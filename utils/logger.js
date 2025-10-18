@@ -1,4 +1,3 @@
-
 // ============================================================
 // 🧠 AI Podcast Suite — Final Unified Logger (Pino)
 // ============================================================
@@ -39,20 +38,9 @@ if (!loggerInstance) {
           singleLine: true,
           ignore: "pid,hostname",
           translateTime: "SYS:standard",
-          messageFormat: "{levelLabel} {msg} {time}",
-          customPrettifiers: {
-            level: (logLevel) => {
-              const emojiMap = {
-                60: '🚨',
-                50: '❌',
-                40: '⚠️',
-                30: 'ℹ️',
-                20: '🐞',
-                10: '🔍',
-              };
-              return emojiMap[logLevel] || '';
-            },
-          },
+          messageFormat: "{levelLabel} {msg}",
+          // ✅ Remove customPrettifiers - they cause DataCloneError
+          // Emojis can be added directly in log messages if needed
         },
       },
     });
@@ -71,4 +59,3 @@ export const error = (...args) => log.error(...args);
 export const debug = (...args) => log.debug(...args);
 
 export default log;
-
