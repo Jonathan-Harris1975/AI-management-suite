@@ -2,15 +2,17 @@
 // 🧠 AI Podcast Suite — Safe Bootstrap + RSS Feed Rotation
 // ============================================================
 //
-// 1) Ensures unsafe getObject() calls use getObjectAsText()
-// 2) Reads feeds.txt + urls.txt, rotates 5 feeds + 1 URL
-// 3) Writes utils/active-feeds.json for build-rss.js
-// 4) Persists index in utils/feed-state.json
+// 1) Rewrites unsafe getObject() calls → getObjectAsText()
+// 2) Fixes bad alias imports (#shared/#routes/#services → correct relative paths)
+// 3) Fixes absolute /app/shared/utils/* imports
+// 4) Reads feeds.txt + urls.txt, rotates 5 feeds + 1 URL
+// 5) Writes utils/active-feeds.json for build-rss.js
+// 6) Persists index in utils/feed-state.json
 // ============================================================
 
 import fs from "fs";
 import path from "path";
-import { log } from "#shared/logger.js";
+import { log } from "../utils/logger.js";
 
 const projectRoot = "/app";
 const dataDir = path.join(projectRoot, "services/rss-feed-creator/data");
@@ -19,14 +21,35 @@ const stateFile = path.join(utilsDir, "feed-state.json");
 const activeFile = path.join(utilsDir, "active-feeds.json");
 
 // ------------------------------------------------------------
-// 🧠 Step 1: Apply Safe R2 Patch
+// 🧠 Step 1: Apply Safe R2 Patch + Import Alias Fixes
 // ------------------------------------------------------------
-function applySafeR2Patch() {
+function applySafeR2PatchAndAliasFix() {
   const processed = [];
+  const aliasFixes = [];
 
-  // ✅ Correct regex syntax — valid negative lookbehind in Node 22
   const patternImport = /getObject(?!AsText)/g;
-  const patternCall = /(?<!AsText\b)getObject\(/g; // avoid already-correct calls
+  const patternCall = /(?<!AsText\b)getObject\(/g;
+
+  const aliasPatterns = [
+    // Shared utils
+    { regex: /from\s+['"]#shared\/logger\.js['"]/g, replace: "from '../utils/logger.js'", desc: "#shared/logger.js alias fix" },
+    { regex: /from\s+['"]#shared\/r2-client\.js['"]/g, replace: "from '../utils/r2-client.js'", desc: "#shared/r2-client.js alias fix" },
+    { regex: /from\s+['"]#shared\/env\.js['"]/g, replace: "from '../utils/env.js'", desc: "#shared/env.js alias fix" },
+
+    // Route aliases
+    { regex: /from\s+['"]#routes\/rss-health\.js['"]/g, replace: "from '../../routes/rss-health.js'", desc: "#routes/rss-health.js alias fix" },
+    { regex: /from\s+['"]#routes\/podcast-health\.js['"]/g, replace: "from '../../routes/podcast-health.js'", desc: "#routes/podcast-health.js alias fix" },
+    { regex: /from\s+['"]#routes\/podcast\.js['"]/g, replace: "from '../../routes/podcast.js'", desc: "#routes/podcast.js alias fix" },
+    { regex: /from\s+['"]#routes\/([^'"]+)['"]/g, replace: "from '../../routes/$1'", desc: "#routes/* generic alias fix" },
+
+    // Service aliases
+    { regex: /from\s+['"]#services\/rss-feed-creator\/rewrite-pipeline\.js['"]/g, replace: "from '../rss-feed-creator/rewrite-pipeline.js'", desc: "#services/rss-feed-creator alias fix" },
+    { regex: /from\s+['"]#services\/podcast\/runPodcastPipeline\.js['"]/g, replace: "from '../podcast/runPodcastPipeline.js'", desc: "#services/podcast alias fix" },
+
+    // Absolute /app fixes
+    { regex: /from\s+['"]\/app\/shared\/utils\/logger\.js['"]/g, replace: "from '../utils/logger.js'", desc: "/app/shared/utils/logger.js absolute fix" },
+    { regex: /from\s+['"]\/app\/shared\/utils\/r2-client\.js['"]/g, replace: "from '../utils/r2-client.js'", desc: "/app/shared/utils/r2-client.js absolute fix" }
+  ];
 
   function walk(dir) {
     const entries = fs.readdirSync(dir);
@@ -35,27 +58,26 @@ function applySafeR2Patch() {
       const stat = fs.statSync(full);
 
       if (stat.isDirectory()) {
-        if (
-          full.includes("node_modules") ||
-          full.includes(".git") ||
-          full.includes("tmp")
-        )
-          continue;
+        if (full.includes("node_modules") || full.includes(".git") || full.includes("tmp")) continue;
         walk(full);
       } else if (name.endsWith(".js")) {
         let content = fs.readFileSync(full, "utf8");
+        let updated = content;
 
-        // Skip if file already defines getObjectAsText
-        if (
-          /function\s+getObjectAsText|export\s+async\s+function\s+getObjectAsText/.test(
-            content
-          )
-        )
-          continue;
+        // Skip if already defines getObjectAsText
+        if (!/function\s+getObjectAsText|export\s+async\s+function\s+getObjectAsText/.test(content)) {
+          updated = updated
+            .replace(patternImport, "getObjectAsText")
+            .replace(patternCall, "getObjectAsText(");
+        }
 
-        const updated = content
-          .replace(patternImport, "getObjectAsText")
-          .replace(patternCall, "getObjectAsText(");
+        // Apply alias/path fixes
+        for (const { regex, replace, desc } of aliasPatterns) {
+          if (regex.test(updated)) {
+            updated = updated.replace(regex, replace);
+            aliasFixes.push({ file: full, fix: desc });
+          }
+        }
 
         if (updated !== content) {
           fs.writeFileSync(full, updated, "utf8");
@@ -66,15 +88,25 @@ function applySafeR2Patch() {
   }
 
   try {
-    log.info("🧠 Applying R2 Text Safety Patch (Safe Mode)...");
+    log.info("🧠 Applying R2 Safety Patch & Import Alias Fixes...");
     walk(projectRoot);
+
     if (processed.length > 0) {
-      log.info("✅ R2 Text Safety Patch applied to:", processed);
+      log.info(`✅ R2/Import patches applied to ${processed.length} files`);
     } else {
-      log.info("✨ No updates required — safe definitions already exist.");
+      log.info("✨ No R2 or import updates required.");
+    }
+
+    if (aliasFixes.length > 0) {
+      log.info(`🔧 ${aliasFixes.length} alias mismatches fixed`);
+      aliasFixes.slice(0, 10).forEach((f) =>
+        log.info(`   → ${f.fix} in ${f.file}`)
+      );
+    } else {
+      log.info("🔍 No alias mismatches found.");
     }
   } catch (err) {
-    log.error("❌ Failed to apply R2 Text Safety Patch", { error: err.message });
+    log.error("❌ Failed to apply R2 or alias fixes", { error: err.message });
   }
 }
 
@@ -93,16 +125,10 @@ function rotateFeeds() {
       return;
     }
 
-    const feeds = fs
-      .readFileSync(feedsPath, "utf-8")
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const urls = fs
-      .readFileSync(urlsPath, "utf-8")
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const feeds = fs.readFileSync(feedsPath, "utf-8")
+      .split("\n").map((s) => s.trim()).filter(Boolean);
+    const urls = fs.readFileSync(urlsPath, "utf-8")
+      .split("\n").map((s) => s.trim()).filter(Boolean);
 
     const batchSize = 5;
     let state = { index: 0 };
@@ -120,7 +146,6 @@ function rotateFeeds() {
     const currentFeeds = feeds.slice(start, end);
     const urlIndex = Math.floor(start / batchSize) % Math.max(urls.length, 1);
     const currentUrl = urls[urlIndex];
-
     const nextIndex = end >= feeds.length ? 0 : end;
 
     const activeData = {
@@ -128,7 +153,7 @@ function rotateFeeds() {
       url: currentUrl,
       batchStart: start,
       batchEnd: end,
-      totalFeeds: feeds.length,
+      totalFeeds: feeds.length
     };
 
     fs.writeFileSync(stateFile, JSON.stringify({ index: nextIndex }, null, 2));
@@ -137,7 +162,7 @@ function rotateFeeds() {
     log.info("🔁 RSS Feed Rotation Complete", {
       feedsUsed: currentFeeds.length,
       nextIndex,
-      currentUrl,
+      currentUrl
     });
   } catch (err) {
     log.error("❌ RSS Feed Rotation failed", { error: err.message });
@@ -148,7 +173,7 @@ function rotateFeeds() {
 // 🚀 Execute Both
 // ------------------------------------------------------------
 try {
-  applySafeR2Patch();
+  applySafeR2PatchAndAliasFix();
   rotateFeeds();
 } catch (err) {
   log.error("❌ Failed during bootstrap sequence", { error: err.message });
