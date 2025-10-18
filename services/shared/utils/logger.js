@@ -1,4 +1,3 @@
-
 // ============================================================
 // 🧠 AI Podcast Suite — Final Unified Logger (Non-recursive)
 // ============================================================
@@ -30,20 +29,9 @@ if (!loggerInstance) {
           singleLine: true,
           translateTime: "SYS:standard",
           ignore: "pid,hostname",
-          messageFormat: "{levelLabel} {msg} {time}",
-          customPrettifiers: {
-            level: (logLevel) => {
-              const emojiMap = {
-                60: '🚨',
-                50: '❌',
-                40: '⚠️',
-                30: 'ℹ️',
-                20: '🐞',
-                10: '🔍',
-              };
-              return emojiMap[logLevel] || '';
-            },
-          },
+          messageFormat: "{levelLabel} {msg}",
+          // ✅ Removed customPrettifiers to prevent DataCloneError
+          // Functions cannot be cloned to worker threads
         },
       },
     });
@@ -52,13 +40,13 @@ if (!loggerInstance) {
   globalThis.__AI_PODCAST_LOGGER__ = loggerInstance;
 }
 
-// ✅ Export single instance — guaranteed non-duplicate
+// ✅ Export single instance with emoji helpers
 const log = loggerInstance;
 
 export { log };
-export const info = (...a) => log.info(...a);
-export const warn = (...a) => log.warn(...a);
-export const error = (...a) => log.error(...a);
-export const debug = (...a) => log.debug(...a);
+export const info = (...a) => log.info('ℹ️', ...a);
+export const warn = (...a) => log.warn('⚠️', ...a);
+export const error = (...a) => log.error('❌', ...a);
+export const debug = (...a) => log.debug('🐞', ...a);
 
 export default log;
