@@ -1,30 +1,29 @@
 // ============================================================
-// 📰 RSS Rewrite Route — AI Podcast Suite
-// ============================================================
-//
-// Purpose:
-//   • Exposes /rss/rewrite endpoint
-//   • Calls rewriteRSSFeeds() from the RSS Feed Creator pipeline
+// 📰 RSS Rewrite Route — Manual Trigger
 // ============================================================
 
 import express from "express";
+import { info, error } from "../services/shared/utils/logger.js";
 import { rewriteRSSFeeds } from "../services/rss-feed-creator/rewrite-pipeline.js";
-import { log } from "../services/shared/utils/logger.js";
 
 const router = express.Router();
 
-// ------------------------------------------------------------
-// 🔁 POST /rss/rewrite
-// ------------------------------------------------------------
-router.post("/rss/rewrite", async (_req, res) => {
-  log.info("🔁 RSS rewrite endpoint triggered");
+/**
+ * POST /rss/rewrite
+ * Body: { batchSize?: number }
+ * - Rotates/rewrites active feeds and writes a manifest to R2.
+ * - Does NOT run automatically on boot (manual-only as requested).
+ */
+router.post("/rss/rewrite", async (req, res) => {
+  const batchSize = Number(req.body?.batchSize) || 5;
+  info("📰 RSS rewrite requested", { batchSize });
 
   try {
-    const result = await rewriteRSSFeeds();
-    res.json({ ok: true, result });
+    const result = await rewriteRSSFeeds({ batchSize });
+    return res.json({ ok: true, ...result });
   } catch (err) {
-    log.error("❌ RSS rewrite failed", { error: err.message });
-    res.status(500).json({ ok: false, error: err.message });
+    error("💥 RSS rewrite failed", { error: err.message });
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
