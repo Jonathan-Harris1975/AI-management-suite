@@ -9,12 +9,12 @@
 //   • Updates utils/last-success.log
 //
 // Dependencies:
-//   • ../utils/r2-client.js
-//   • ../utils/logger.js
+//   • ../../shared/utils/r2-client.js
+//   • ../../shared/utils/logger.js
 // ============================================================
 
-import { getObjectAsText, putJson, putText } from "../utils/r2-client.js";
-import { log } from "../utils/logger.js";
+import { getObjectAsText, putJson, putText } from "../../shared/utils/r2-client.js";
+import { log } from "../../shared/utils/logger.js";
 
 // ------------------------------------------------------------
 // ⚙️ Main Rewrite Pipeline
@@ -74,4 +74,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.error("Rewrite pipeline failed:", err);
       process.exit(1);
     });
-                                    }
+}
