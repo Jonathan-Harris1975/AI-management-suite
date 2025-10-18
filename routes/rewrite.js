@@ -12,7 +12,7 @@ const router = express.Router();
  * POST /rss/rewrite
  * Body: { batchSize?: number }
  * - Rotates/rewrites active feeds and writes a manifest to R2.
- * - Does NOT run automatically on boot (manual-only as requested).
+ * - Manual trigger only (not automatic at startup).
  */
 router.post("/rss/rewrite", async (req, res) => {
   const batchSize = Number(req.body?.batchSize) || 5;
