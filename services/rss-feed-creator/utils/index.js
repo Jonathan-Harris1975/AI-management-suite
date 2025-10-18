@@ -1,17 +1,16 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
-// services/rss-feed-creator/index.js
-import express from "express";
-import cors from "cors";
-import { log } from "../../../utils/logger.js";
-import routes from "./routes/index.js";
+// /services/rss-feed-creator/index.js
+import { uploadRssDataFiles } from "./bootstrap.js";
+import { runRewritePipeline } from "./rewrite-pipeline.js";
+import { log } from "#shared/logger.js";
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+export async function startFeedCreator() {
+  log.info("rss.pipeline.start");
 
-app.use("/", routes);
+  // 1️⃣ Ensure feeds.txt + urls.txt are present in R2 before anything else
+  await uploadRssDataFiles();
 
-log.info("✅ rss-feed-creator env OK");
-log.info("🚀 RSS Feed Creator Service initialized");
+  // 2️⃣ Run rotation + rebuild
+  return await runRewritePipeline();
+}
 
-export default app;
+export default startFeedCreator;
