@@ -1,6 +1,6 @@
 {
-  "name": "ai-podcast-suite",
-  "version": "1.1.0",
+  "name": "AI-management-suite",
+  "version": "2.6.0",
   "type": "module",
   "main": "server.js",
 
