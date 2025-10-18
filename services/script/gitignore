@@ -1,0 +1,18 @@
+# Node
+node_modules/
+npm-debug.log
+
+# Env
+.env
+
+# Generated output
+storage/
+*.log
+
+# IDEs
+.vscode/
+.idea/
+
+# OS-specific
+.DS_Store
+Thumbs.db
