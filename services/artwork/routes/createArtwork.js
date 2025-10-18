@@ -1,34 +1,21 @@
-import { getObject, putJson } from "../../shared/utils/r2-client.js";
+// services/artwork/routes/createArtwork.js
 import express from "express";
-import fetch from "node-fetch";
+import { putJson, getObject } from "../../shared/utils/r2-client.js";
+import { info, error } from "../../shared/utils/logger.js";
 
 const router = express.Router();
 
-// This route is optional, a POST alternative to health trigger
-router.post("/", async (req, res) => {
+router.post("/artwork/generate", async (req, res) => {
   try {
-    const { sessionId, metaUrls } = req.body;
-
-    if (!sessionId) {
-      return res.status(400).json({ error: "sessionId is required" });
-    }
-
-    const payload = { sessionId, metaUrls };
-
-    if (!process.env.ART_CREATE) {
-      return res.status(500).json({ error: "ART_CREATE env not set" });
-    }
-
-    await fetch(process.env.ART_CREATE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    res.json({ status: "started", sessionId });
+    const payload = req.body || {};
+    const bucket = process.env.R2_BUCKET_ART || process.env.R2_BUCKET_META;
+    const key = `artwork/requests/${Date.now()}.json`;
+    await putJson(bucket, key, payload);
+    info("🎨 Artwork request stored", { bucket, key });
+    res.json({ ok: true, bucket, key });
   } catch (err) {
-    console.error("❌ Error in /create-artwork:", err);
-    res.status(500).json({ error: "Failed to start artwork generation" });
+    error("💥 Artwork create failed", { error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
