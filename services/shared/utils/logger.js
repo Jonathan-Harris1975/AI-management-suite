@@ -2,10 +2,10 @@
 // 🧠 Unified Logger for AI Management Suite (Shiper Compatible)
 // ============================================================
 //
-// Guarantees:
-//  • Always has a readable string prefix
-//  • Always prints JSON context (full detail)
-//  • Prevents "undefined" or blank log lines on Shiper
+// Guarantees readable log lines on Shiper:
+//  • Always has a string prefix
+//  • Always emits full JSON context
+//  • No "undefined" / blank lines
 // ============================================================
 
 import pino from "pino";
@@ -33,17 +33,14 @@ export function info(msg, ctx = {}) {
   const [text, meta] = normalize(msg, ctx);
   base.info(meta, text);
 }
-
 export function warn(msg, ctx = {}) {
   const [text, meta] = normalize(msg, ctx);
   base.warn(meta, text);
 }
-
 export function error(msg, ctx = {}) {
   const [text, meta] = normalize(msg, ctx);
   base.error(meta, text);
 }
-
 export function debug(msg, ctx = {}) {
   const [text, meta] = normalize(msg, ctx);
   base.debug(meta, text);
