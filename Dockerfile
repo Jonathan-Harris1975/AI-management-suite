@@ -38,7 +38,7 @@ WORKDIR /app
 COPY --from=base /app /app
 
 # Avoid Shiper’s TS detection by explicitly defining entry
-ENTRYPOINT ["node", "server.js"]
+ENTRYPOINT ["/bin/sh", "-c", "node ./scripts/bootstrap.js && node server.js"]
 
 EXPOSE 3000
 
