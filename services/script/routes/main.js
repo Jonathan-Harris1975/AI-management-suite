@@ -1,66 +1,32 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "#shared/r2-client.js";
-// routes/main.js
-import express from 'express';
-import fs from 'fs';
-import path from 'path';
-import { resilientRequest } from "#shared/ai-service.js";
-import { getMainPrompt } from '../utils/promptTemplates.js';
-import fetchFeeds from '../utils/fetchFeeds.js';
-import { storeAndTrigger } from '../utils/script-helper.js';
+import express from "express";
+import { info, error } from "../../shared/utils/logger.js";
 
 const router = express.Router();
 
-router.post('/', async (req, res) => {
+async function resolveMain() {
+  const candidates = [
+    { mod: "../index.js", fns: ["generateMain", "main", "default"] },
+    { mod: "../main.js", fns: ["generateMain", "main", "default"] },
+  ];
+  for (const c of candidates) {
+    try {
+      const m = await import(c.mod);
+      for (const name of c.fns) if (typeof m[name] === "function") return m[name];
+    } catch (_) {}
+  }
+  throw new Error("No main generator found");
+}
+
+router.post("/", async (req, res) => {
+  const sessionId = req.body?.sessionId || `TT-${Date.now()}`;
+  info("📜 Main requested", { sessionId });
   try {
-    const { sessionId, date } = req.body;
-
-    if (!sessionId || !date) {
-      return res.status(400).json({ error: 'sessionId and date are required' });
-    }
-
-    const feedUrl = process.env.FEED_URL;
-    if (!feedUrl) {
-      return res.status(500).json({ error: 'FEED_URL missing in environment' });
-    }
-
-    // Fetch articles
-    const articles = await fetchFeeds(feedUrl);
-    if (!articles || articles.length === 0) {
-      return res.status(500).json({ error: 'No articles available from feed' });
-    }
-
-    const articleTexts = articles.map(a => a.contentSnippet || a.content || a.title);
-
-    // Build main prompt (target 60 mins by default)
-    const fullPrompt = getMainPrompt(articleTexts, 60);
-
-    // Generate main script
-    const mainText = await resilientRequest('main', [
-      { role: 'user', content: fullPrompt }
-    ]);
-
-    // Save to persistent disk
-    const storageDir = path.resolve('/mnt/data', sessionId);
-    fs.mkdirSync(storageDir, { recursive: true });
-    const mainPath = path.join(storageDir, 'main.txt');
-    fs.writeFileSync(mainPath, mainText, 'utf-8');
-
-    // Store metadata + trigger outro via Hookdeck
-    await storeAndTrigger({
-      sessionId,
-      step: 'main',
-      payload: { date, mainPath, articleCount: articleTexts.length } }
-    });
-
-    res.json({
-      status: 'main complete',
-      sessionId,
-      mainPath,
-      main: mainText
-    });
+    const run = await resolveMain();
+    const result = await run({ sessionId, ...req.body });
+    res.json({ ok: true, sessionId, result });
   } catch (err) {
-    console.error('Main error:', err);
-    res.status(500).json({ error: 'Internal server error', details: err.message });
+    error("💥 Main failed", { sessionId, error: err.message });
+    res.status(500).json({ ok: false, sessionId, error: err.message });
   }
 });
 
