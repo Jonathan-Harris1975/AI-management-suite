@@ -1,4 +1,4 @@
-import {BUCKETS, listKeys, getObjectAsText, buildPublicUrl} from "../../shared/utils/r2-client.js";
+import {BUCKETS, listKeys, getObjectAsText, buildPublicUrl} from "#shared/r2-client.js";
 import { log } from "../../../utils/logger.js";
 
 export async function getTextChunkUrls(sessionId) {

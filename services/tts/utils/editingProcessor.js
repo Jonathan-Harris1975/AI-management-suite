@@ -1,20 +1,21 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
+import { getR2ReadStream } from "#shared/r2-client.js";
 import path from "path";
 import os from "os";
 import { spawn } from "child_process";
-import { validateEnv } from "../services/env-checker.js";
-validateEnv();          // hard-stop if any env var is missing
-// single HeadBucket probe (no retries/ping)
-import logger from "./logger.js";
+import * as logger from "#shared/logger.js";
 
 const tempDir = os.tmpdir();
 
-async function processEditing(sessionId) {
+/**
+ * Process and enhance audio for a given session.
+ * Streams from R2 → applies FFmpeg filters → outputs local edited file.
+ */
+export async function processEditing(sessionId) {
   const outputPath = path.join(tempDir, `${sessionId}-edited.mp3`);
 
   try {
     logger.info(`🎧 Starting streaming audio processing for ${sessionId}`);
-    
+
     // Stream directly from R2 to ffmpeg
     await streamFromR2ToFfmpeg(sessionId, outputPath);
 
@@ -32,23 +33,26 @@ async function processEditing(sessionId) {
   }
 }
 
+/**
+ * Streams audio directly from R2 into FFmpeg,
+ * applies EQ + compression filters, and writes output locally.
+ */
 async function streamFromR2ToFfmpeg(sessionId, outputFile) {
   return new Promise(async (resolve, reject) => {
     try {
       const fileName = `${sessionId}-merged.mp3`;
       logger.info(`📦 Creating read stream from R2 for: ${fileName}`);
-      
+
       // Get a readable stream from R2
       const readStream = await getR2ReadStream(fileName);
-      
+
       const filters = [
-        
+        "highpass=f=100,lowpass=f=10000,afftdn=nr=10:tn=1,firequalizer=gain_entry='entry(150,3);entry(2500,2)',deesser=f=7000:i=0.7,acompressor=threshold=-24dB:ratio=4:attack=10:release=200:makeup=5,dynaudnorm=f=100:n=0:p=0.9,aresample=44100,aconvolution=reverb=0.1:0.1:0.9:0.9",
         "equalizer=f=120:width_type=o:width=2:g=3",
-        "equalizer=f=9000:width_type=o:width=2:g=2"
-        
+        "equalizer=f=9000:width_type=o:width=2:g=2",
       ];
 
-      logger.info(`🔧 Starting FFmpeg with filters: ${filters.join(', ')}`);
+      logger.info(`🔧 Starting FFmpeg with filters: ${filters.join(", ")}`);
 
       const ffmpeg = spawn("ffmpeg", [
         "-y",
@@ -63,13 +67,12 @@ async function streamFromR2ToFfmpeg(sessionId, outputFile) {
       // Pipe R2 stream to ffmpeg stdin
       readStream.pipe(ffmpeg.stdin);
 
-      let stderrData = '';
+      let stderrData = "";
 
       ffmpeg.stderr.on("data", (data) => {
         const dataStr = data.toString();
         stderrData += dataStr;
-        // Log FFmpeg progress
-        if (dataStr.includes('time=') || dataStr.includes('size=')) {
+        if (dataStr.includes("time=") || dataStr.includes("size=")) {
           logger.info(`FFmpeg: ${dataStr.trim()}`);
         }
       });
@@ -91,15 +94,14 @@ async function streamFromR2ToFfmpeg(sessionId, outputFile) {
         } else {
           logger.error(`❌ FFmpeg exited with code ${code}`);
           logger.error(`🔍 FFmpeg stderr: ${stderrData}`);
-          reject(new Error(`FFmpeg exited with code ${code}: ${stderrData.substring(0, 200)}...`));
+          reject(
+            new Error(`FFmpeg exited with code ${code}: ${stderrData.substring(0, 200)}...`)
+          );
         }
       });
-
     } catch (err) {
       logger.error(`❌ Failed to create R2 stream: ${err.message}`);
       reject(err);
     }
   });
 }
-
-export { processEditing };

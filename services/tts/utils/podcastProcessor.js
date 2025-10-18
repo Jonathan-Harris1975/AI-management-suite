@@ -1,13 +1,11 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
+import {s3, R2_BUCKETS, uploadBuffer, listKeys, getR2ReadStream,getObjectAsText} from "#shared/r2-client.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
 import { spawn } from "child_process";
 import fetch from "node-fetch";
-import { validateEnv } from "../services/env-checker.js";
-validateEnv();          // hard-stop if any env var is missing
-// single HeadBucket probe (no retries/ping)
-import logger from "./logger.js";
+
+import * as logger from "#shared/logger.js";
 
 const tempDir = os.tmpdir();
 
