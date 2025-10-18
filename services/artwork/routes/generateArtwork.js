@@ -1,9 +1,8 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "#shared/r2-client.js";
-// routes/generateArtwork.js
+import { getObject, putJson } from "../../shared/utils/r2-client.js";
 import express from "express";
 import fetch from "node-fetch";
-import { generateArtwork } from "../utils/artwork.js";
-import { uploadToR2 } from "../utils/r2-artwork-client.js";
+import { generateArtwork } from "../utils/artwork.js"
+
 
 const router = express.Router();
 
