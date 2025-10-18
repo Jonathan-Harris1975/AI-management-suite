@@ -1,9 +1,9 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
+import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "#shared/r2-client.js";
 // routes/outro.js
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
-import { resilientRequest } from '../utils/ai-service.js';
+import { resilientRequest } from "#shared/ai-service.js";
 import { getOutroPromptFull } from '../utils/promptTemplates.js';
 import { storeAndTrigger } from '../utils/script-helper.js';
 
@@ -35,8 +35,7 @@ router.post('/', async (req, res) => {
     await storeAndTrigger({
       sessionId,
       step: 'outro',
-      payload: { date, outroPath },
-      nextUrl: process.env.HOOKDECK_COMPOSE_URL
+      payload: { date, outroPath } }
     });
 
     res.json({

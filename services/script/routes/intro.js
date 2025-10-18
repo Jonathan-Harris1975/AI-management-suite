@@ -1,9 +1,9 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
+import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "#shared/r2-client.js";
 // routes/intro.js
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
-import { resilientRequest } from '../utils/ai-service.js';
+import { resilientRequest } from "#shared/ai-service.js";
 import { getIntroPrompt } from '../utils/promptTemplates.js';
 import { storeAndTrigger } from '../utils/script-helper.js';
 
@@ -43,8 +43,7 @@ router.post('/', async (req, res) => {
     await storeAndTrigger({
       sessionId,
       step: 'intro',
-      payload: { date, introPath },
-      nextUrl: process.env.HOOKDECK_MAIN_URL
+      payload: { date, introPath } }
     });
 
     res.json({

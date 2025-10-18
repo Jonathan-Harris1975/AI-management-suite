@@ -1,10 +1,10 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
+import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "#shared/r2-client.js";
 // routes/compose.js
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { resilientRequest } from '../utils/ai-service.js';
+import { resilientRequest } from "#shared/ai-service.js";
 import splitPlainText from '../utils/splitPlainText.js';
 import editAndFormat from '../utils/editAndFormat.js';
 import uploadChunksToR2 from '../utils/uploadChunksToR2.js';
@@ -150,17 +150,6 @@ router.post('/', async (req, res) => {
         metaUrls
       }
     });
-
-    // Wake up downstream services
-    if (process.env.HOOKDECK_WAKEUP_URL) {
-      await fetch(process.env.HOOKDECK_WAKEUP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, metaUrls, transcriptUrl, chunkUrls })
-      });
-      console.log(`✅ Wakeup webhook triggered for session ${sessionId}`);
-    }
-
     res.json({
       sessionId,
       episodeNumber,
