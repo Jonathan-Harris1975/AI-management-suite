@@ -2,7 +2,7 @@
 import { info, error } from "../shared/utils/logger.js";
 import { putJson } from "../shared/utils/r2-client.js";
 
-export default async function runPodcastPipeline(sessionId, text) {
+export default async function PodcastPipeline(sessionId, text) {
   info("🎙️ Starting podcast pipeline", { sessionId });
 
   const { orchestrateTTS } = await import("../tts/utils/orchestrator.js").catch(() => ({}));
