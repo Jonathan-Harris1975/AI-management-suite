@@ -1,43 +1,23 @@
-// /routes/podcast.js — AI Podcast Suite (Final Stable 2025-10-11)
 import express from "express";
-// When re-enabled, you can import your Gemini / TTS logic here, e.g.:
-// import { runPodcastPipeline } from "../services/podcast-engine/index.js";
+import { runPodcastPipeline } from "../services/podcast/runPodcastPipeline.js";
+import { info, error } from "#shared/logger.js";
 
 const router = express.Router();
 
-/**
- * Handles both GET (status check) and POST (trigger podcast generation)
- */
-router.all("/", async (req, res) => {
-  const isPost = req.method === "POST";
+router.get("/", (_req, res) => {
+  info("🎧 Podcast route health OK");
+  res.json({ ok: true, service: "podcast", message: "Ready to trigger pipeline" });
+});
 
-  if (!isPost) {
-    return res.status(200).json({
-      status: "ok",
-      route: "podcast",
-      message: "Podcast route is active. Use POST to start TTS or episode generation.",
-      method: req.method,
-    });
-  }
-
+router.post("/", async (req, res) => {
+  const sessionId = req.body?.sessionId || `TT-${Date.now()}`;
   try {
-    // Placeholder until Gemini 2.5 TTS pipeline is active
-    // const result = await runPodcastPipeline();
-    const result = { note: "Gemini 2.5 TTS pipeline placeholder (coming soon)" };
-
-    res.status(200).json({
-      success: true,
-      route: "podcast",
-      message: "Podcast generation executed successfully.",
-      result,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      route: "podcast",
-      message: "Podcast generation failed.",
-      error: error.message,
-    });
+    info("🎙️ Starting podcast pipeline", { sessionId });
+    await runPodcastPipeline(sessionId);
+    res.status(202).json({ ok: true, sessionId });
+  } catch (err) {
+    error("💥 Podcast pipeline failed", { error: err.stack });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
