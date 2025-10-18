@@ -26,7 +26,7 @@ log("✅ Mounted /api/rewrite");
 // Basic root + health
 app.get("/", (_req, res) => {
   res.json({
-    message: "🧠 AI Podcast Suite is live",
+    message: "🧠 endpoint is live",
     endpoints: ["/api/rewrite/health", "/api/rewrite/run"],
   });
 });
