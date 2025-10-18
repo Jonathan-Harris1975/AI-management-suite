@@ -1,6 +1,6 @@
 // services/tts/routes/tts.js
 // ============================================================
-// 🔊 TTS Route (no webhooks)
+// 🔊 TTS Route (webhook-free)
 // POST /tts  { sessionId?: string, voiceId?: string, text?: string }
 // ============================================================
 
@@ -10,7 +10,6 @@ import { info, error } from "../../shared/utils/logger.js";
 const router = express.Router();
 
 async function resolveTTS() {
-  // Try common module locations / export names, no guessing beyond this list.
   const candidates = [
     { mod: "../index.js", fns: ["runTTS", "synthesize", "default"] },
     { mod: "../synthesize.js", fns: ["runTTS", "synthesize", "default"] },
@@ -23,14 +22,13 @@ async function resolveTTS() {
       for (const name of c.fns) {
         if (typeof m[name] === "function") return m[name];
       }
-    } catch (_) {
-      // ignore and continue
-    }
+    } catch (_) {}
   }
   throw new Error("No TTS runner found (tried ../index.js, ../synthesize.js, ../tts.js)");
 }
 
-router.post("/", async (req, res) => {
+const ttsRouter = express.Router();
+ttsRouter.post("/", async (req, res) => {
   const sessionId = req.body?.sessionId || `TT-${Date.now()}`;
   const voiceId   = req.body?.voiceId || null;
   const text      = req.body?.text || null;
@@ -47,4 +45,4 @@ router.post("/", async (req, res) => {
   }
 });
 
-export default router;
+export default ttsRouter;
