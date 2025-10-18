@@ -1,24 +1,13 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
-
-// apps/artwork/routes/index.js
+// services/artwork/routes/index.js — Route aggregator (no Hookdeck)
 import express from "express";
-import { createArtwork } from "../services/createArtwork.js";
-import { withRetry } from "../../../utils/retry.js";
-import { log } from "../../../utils/logger.js";
+import createArtworkRouter from "./createArtwork.js";
+import generateArtworkRouter from "./generateArtwork.js";
 
 const router = express.Router();
 
-router.post("/artwork", async (req, res) => {
-  try {
-    const result = await withRetry(
-      () => createArtwork(req.body),
-      { retries: 3, delay: 2000, label: "🎨 Artwork generation" }
-    );
-    return res.json({ success: true, result });
-  } catch (err) {
-    log.error({ err }, "❌ Artwork generation failed after retries");
-    return res.status(500).json({ error: "Artwork generation failed" });
-  }
-});
+// POST /artwork/create
+router.use("/create", createArtworkRouter);
+// POST /artwork/generate
+router.use("/generate", generateArtworkRouter);
 
 export default router;

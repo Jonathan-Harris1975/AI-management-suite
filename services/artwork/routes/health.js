@@ -1,4 +1,4 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
+import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "#shared/r2-client.js";
 // routes/health.js
 import express from "express";
 import fetch from "node-fetch";
@@ -10,7 +10,7 @@ router.get("/", async (req, res) => {
   try {
     const { sessionId, metaUrls } = req.query;
 
-    // If Hookdeck just pings with no params → reply OK
+    // If downstream just pings with no params → reply OK
     if (!sessionId) {
       return res.json({ status: "ok", message: "Health check passed" });
     }
