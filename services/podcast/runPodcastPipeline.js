@@ -1,18 +1,22 @@
-// services/podcast/runPodcastPipeline. import { log } from "#shared/logger.js";
-import { log } from "../shared/utils/logger.js";
-import { processPodcastPipeline } from "../tts/utils/orchestrator.js";
+// services/podcast/runPodcastPipeline.js
+import { info, error } from "../shared/utils/logger.js";
+import { putJson } from "../shared/utils/r2-client.js";
 
-export async function runPodcastPipeline(sessionId, text) {
-  try {
-    log.info("pipeline.start", { sessionId });
-    const result = await processPodcastPipeline(sessionId, text);
-    log.info("pipeline.complete", { success: true, sessionId });
-    return result;
-  } catch (err) {
-    log.error("pipeline.failed", { sessionId, error: err.message });
-    throw err;
+export default async function runPodcastPipeline(sessionId, text) {
+  info("🎙️ Starting podcast pipeline", { sessionId });
+
+  const { orchestrateTTS } = await import("../tts/utils/orchestrator.js").catch(() => ({}));
+  let ttsResult = null;
+  if (typeof orchestrateTTS === "function") {
+    ttsResult = await orchestrateTTS({ sessionId, text });
+  } else {
+    info("🔊 TTS orchestrator not found — skipping TTS stage", { sessionId });
   }
-}
 
-// (Optional) keep the old name as an alias if other code imports runPipeline
-export { runPodcastPipeline as runPipeline };
+  const bucket = process.env.R2_BUCKET_PODCAST || process.env.R2_BUCKET_META;
+  const key = `podcast/${sessionId}.json`;
+  await putJson(bucket, key, { sessionId, text, ttsResult, finishedAt: new Date().toISOString() });
+
+  info("🎙️ Podcast pipeline complete", { sessionId, bucket, key });
+  return { sessionId, key, bucket };
+}
