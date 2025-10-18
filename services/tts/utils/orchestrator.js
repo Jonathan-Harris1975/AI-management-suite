@@ -1,37 +1,40 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "#shared/r2-client.js";
-// utils/orchestrator.js
-import { processTTS } from "./ttsProcessor.js";
-import { mergeChunks } from "./mergeprocessor.js";
-import { processEditing } from "./editingProcessor.js";
-import { processPodcast } from "./podcastProcessor.js";
+// services/tts/utils/orchestrator.js
+// ============================================================
+// 🔊 TTS Orchestrator (webhook-free, shared R2 client)
+// ============================================================
 
-import * as logger from "#shared/logger.js";
+import { putJson } from "../../shared/utils/r2-client.js";
+import { info, error } from "../../shared/utils/logger.js";
 
-/**
- * Main orchestration function
- */
-async function processPodcastPipeline(sessionId, text) {
-  try {
-    // 1. Generate TTS
-    await processTTS(sessionId, text);
-
-    // 2. Get chunk list
-    const chunkKeys = await listChunks(sessionId);
-
-    // 3. Merge chunks into one file
-    await mergeChunks(sessionId, chunkKeys);
-
-    // 4. Run editing on the merged file
-    await processEditing(sessionId);
-
-    // 5. Build final podcast
-    const podcastResult = await processPodcast(sessionId);
-
-    return podcastResult;
-  } catch (err) {
-    logger.error(`❌ Podcast pipeline failed for ${sessionId}: ${err.message}`);
-    throw err;
+async function resolveSynth() {
+  const candidates = [
+    { mod: "../synthesize.js", fns: ["default", "synthesize", "runTTS"] },
+    { mod: "../index.js",      fns: ["runTTS", "synthesize", "default"] },
+    { mod: "../tts.js",        fns: ["runTTS", "synthesize", "default"] },
+  ];
+  for (const c of candidates) {
+    try {
+      const m = await import(c.mod);
+      for (const name of c.fns) {
+        if (typeof m[name] === "function") return m[name];
+      }
+    } catch (_) {}
   }
+  throw new Error("No TTS synth module found");
 }
 
-export { processPodcastPipeline };
+export async function orchestrateTTS({ sessionId, text, voiceId }) {
+  info("🔊 Starting TTS orchestration", { sessionId });
+
+  const synthesize = await resolveSynth();
+  const result = await synthesize({ sessionId, text, voiceId });
+
+  const bucket = process.env.R2_BUCKET_PODCAST || process.env.R2_BUCKET_META;
+  const key = `tts/${sessionId}.json`;
+  await putJson(bucket, key, result);
+
+  info("🔊 TTS saved to R2", { bucket, key });
+  return result;
+}
+
+export default orchestrateTTS;
