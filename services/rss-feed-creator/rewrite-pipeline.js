@@ -1,25 +1,14 @@
+// services/rss-feed-creator/rewrite-pipeline.js
 // ============================================================
-// 🔁 RSS Feed Rewrite / Rotation Pipeline (manual)
-// ============================================================
-//
-// Inputs (files in repo):
-//  - services/rss-feed-creator/data/feeds.txt
-//  - services/rss-feed-creator/data/urls.txt
-//
-// Outputs:
-//  - services/rss-feed-creator/utils/active-feeds.json   (local preview)
-//  - services/rss-feed-creator/utils/feed-state.json     (local state)
-//  - r2: rewritten/latest-feeds.json                     (for builder)
-//
-// Env/R2:
-//  - Uses ../shared/utils/r2-client.js (R2_* vars are on Shiper)
+// 🔁 RSS Feed Rewrite / LLM Augmented Pipeline (Manual Trigger)
 // ============================================================
 
 import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
-import { getObjectAsText, putJson } from "../shared/utils/r2-client.js";
-import { info, error } from "../shared/utils/logger.js";
+import fetch from "node-fetch";
+import { info, warn, error } from "../shared/utils/logger.js";
+import { putJson } from "../shared/utils/r2-client.js";
 
 const projectRoot = "/app";
 const baseDir = path.join(projectRoot, "services/rss-feed-creator");
@@ -29,17 +18,66 @@ const utilsDir = path.join(baseDir, "utils");
 const LOCAL_ACTIVE = path.join(utilsDir, "active-feeds.json");
 const LOCAL_STATE  = path.join(utilsDir, "feed-state.json");
 
-// NOTE: Adjust bucket with your env layout.
-// Prefer RSS feeds bucket; fall back to META.
 const R2_BUCKET =
   process.env.R2_BUCKET_RSS_FEEDS ||
   process.env.R2_BUCKET_PODCAST_RSS_FEEDS ||
   process.env.R2_BUCKET_META;
 
-/**
- * Rotate and persist the latest selection of feeds + a target URL.
- * Writes a compact manifest that downstream builder can consume.
- */
+// ---- helpers ------------------------------------------------
+
+async function resolveModelRewriter() {
+  // Dynamically import to avoid hard-coding export names.
+  const mod = await import("./utils/models.js");
+  const candidates = [
+    "runLLMRewrite",
+    "rewriteTextLLM",
+    "rewriteFeed",
+    "rewrite",
+    "callModel",
+    "generateRewrite",
+    "default",
+  ];
+  for (const key of candidates) {
+    const fn = mod[key];
+    if (typeof fn === "function") {
+      return fn;
+    }
+  }
+  throw new Error(
+    "No suitable rewrite function exported by utils/models.js. Expected one of: " +
+      candidates.join(", ")
+  );
+}
+
+async function resolveShortener() {
+  try {
+    const mod = await import("./utils/shortio.js");
+    const candidates = ["shortenURL", "shortenUrl", "shorten", "default"];
+    for (const key of candidates) {
+      const fn = mod[key];
+      if (typeof fn === "function") return fn;
+    }
+  } catch (e) {
+    // fallthrough
+  }
+  return async (u) => u; // no-op if not available
+}
+
+function xmlSafeSnippet(s = "") {
+  // Keep the prompt payload modest; LLM should not receive raw XML blobs.
+  return s
+    .replace(/\s+/g, " ")
+    .slice(0, 2000);
+}
+
+async function fetchText(url) {
+  const res = await fetch(url, { timeout: 12000 });
+  const text = await res.text();
+  return text;
+}
+
+// ---- main ---------------------------------------------------
+
 export async function rewriteRSSFeeds({ batchSize = 5 } = {}) {
   try {
     if (!fs.existsSync(utilsDir)) fs.mkdirSync(utilsDir, { recursive: true });
@@ -67,45 +105,98 @@ export async function rewriteRSSFeeds({ batchSize = 5 } = {}) {
     const batch = feeds.slice(start, end);
     const urlIndex = Math.floor(start / batchSize) % Math.max(urls.length, 1);
     const targetUrl = urls[urlIndex];
-
     const nextIndex = end >= feeds.length ? 0 : end;
 
-    // Local previews
-    await fsp.writeFile(LOCAL_STATE, JSON.stringify({ index: nextIndex }, null, 2));
-    await fsp.writeFile(LOCAL_ACTIVE, JSON.stringify({
-      feeds: batch, targetUrl, batchStart: start, batchEnd: end, totalFeeds: feeds.length
-    }, null, 2));
+    // Resolve integrations
+    const rewriteFn   = await resolveModelRewriter();
+    const shortenFn   = await resolveShortener();
+    info("🧠 RSS rewrite: integrations resolved", {
+      modelResolver: rewriteFn.name || "anonymous",
+      shortener: shortenFn.name || "noop",
+      batchSize,
+    });
 
-    // R2 manifest for builder
-    const manifestKey = "rewritten/latest-feeds.json";
+    // Rewrite each feed URL via LLM (lightweight fetch -> snippet -> rewrite)
+    const items = [];
+    for (const originalUrl of batch) {
+      try {
+        const raw = await fetchText(originalUrl).catch(() => "");
+        const snippet = xmlSafeSnippet(raw);
+        // Try to derive a title-ish string from URL (fallback)
+        const derivedTitle = originalUrl.split("/").filter(Boolean).slice(-1)[0] || "Source";
+
+        // Many teams keep their own prompt builder; if your models.js expects a single string,
+        // pass one; if it expects an object, this adapter still works (common signatures tried below).
+        let summary;
+        try {
+          // Try common signatures without breaking:
+          summary =
+            (await rewriteFn({ title: derivedTitle, description: snippet, source: originalUrl })) ||
+            (await rewriteFn(derivedTitle, snippet, originalUrl)) ||
+            (await rewriteFn(snippet));
+        } catch (inner) {
+          throw inner;
+        }
+
+        const shortUrl = await shortenFn(originalUrl).catch(() => originalUrl);
+
+        items.push({
+          original: originalUrl,
+          shortUrl,
+          title: derivedTitle,
+          summary: typeof summary === "string" ? summary.trim() : String(summary ?? "").trim(),
+        });
+      } catch (err) {
+        warn("⚠️ Feed item rewrite failed; pushing fallback", {
+          originalUrl,
+          error: err?.message || String(err),
+        });
+        items.push({
+          original: originalUrl,
+          shortUrl: originalUrl,
+          title: "Source",
+          summary: "Rewrite failed for this item.",
+        });
+      }
+    }
+
+    // Local previews/state (kept for dev visibility & backward-compat)
     const manifest = {
       generatedAt: new Date().toISOString(),
-      feeds: batch,
       targetUrl,
-      meta: { batchSize, batchStart: start, batchEnd: end, totalFeeds: feeds.length }
+      // Backward-compat for older builder code:
+      feeds: batch,                 // raw URL list
+      // New, richer structure the builder can use:
+      items,                        // rewritten items
+      meta: { batchStart: start, batchEnd: end, totalFeeds: feeds.length },
     };
 
-    if (!R2_BUCKET) throw new Error("No R2 bucket configured for RSS rewrites (R2_BUCKET_RSS_FEEDS/R2_BUCKET_META).");
+    await fsp.writeFile(LOCAL_STATE, JSON.stringify({ index: nextIndex }, null, 2));
+    await fsp.writeFile(LOCAL_ACTIVE, JSON.stringify(manifest, null, 2));
+
+    if (!R2_BUCKET) throw new Error("No R2 bucket configured (R2_BUCKET_RSS_FEEDS / R2_BUCKET_META)");
+    const manifestKey = "rewritten/latest-feeds.json";
     await putJson(R2_BUCKET, manifestKey, manifest);
 
-    info("🔁 RSS rewrite complete", {
-      feedsUsed: batch.length,
+    info("🔁 RSS rewrite + LLM summaries complete", {
+      rewrittenCount: items.length,
+      batchSize,
       nextIndex,
-      targetUrl,
       r2Bucket: R2_BUCKET,
-      r2Key: manifestKey
+      r2Key: manifestKey,
     });
 
     return {
       ok: true,
-      feedsUsed: batch.length,
+      rewrittenCount: items.length,
       nextIndex,
-      targetUrl,
       r2Bucket: R2_BUCKET,
-      r2Key: manifestKey
+      r2Key: manifestKey,
     };
   } catch (err) {
     error("❌ RSS rewrite pipeline failed", { error: err.message });
     throw err;
   }
-        
+}
+
+export default rewriteRSSFeeds;
