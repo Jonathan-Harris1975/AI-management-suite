@@ -10,10 +10,7 @@ function log(message, meta) {
   process.stdout.write(JSON.stringify(entry) + "\n");
 }
 
-// Quick health probe
-router.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "rewrite" });
-});
+
 
 // Kick the pipeline
 router.post("/run", async (req, res) => {
