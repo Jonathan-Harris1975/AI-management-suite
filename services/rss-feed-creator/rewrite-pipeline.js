@@ -1,77 +1,111 @@
 // ============================================================
-// 🧠 AI Podcast Suite — RSS Feed Rewrite Pipeline
+// 🔁 RSS Feed Rewrite / Rotation Pipeline (manual)
 // ============================================================
 //
-// Purpose:
-//   • Loads utils/active-feeds.json from R2
-//   • Rewrites feeds using placeholder AI logic
-//   • Saves output to rewritten/latest-feeds.json
-//   • Updates utils/last-success.log
+// Inputs (files in repo):
+//  - services/rss-feed-creator/data/feeds.txt
+//  - services/rss-feed-creator/data/urls.txt
 //
-// Dependencies:
-//   • ../shared/utils/r2-client.js
-//   • ../shared/utils/logger.js
+// Outputs:
+//  - services/rss-feed-creator/utils/active-feeds.json   (local preview)
+//  - services/rss-feed-creator/utils/feed-state.json     (local state)
+//  - r2: rewritten/latest-feeds.json                     (for builder)
+//
+// Env/R2:
+//  - Uses ../shared/utils/r2-client.js (R2_* vars are on Shiper)
 // ============================================================
 
-import { getObjectAsText, putJson, putText } from "../shared/utils/r2-client.js";
-import { log } from "../shared/utils/logger.js";
+import fs from "fs";
+import fsp from "fs/promises";
+import path from "path";
+import { getObjectAsText, putJson } from "../shared/utils/r2-client.js";
+import { info, error } from "../shared/utils/logger.js";
 
-// ------------------------------------------------------------
-// ⚙️ Main Rewrite Pipeline
-// ------------------------------------------------------------
-export async function rewriteRSSFeeds() {
-  log.info("🧠 Starting RSS Feed Rewrite Pipeline");
+const projectRoot = "/app";
+const baseDir = path.join(projectRoot, "services/rss-feed-creator");
+const dataDir = path.join(baseDir, "data");
+const utilsDir = path.join(baseDir, "utils");
 
+const LOCAL_ACTIVE = path.join(utilsDir, "active-feeds.json");
+const LOCAL_STATE  = path.join(utilsDir, "feed-state.json");
+
+// NOTE: Adjust bucket with your env layout.
+// Prefer RSS feeds bucket; fall back to META.
+const R2_BUCKET =
+  process.env.R2_BUCKET_RSS_FEEDS ||
+  process.env.R2_BUCKET_PODCAST_RSS_FEEDS ||
+  process.env.R2_BUCKET_META;
+
+/**
+ * Rotate and persist the latest selection of feeds + a target URL.
+ * Writes a compact manifest that downstream builder can consume.
+ */
+export async function rewriteRSSFeeds({ batchSize = 5 } = {}) {
   try {
-    const bucket = process.env.R2_BUCKET_RSS_FEEDS;
-    const inputKey = "utils/active-feeds.json";
-    const outputKey = "rewritten/latest-feeds.json";
+    if (!fs.existsSync(utilsDir)) fs.mkdirSync(utilsDir, { recursive: true });
 
-    // 🧩 Load current active feeds
-    const feedsText = await getObjectAsText(bucket, inputKey);
-    if (!feedsText) throw new Error(`No feed data found at ${inputKey}`);
+    const feedsPath = path.join(dataDir, "feeds.txt");
+    const urlsPath  = path.join(dataDir, "urls.txt");
 
-    const feeds = JSON.parse(feedsText);
-    if (!feeds.feeds?.length) {
-      throw new Error("No feeds available in active-feeds.json");
+    if (!fs.existsSync(feedsPath) || !fs.existsSync(urlsPath)) {
+      throw new Error("Missing feeds.txt or urls.txt in services/rss-feed-creator/data");
     }
 
-    // 🧠 Perform rewrite (placeholder for AI transformation logic)
-    const rewritten = feeds.feeds.map((feed) => ({
-      original: feed,
-      rewritten: `AI-enhanced summary of: ${feed}`,
-    }));
+    const feeds = (await fsp.readFile(feedsPath, "utf-8"))
+      .split("\n").map(s => s.trim()).filter(Boolean);
+    const urls  = (await fsp.readFile(urlsPath, "utf-8"))
+      .split("\n").map(s => s.trim()).filter(Boolean);
 
-    const result = {
-      timestamp: new Date().toISOString(),
-      feedsUsed: feeds.feeds.length,
-      rewritten,
+    let state = { index: 0 };
+    if (fs.existsSync(LOCAL_STATE)) {
+      try { state = JSON.parse(await fsp.readFile(LOCAL_STATE, "utf-8")); }
+      catch { state = { index: 0 }; }
+    }
+
+    const start = Number(state.index) || 0;
+    const end   = Math.min(start + batchSize, feeds.length);
+    const batch = feeds.slice(start, end);
+    const urlIndex = Math.floor(start / batchSize) % Math.max(urls.length, 1);
+    const targetUrl = urls[urlIndex];
+
+    const nextIndex = end >= feeds.length ? 0 : end;
+
+    // Local previews
+    await fsp.writeFile(LOCAL_STATE, JSON.stringify({ index: nextIndex }, null, 2));
+    await fsp.writeFile(LOCAL_ACTIVE, JSON.stringify({
+      feeds: batch, targetUrl, batchStart: start, batchEnd: end, totalFeeds: feeds.length
+    }, null, 2));
+
+    // R2 manifest for builder
+    const manifestKey = "rewritten/latest-feeds.json";
+    const manifest = {
+      generatedAt: new Date().toISOString(),
+      feeds: batch,
+      targetUrl,
+      meta: { batchSize, batchStart: start, batchEnd: end, totalFeeds: feeds.length }
     };
 
-    // 💾 Write new rewritten feeds
-    await putJson(bucket, outputKey, result);
-    await putText(bucket, "utils/last-success.log", `Success at ${new Date().toISOString()}`);
+    if (!R2_BUCKET) throw new Error("No R2 bucket configured for RSS rewrites (R2_BUCKET_RSS_FEEDS/R2_BUCKET_META).");
+    await putJson(R2_BUCKET, manifestKey, manifest);
 
-    log.info("✅ RSS Feed Rewrite Pipeline completed successfully", {
-      feedsUsed: feeds.feeds.length,
-      outputKey,
+    info("🔁 RSS rewrite complete", {
+      feedsUsed: batch.length,
+      nextIndex,
+      targetUrl,
+      r2Bucket: R2_BUCKET,
+      r2Key: manifestKey
     });
 
-    return result;
+    return {
+      ok: true,
+      feedsUsed: batch.length,
+      nextIndex,
+      targetUrl,
+      r2Bucket: R2_BUCKET,
+      r2Key: manifestKey
+    };
   } catch (err) {
-    log.error("❌ RSS Feed Rewrite Pipeline failed", { error: err.message });
+    error("❌ RSS rewrite pipeline failed", { error: err.message });
     throw err;
   }
-}
-
-// ------------------------------------------------------------
-// 🧩 CLI entry point
-// ------------------------------------------------------------
-if (import.meta.url === `file://${process.argv[1]}`) {
-  rewriteRSSFeeds()
-    .then(() => log.info("🏁 RSS rewrite complete"))
-    .catch((err) => {
-      console.error("Rewrite pipeline failed:", err);
-      process.exit(1);
-    });
-}
+        
