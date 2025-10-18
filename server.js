@@ -1,46 +1,117 @@
-// /server.js — AI Podcast Suite (clean)
+// ============================================================
+// 🌍 AI Management Suite — Server Bootstrap (Final Stable Build)
+// ============================================================
+//
+// ✅ Includes:
+//   • RSS Health Check (/api/rss/health)
+//   • RSS Rewrite Pipeline (/rss/rewrite)
+//   • Podcast Health Check (/api/podcast/health)
+//   • Podcast Main Route (/podcast)
+//   • Express setup with JSON, URL-encoded body parser, CORS
+// ============================================================
+
 import express from "express";
-import process from "node:process";
-import fs from "node:fs";
+import cors from "cors";
+import { log } from "./services/shared/utils/logger.js";
 
 const app = express();
-app.use(express.json());
-
 const PORT = process.env.PORT || 3000;
-const NODE_ENV = (process.env.NODE_ENV || "production").toLowerCase();
 
-function log(message, meta) {
-  const entry = { time: new Date().toISOString(), message };
-  if (meta && typeof meta === "object") entry.meta = meta;
-  process.stdout.write(JSON.stringify(entry) + "\n");
-}
+// ------------------------------------------------------------
+// 🧩 Middleware
+// ------------------------------------------------------------
+app.use(cors());
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
 
-// Preflight: make sure the route file actually exists
-log("🧩 Preflight check", { rewriteExists: fs.existsSync("./routes/rewrite.js") });
-
-// Mount rewrite route
-import rewriteRouter from "./routes/rewrite.js";
-app.use("/api/rewrite", rewriteRouter);
-log("✅ Mounted /api/rewrite");
-
-// Basic root + health
+// ------------------------------------------------------------
+// 🩺 Root Health Check
+// ------------------------------------------------------------
 app.get("/", (_req, res) => {
   res.json({
-    message: "🧠 endpoint is live",
-    endpoints: ["/api/rewrite/health", "/api/rewrite/run"],
+    service: "AI Management Suite",
+    status: "online",
+    endpoints: [
+      "/api/rss/health",
+      "/rss/rewrite",
+      "/api/podcast/health",
+      "/podcast",
+    ],
   });
 });
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", env: NODE_ENV });
-});
+// ------------------------------------------------------------
+// ⚙️ Dynamic Route Registration
+// ------------------------------------------------------------
+(async () => {
+  try {
+    log.info("🚀 Starting route registration...");
 
-// 404 (keep last)
-app.use((req, res) => {
-  log("⚠️ 404 Not Found", { path: req.originalUrl });
-  res.status(404).json({ error: "Endpoint not found", path: req.originalUrl });
-});
+    // 🧠 RSS Health
+    try {
+      app.get("/api/rss/health", (_req, res) => {
+        res.json({
+          ok: true,
+          service: "RSS Feed Creator",
+          status: "healthy",
+          timestamp: new Date().toISOString(),
+        });
+      });
+      log.info("🧩 Mounted: /api/rss/health");
+    } catch (err) {
+      log.error("💥 RSS Health route failed", { error: err.stack });
+    }
 
-app.listen(PORT, () => {
-  log("🚀 Server listening", { PORT: String(PORT), NODE_ENV: (process.env.NODE_ENV || "Production") });
-});
+    // 📰 RSS Rewrite
+    try {
+      const { default: rssRewriteRouter } = await import("./routes/rewrite.js");
+      app.use(rssRewriteRouter);
+      log.info("🧩 Mounted: /rss/rewrite");
+    } catch (err) {
+      log.error("💥 RSS Rewrite route failed", { error: err.stack });
+    }
+
+    // 🎧 Podcast Health
+    try {
+      app.get("/api/podcast/health", (_req, res) => {
+        res.json({
+          ok: true,
+          service: "Podcast Engine",
+          status: "healthy",
+          timestamp: new Date().toISOString(),
+        });
+      });
+      log.info("🎧 Mounted: /api/podcast/health");
+    } catch (err) {
+      log.error("💥 Podcast Health route failed", { error: err.stack });
+    }
+
+    // 🎙️ Podcast Main Route
+    try {
+      const { default: podcastRouter } = await import("./routes/podcast.js");
+      if (!podcastRouter)
+        throw new Error("Missing default export in routes/podcast.js");
+      app.use("/podcast", podcastRouter);
+      log.info("🎙️ Mounted: /podcast");
+    } catch (err) {
+      log.error("💥 Podcast route failed to load", { error: err.stack });
+    }
+
+    // --------------------------------------------------------
+    // 🚀 Final Startup Confirmation
+    // --------------------------------------------------------
+    app.listen(PORT, () => {
+      log.info("🌍 Server started successfully");
+      log.info("---------------------------------------------");
+      log.info("✅ Active Endpoints:");
+      log.info("🧠 → GET  /api/rss/health");
+      log.info("📰 → POST /rss/rewrite");
+      log.info("🎧 → GET  /api/podcast/health");
+      log.info("🎙️ → ALL  /podcast");
+      log.info("---------------------------------------------");
+    });
+  } catch (outerErr) {
+    log.error("💥 Fatal server startup error", { error: outerErr.stack });
+    process.exit(1);
+  }
+})();
