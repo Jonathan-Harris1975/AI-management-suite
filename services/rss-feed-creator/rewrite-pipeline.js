@@ -4,17 +4,17 @@
 //
 // Purpose:
 //   • Loads utils/active-feeds.json from R2
-//   • Rewrites feeds using simple AI placeholder logic
+//   • Rewrites feeds using placeholder AI logic
 //   • Saves output to rewritten/latest-feeds.json
 //   • Updates utils/last-success.log
 //
 // Dependencies:
-//   • ../../shared/utils/r2-client.js
-//   • ../../shared/utils/logger.js
+//   • ../shared/utils/r2-client.js
+//   • ../shared/utils/logger.js
 // ============================================================
 
-import { getObjectAsText, putJson, putText } from "../../shared/utils/r2-client.js";
-import { log } from "../../shared/utils/logger.js";
+import { getObjectAsText, putJson, putText } from "../shared/utils/r2-client.js";
+import { log } from "../shared/utils/logger.js";
 
 // ------------------------------------------------------------
 // ⚙️ Main Rewrite Pipeline
