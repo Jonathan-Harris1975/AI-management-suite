@@ -1,37 +1,47 @@
 {
   "name": "ai-podcast-suite",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "main": "server.js",
+
   "scripts": {
     "start": "node server.js",
-    "build": "echo 'Skipping TypeScript build — this project is pure ESM JS'",
-    "dev": "node server.js"
+    "build": "echo 'Skipping TypeScript build — pure ESM JS project'"
   },
+
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22 <25"
   },
+
   "dependencies": {
     "@aws-sdk/client-s3": "^3.663.0",
     "@google/generative-ai": "0.10.0",
-    "child_process": "*",
-    "cors": "*",
+    "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.19.2",
-    "ffmpeg-static": "*",
-    "ffprobe-static": "*",
-    "fluent-ffmpeg": "*",
-    "logform": "*",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "fluent-ffmpeg": "^2.1.2",
     "node-fetch": "^3.3.2",
     "openai": "^4.56.0",
-    "p-limit": "*",
+    "p-limit": "^4.0.0",
     "pino": "^9.2.0",
-    "pino-http": "*",
-    "process": "*",
+    "pino-http": "^9.0.0",
+    "pino-pretty": "^11.2.2",
+      "nanoid": "^5.0.7",
     "rss-parser": "^3.13.0",
-    "supertest": "*",
-    "undici": "*",
-    "winston": "^3.11.0",
+    "undici": "^6.19.8",
     "zod": "^3.23.8"
-  }
+  },
+
+  "imports": {
+  "#shared/*": "./services/shared/utils/*",
+  "#routes/*": "./routes/*"
+},
+
+  "devDependencies": {
+    "supertest": "^7.0.0"
+  },
+
+  "private": true
 }
