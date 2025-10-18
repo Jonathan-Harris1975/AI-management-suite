@@ -1,3 +1,4 @@
+
 // ============================================================
 // 🧠 AI Podcast Suite — Final Unified Logger (Non-recursive)
 // ============================================================
@@ -29,6 +30,20 @@ if (!loggerInstance) {
           singleLine: true,
           translateTime: "SYS:standard",
           ignore: "pid,hostname",
+          messageFormat: "{levelLabel} {msg} {time}",
+          customPrettifiers: {
+            level: (logLevel) => {
+              const emojiMap = {
+                60: '🚨',
+                50: '❌',
+                40: '⚠️',
+                30: 'ℹ️',
+                20: '🐞',
+                10: '🔍',
+              };
+              return emojiMap[logLevel] || '';
+            },
+          },
         },
       },
     });
