@@ -2,7 +2,7 @@
 // Unified orchestrator for the 4-stage podcast script pipeline
 // Runs intro → main → outro → compose routes in sequence
 
-import { info, error } from "#shared/utils/logger.js";
+import { info, error } from "../../shared/utils/logger.js";";
 
 const BASE_URL = process.env.INTERNAL_BASE_URL || "http://localhost:3000"; // works inside container
 const SCRIPT_PATH = "/api/script"; // your route mount path
