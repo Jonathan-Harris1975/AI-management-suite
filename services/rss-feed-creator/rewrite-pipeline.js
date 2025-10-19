@@ -1,29 +1,31 @@
 import fs from "fs";
 import path from "path";
 import { parseStringPromise, Builder } from "xml2js";
-import { info, error } from "../shared/utils/logger.js"; // ✅ Fixed import path
-import { uploadFileToR2 } from "../shared/utils/r2-client.js"; // ✅ Fixed import path
+import { info, error } from "../../shared/utils/logger.js"; // ✅ Correct path
+import { uploadToR2 } from "../../shared/utils/r2-client.js"; // ✅ Correct path
 import { resolveModelRewriter } from "./utils/models.js";
 import { shortenUrl } from "./utils/shortio.js";
 
 const RSS_FEED_BUCKET = process.env.R2_BUCKET_RSS_FEEDS;
 const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL_RSS;
 
-/**
- * Main RSS rewrite pipeline
- */
-export async function rewriteRSSFeeds(feedContent, options = {}) {
+export async function rewriteRssFeed(feedContent, options = {}) {
   try {
     info("📰 Starting RSS feed rewrite pipeline...");
 
     if (!feedContent) throw new Error("No RSS feed content provided");
+
+    // ✅ Validate XML
+    if (!feedContent.trim().startsWith("<")) {
+      throw new Error("Invalid feed: does not start with XML tag");
+    }
 
     const feed = await parseStringPromise(feedContent);
     const channel = feed?.rss?.channel?.[0];
     if (!channel?.item) throw new Error("No RSS items found in feed");
 
     const items = channel.item;
-    const rewriter = resolveModelRewriter(); // ✅ Correctly defined now
+    const rewriter = resolveModelRewriter();
 
     const rewrittenItems = [];
     for (const item of items) {
@@ -47,7 +49,6 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
       }
     }
 
-    // Build new RSS feed
     const builder = new Builder();
     const rewrittenFeed = builder.buildObject({
       rss: {
@@ -68,8 +69,7 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
     fs.writeFileSync(tempPath, rewrittenFeed);
     info(`✅ RSS feed rewritten successfully (${rewrittenItems.length} items)`);
 
-    // Upload to R2
-    const result = await uploadFileToR2({
+    const result = await uploadToR2({
       bucket: RSS_FEED_BUCKET,
       key: fileName,
       filePath: tempPath,
@@ -91,4 +91,4 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
   }
 }
 
-export default rewriteRSSFeeds;
+export default rewriteRssFeed;
