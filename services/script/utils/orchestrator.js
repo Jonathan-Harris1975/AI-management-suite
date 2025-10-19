@@ -19,12 +19,12 @@ async function callRoute(route, sessionId) {
   return await res.json();
 }
 
-export async function runScriptOrchestrator(sessionId) {
+export async function orchestrateScript(sessionId) {
   const started = Date.now();
   const log = (stage, meta) => info(`script.${stage}`, { sessionId, ...meta });
 
   try {
-    log("start", {});
+    log("start", {}); 
 
     // ── 1️⃣ Intro
     const intro = await callRoute("intro", sessionId);
