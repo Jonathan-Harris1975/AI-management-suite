@@ -1,0 +1,7 @@
+Delete the following redundant or deprecated files if they exist:
+- services/tts/utils/webhooks.js
+- services/rss-feed-creator/routes/health.js
+- services/podcast/routes/health.js
+- services/tts/routes/health.js
+- services/artwork/routes/health.js
+- services/script/routes/health.js
