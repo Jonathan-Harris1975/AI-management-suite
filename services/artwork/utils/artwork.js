@@ -6,7 +6,7 @@
 import { putJson, getObject, putText } from "../../shared/utils/r2-client.js";
 import { info, error } from "../../shared/utils/logger.js";
 
-export async function saveArtworkManifest(data) {
+export async function generatePodcastArtwork(data) {
   const bucket = process.env.R2_BUCKET_ART || process.env.R2_BUCKET_META;
   const key = `artwork/${data.sessionId || Date.now()}.json`;
   await putJson(bucket, key, data);
