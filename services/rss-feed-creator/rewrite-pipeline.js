@@ -12,7 +12,7 @@ const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL_RSS;
 /**
  * Main RSS rewrite pipeline
  */
-export async function rewriteRssFeed(feedContent, options = {}) {
+export async function rewriteRSSFeeds(feedContent, options = {}) {
   try {
     info("📰 Starting RSS feed rewrite pipeline...");
 
