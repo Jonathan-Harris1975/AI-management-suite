@@ -1,12 +1,12 @@
 // services/podcast/runPodcastPipeline.js
 // ============================================================
-// 🎙️ AI Podcast Suite — Unified Podcast Pipeline
+// 🎙️ AI Podcast Suite — Unified Podcast Pipeline (fixed imports)
 // ============================================================
 // Runs the podcast pipeline sequentially:
 // script → tts → artwork
 // ============================================================
 
-import { log } from "../../shared/utils/logger.js";
+import { log } from "../../shared/logger.js";
 import { orchestrateScript } from "../script/utils/orchestrator.js";
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
 import { generatePodcastArtwork } from "../artwork/utils/artwork.js";
