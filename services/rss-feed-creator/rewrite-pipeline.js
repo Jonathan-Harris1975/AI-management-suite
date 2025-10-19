@@ -69,7 +69,7 @@ export async function rewriteRssFeed(feedContent, options = {}) {
     info(`✅ RSS feed rewritten successfully (${rewrittenItems.length} items)`);
 
     // Upload to R2
-    const result = await uploadToR2({
+    const result = await uploadFileToR2({
       bucket: RSS_FEED_BUCKET,
       key: fileName,
       filePath: tempPath,
