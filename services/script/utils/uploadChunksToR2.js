@@ -17,5 +17,5 @@ export default async function uploadChunksToR2(filePath, key) {
 
   await s3.send(command);
 
-  const url = buildPublicUrl(R2_BUCKETS.META, key) || buildPublicUrl(R2_BUCKETS.RAW, key);
+  const url = buildPublicUrl(R2_BUCKET_RAW_TEXT, key);
   return url;
