@@ -1,22 +1,48 @@
 // services/podcast/runPodcastPipeline.js
-import { info, error } from "../shared/utils/logger.js";
-import { putJson } from "../shared/utils/r2-client.js";
+// ============================================================
+// 🎙️ AI Podcast Suite — Unified Podcast Pipeline
+// ============================================================
+// Runs the podcast pipeline sequentially:
+// script → tts → artwork
+// ============================================================
 
-export default async function PodcastPipeline(sessionId, text) {
-  info("🎙️ Starting podcast pipeline", { sessionId });
+import { log } from "../../shared/utils/logger.js";
+import { orchestrateScript } from "../script/utils/orchestrator.js";
+import { orchestrateTTS } from "../tts/utils/orchestrator.js";
+import { generatePodcastArtwork } from "../artwork/utils/artwork.js";
 
-  const { orchestrateTTS } = await import("../tts/utils/orchestrator.js").catch(() => ({}));
-  let ttsResult = null;
-  if (typeof orchestrateTTS === "function") {
-    ttsResult = await orchestrateTTS({ sessionId, text });
-  } else {
-    info("🔊 TTS orchestrator not found — skipping TTS stage", { sessionId });
+export async function runPodcastPipeline({ sessionId }) {
+  log.info(`🎙️ Podcast pipeline starting for session: ${sessionId}`);
+
+  try {
+    // 1️⃣ Run the script pipeline (intro → main → outro → compose)
+    const script = await orchestrateScript(sessionId);
+    log.info(`🧩 Script pipeline completed for ${sessionId}`);
+
+    // 2️⃣ Run TTS synthesis
+    const tts = await orchestrateTTS({
+      sessionId,
+      text: script.fullText || script.combinedText,
+    });
+    log.info(`🔊 TTS synthesis completed for ${sessionId}`);
+
+    // 3️⃣ Generate podcast artwork
+    const art = await generatePodcastArtwork(sessionId);
+    log.info(`🎨 Artwork generation completed for ${sessionId}`);
+
+    // ✅ Final output summary
+    return {
+      sessionId,
+      script,
+      tts,
+      art,
+      status: "complete",
+    };
+  } catch (err) {
+    log.error({ sessionId, error: err.message }, "💥 Podcast pipeline failed");
+    throw err;
   }
-
-  const bucket = process.env.R2_BUCKET_PODCAST || process.env.R2_BUCKET_META;
-  const key = `podcast/${sessionId}.json`;
-  await putJson(bucket, key, { sessionId, text, ttsResult, finishedAt: new Date().toISOString() });
-
-  info("🎙️ Podcast pipeline complete", { sessionId, bucket, key });
-  return { sessionId, key, bucket };
 }
+
+// 👇 Ensure both default and named exports
+export default runPodcastPipeline;
