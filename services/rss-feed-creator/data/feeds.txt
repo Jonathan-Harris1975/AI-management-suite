@@ -21,4 +21,19 @@ https://hackread.com/feed/
 https://www.itsecurityguru.org/feed/
 https://www.csoonline.com/feed/
 https://grahamcluley.com/feed/
+https://openai.com/blog/rss/
+https://www.deepmind.com/blog/rss.xml
+https://blogs.microsoft.com/ai/feed/
+https://research.facebook.com/blog/feed/
+https://www.technologyreview.com/topic/artificial-intelligence/feed/
+https://www.artificialintelligence-news.com/feed/
+https://analyticsindiamag.com/feed/
+https://aibusiness.com/rss.xml
 
+https://arxiv.org/rss/cs.AI
+https://news.mit.edu/rss/topic/artificial-intelligence
+https://research.google/blog/rss/
+https://towardsdatascience.com/feed
+https://machinelearningmastery.com/blog/feed
+https://www.kdnuggets.com/feed
+https://siliconangle.com/category/ai/feed
