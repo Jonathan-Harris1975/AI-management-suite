@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { parseStringPromise, Builder } from "xml2js";
-import { info, error } from "../../shared/utils/logger.js";
-import { uploadToR2 } from "../../shared/utils/r2-client.js";
+import { info, error } from "../shared/utils/logger.js"; // ✅ Fixed import path
+import { uploadToR2 } from "../shared/utils/r2-client.js"; // ✅ Fixed import path
 import { resolveModelRewriter } from "./utils/models.js";
 import { shortenUrl } from "./utils/shortio.js";
 
@@ -36,7 +36,7 @@ export async function rewriteRssFeed(feedContent, options = {}) {
         const shortLink = await shortenUrl(link);
 
         rewrittenItems.push({
-          title: title,
+          title,
           description: rewrittenText || snippet,
           link: shortLink,
           pubDate: item.pubDate?.[0] || new Date().toUTCString(),
