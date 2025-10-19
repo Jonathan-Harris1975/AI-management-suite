@@ -19,9 +19,8 @@ const LOCAL_ACTIVE = path.join(utilsDir, "active-feeds.json");
 const LOCAL_STATE  = path.join(utilsDir, "feed-state.json");
 
 const R2_BUCKET =
-  process.env.R2_BUCKET_RSS_FEEDS ||
-  process.env.R2_BUCKET_PODCAST_RSS_FEEDS ||
-  process.env.R2_BUCKET_META;
+  process.env.R2_BUCKET_RSS_FEEDS |
+  
 
 // ---- helpers ------------------------------------------------
 
