@@ -91,4 +91,4 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
   }
 }
 
-export default rewriteRssFeed;
+export default rewriteRSSFeeds;
