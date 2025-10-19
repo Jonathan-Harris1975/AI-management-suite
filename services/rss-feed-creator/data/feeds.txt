@@ -29,9 +29,7 @@ https://www.technologyreview.com/topic/artificial-intelligence/feed/
 https://www.artificialintelligence-news.com/feed/
 https://analyticsindiamag.com/feed/
 https://aibusiness.com/rss.xml
-
 https://arxiv.org/rss/cs.AI
-https://news.mit.edu/rss/topic/artificial-intelligence
 https://research.google/blog/rss/
 https://towardsdatascience.com/feed
 https://machinelearningmastery.com/blog/feed
