@@ -35,7 +35,8 @@
   },
 
   "imports": {
-  "#shared/*": "./services/shared/utils/*","logger/*",
+  "#shared/*": "./services/shared/utils/*",
+  "#logger/*": "./path/to/logger/*",
   "#routes/*": "./routes/*"
 },
 
