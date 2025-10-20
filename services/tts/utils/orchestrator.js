@@ -4,7 +4,7 @@
 // ============================================================
 
 import { putJson } from "../../shared/utils/r2-client.js";
-import { info, error } from "../../shared/utils/logger.js";
+import { info, error } from "#logger.js";
 
 async function resolveSynth() {
   const candidates = [
