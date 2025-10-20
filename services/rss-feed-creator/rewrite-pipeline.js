@@ -1,8 +1,6 @@
-import fs from "fs";
-import path from "path";
 import { parseStringPromise, Builder } from "xml2js";
-import { info, error } from "../shared/utils/logger.js";
-import { uploadFileToR2 } from "../shared/utils/r2-client.js";
+import { info, error } from "../../shared/utils/logger.js";
+import { uploadToR2 } from "../../shared/utils/r2-client.js";
 import { resolveModelRewriter } from "./utils/models.js";
 import { shortenUrl } from "./utils/shortio.js";
 
@@ -18,6 +16,7 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
   const maxItemsPerFeed = Number(options.maxItemsPerFeed || process.env.MAX_ITEMS_PER_FEED || 20);
   const fileName =
     options.fileName || `feed-rewrite-${new Date().toISOString().replace(/[:.]/g, "-")}.xml`;
+  const returnItemsOnly = Boolean(options.returnItemsOnly);
 
   try {
     info("📰 Starting RSS feed rewrite pipeline...");
@@ -25,11 +24,7 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
     if (!feedContent) throw new Error("No RSS feed content provided");
 
     if (typeof feedContent !== "string") {
-      if (typeof feedContent === "object") {
-        // If an object slipped through, fail fast (we need raw XML)
-        throw new Error("Expected raw XML string, received object");
-      }
-      throw new Error(`Invalid feedContent type: ${typeof feedContent}`);
+      throw new Error("Expected raw XML string for feedContent");
     }
 
     const trimmed = feedContent.trim();
@@ -81,6 +76,10 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
       }
     }
 
+    if (returnItemsOnly) {
+      return { success: true, items: rewrittenItems };
+    }
+
     const builder = new Builder();
     const rewrittenFeed = builder.buildObject({
       rss: {
@@ -94,22 +93,13 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
       },
     });
 
-    const tempPath = path.join("/tmp", fileName);
-    fs.writeFileSync(tempPath, rewrittenFeed);
-    info("✅ RSS feed rewritten", {
-      itemsIn: items.length,
-      itemsRecent: recent.length,
-      itemsOut: rewrittenItems.length,
-      fileName,
-    });
-
-    const result = await uploadFileToR2({
+    const result = await uploadToR2({
       bucket: RSS_FEED_BUCKET,
       key: fileName,
-      filePath: tempPath,
+      body: rewrittenFeed,
     });
 
-    const publicUrl = `${R2_PUBLIC_BASE_URL}/${fileName}`;
+    const publicUrl = R2_PUBLIC_BASE_URL ? `${R2_PUBLIC_BASE_URL}/${fileName}` : fileName;
     info("📤 Uploaded rewritten feed to R2", { publicUrl });
 
     return {
