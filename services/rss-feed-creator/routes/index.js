@@ -1,7 +1,7 @@
 import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
 // services/rss-feed-creator/routes/index.js
 import express from "express";
-import { log } from "../../../utils/logger.js";
+import { log } from "#logger.js";
 
 const router = express.Router();
 
