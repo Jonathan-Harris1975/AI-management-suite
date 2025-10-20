@@ -7,7 +7,7 @@
 // ============================================================
 
 import { execSync } from "child_process";
-import { log } from "#shared/logger.js";
+import { log } from "#logger.js";
 
 async function run(cmd, label) {
   try {
