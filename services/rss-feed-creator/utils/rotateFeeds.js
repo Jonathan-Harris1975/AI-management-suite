@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { info, error } from "../../../shared/utils/logger.js";
+import { info, error } from "#logger.js";
 
 const ROOT = path.join(process.cwd(), "services", "rss-feed-creator");
 const DATA_DIR = path.join(ROOT, "data");
