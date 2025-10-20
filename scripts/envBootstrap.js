@@ -12,7 +12,7 @@
 
 import os from "os";
 import process from "process";
-import { log } from "#shared/logger.js";
+import { log } from "#logger.js";
 
 // ------------------------------------------------------------------
 // 🧱 Inline validateEnv() to avoid external dependency errors
