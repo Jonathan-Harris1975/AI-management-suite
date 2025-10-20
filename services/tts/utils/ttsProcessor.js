@@ -7,8 +7,7 @@ import path from "path";
 import pLimit from "p-limit";
 import fetch from "node-fetch";
 import ffmpeg from "fluent-ffmpeg";
-import { log } from "../../../utils/logger.js";
-import { validateEnv } from "../../../utils/envChecker.js";
+import { log } from "#logger.js";
 
 // ✅ Ensure required env vars exist
 validateEnv(["GEMINI_API_KEY"]);
