@@ -1,5 +1,5 @@
 import { resilientRequest } from '../../shared/utils/ai-service.js';
-import { info, error } from '../../shared/utils/logger.js';
+import { info, error } from '#logger.js';
 import { RSS_PROMPTS } from './rss-prompts.js';
 
 export async function rewriteTextLLM({ title, snippet }) {
