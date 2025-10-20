@@ -5,7 +5,7 @@ import os from "os";
 import { spawn } from "child_process";
 import fetch from "node-fetch";
 
-import * as logger from "#shared/logger.js";
+import * as logger from "#logger.js";
 
 const tempDir = os.tmpdir();
 
