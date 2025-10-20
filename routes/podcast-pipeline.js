@@ -4,7 +4,7 @@
 // ============================================================
 
 import express from "express";
-import { info, error } from "../services/shared/utils/logger.js";
+import { info, error } from "#logger.js";
 
 const router = express.Router();
 
