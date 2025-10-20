@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { parseStringPromise, Builder } from "xml2js";
-import { info, error } from "../../shared/utils/logger.js";
-import { uploadToR2 } from "../../shared/utils/r2-client.js";
+import { info, error } from "../shared/utils/logger.js";
+import { uploadFileToR2 } from "../shared/utils/r2-client.js";
 import { resolveModelRewriter } from "./utils/models.js";
 import { shortenUrl } from "./utils/shortio.js";
 
@@ -94,7 +94,7 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
     fs.writeFileSync(tempPath, rewrittenFeed);
     info(`✅ RSS feed rewritten successfully (${rewrittenItems.length} items)`);
 
-    const result = await uploadToR2({
+    const result = await uploadFileToR2({
       bucket: RSS_FEED_BUCKET,
       key: fileName,
       filePath: tempPath,
