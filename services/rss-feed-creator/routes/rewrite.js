@@ -1,6 +1,6 @@
 // ✅ inside rewrite.js
 import express from "express";
-import { info, error } from "../shared/utils/logger.js";
+import { info, error } from "#logger.js";
 import { rewriteRSSFeeds } from "../rewrite-pipeline.js";
 
 const router = express.Router();
