@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { parseStringPromise, Builder } from "xml2js";
-import { info, error } from "../shared/utils/logger.js";
-import { uploadFileToR2 } from "../shared/utils/r2-client.js";
+import { info, error } from "../../shared/utils/logger.js";
+import { uploadToR2 } from "../../shared/utils/r2-client.js";
 import { resolveModelRewriter } from "./utils/models.js";
 import { shortenUrl } from "./utils/shortio.js";
 
@@ -14,6 +14,18 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
     info("📰 Starting RSS feed rewrite pipeline...");
 
     if (!feedContent) throw new Error("No RSS feed content provided");
+
+    // 🧩 Safely convert feedContent to string if necessary
+    if (typeof feedContent !== "string") {
+      if (typeof feedContent === "object") {
+        feedContent = JSON.stringify(feedContent, null, 2);
+        info("ℹ️ feedContent was an object — converted to string");
+      } else {
+        throw new Error(`Invalid feedContent type: ${typeof feedContent}`);
+      }
+    }
+
+    // ✅ Validate XML structure
     if (!feedContent.trim().startsWith("<")) {
       throw new Error("Invalid feed: does not start with XML tag");
     }
@@ -33,12 +45,25 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
       const link = item.link?.[0] || "";
 
       try {
-        const rewrittenText = await rewriter({ title, snippet });
+        // 🧠 Rewrite with character control
+        const rewrittenText = await rewriter({
+          title,
+          snippet,
+          minLength: 250,
+          maxLength: 750,
+          tone: "informative and engaging, summarizing full key ideas naturally",
+        });
+
+        const text =
+          rewrittenText && rewrittenText.length >= 250
+            ? rewrittenText.slice(0, 750)
+            : snippet;
+
         const shortLink = await shortenUrl(link);
 
         rewrittenItems.push({
           title,
-          description: rewrittenText || snippet,
+          description: text,
           link: shortLink,
           pubDate: item.pubDate?.[0] || new Date().toUTCString(),
         });
@@ -48,6 +73,7 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
       }
     }
 
+    // 🧱 Rebuild feed
     const builder = new Builder();
     const rewrittenFeed = builder.buildObject({
       rss: {
@@ -68,7 +94,7 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
     fs.writeFileSync(tempPath, rewrittenFeed);
     info(`✅ RSS feed rewritten successfully (${rewrittenItems.length} items)`);
 
-    const result = await uploadFileToR2({
+    const result = await uploadToR2({
       bucket: RSS_FEED_BUCKET,
       key: fileName,
       filePath: tempPath,
