@@ -2,7 +2,7 @@ import { getR2ReadStream } from "#shared/r2-client.js";
 import path from "path";
 import os from "os";
 import { spawn } from "child_process";
-import * as logger from "#shared/logger.js";
+import * as logger from "#logger.js";
 
 const tempDir = os.tmpdir();
 
