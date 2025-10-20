@@ -2,7 +2,7 @@
 import express from "express";
 import cors from "cors";
 import os from "os";
-import { info } from "./shared/utils/logger.js";
+import { info } from "#logger.js";
 import routes from "./routes/index.js";
 
 info("=============================================");
