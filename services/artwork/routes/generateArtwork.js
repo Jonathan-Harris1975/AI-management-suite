@@ -1,7 +1,7 @@
 // services/artwork/routes/generateArtwork.js
 import express from "express";
 import { putJson } from "../../shared/utils/r2-client.js";
-import { info, error } from "../../shared/utils/logger.js";
+import { info, error } from "#logger.js";
 
 const router = express.Router();
 
