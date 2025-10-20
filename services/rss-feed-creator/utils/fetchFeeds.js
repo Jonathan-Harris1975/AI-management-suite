@@ -1,5 +1,5 @@
 import fetch from "node-fetch";
-import { info, error } from "../../../shared/utils/logger.js";
+import { info, error } from "#logger.js";
 
 export async function fetchFeedsXml(urls = []) {
   const out = [];
