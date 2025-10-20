@@ -11,7 +11,7 @@
 
 import fs from "fs";
 import path from "path";
-import { log } from "#shared/logger.js";
+import { log } from "#logger.js";
 
 const projectRoot = "/app";
 const dataDir = path.join(projectRoot, "services/rss-feed-creator/data");
