@@ -1,7 +1,7 @@
 // services/artwork/index.js
 // Keeps your existing generation logic intact; only R2 + logging centralization.
 
-import { info, error } from "#shared/logger.js";
+import { info, error } from "#logger.js";
 import { saveArtworkPng, makeArtworkKey } from "./utils/io.js";
 
 // ⬇️ Import your existing image generation function (unchanged)
