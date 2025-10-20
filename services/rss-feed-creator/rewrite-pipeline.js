@@ -1,79 +1,86 @@
 import fs from "fs";
 import path from "path";
 import { parseStringPromise, Builder } from "xml2js";
-import { info, error } from "../shared/utils/logger.js";
-import { uploadFileToR2 } from "../shared/utils/r2-client.js";
+import { info, error } from "../../shared/utils/logger.js";
+import { uploadFileToR2 } from "../../shared/utils/r2-client.js";
 import { resolveModelRewriter } from "./utils/models.js";
 import { shortenUrl } from "./utils/shortio.js";
 
 const RSS_FEED_BUCKET = process.env.R2_BUCKET_RSS_FEEDS;
 const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL_RSS;
 
+function isRecent(pubDate) {
+  const dt = new Date(pubDate || Date.now());
+  return Date.now() - dt.getTime() < 24 * 60 * 60 * 1000;
+}
+
 export async function rewriteRSSFeeds(feedContent, options = {}) {
+  const maxItemsPerFeed = Number(options.maxItemsPerFeed || process.env.MAX_ITEMS_PER_FEED || 20);
+  const fileName =
+    options.fileName || `feed-rewrite-${new Date().toISOString().replace(/[:.]/g, "-")}.xml`;
+
   try {
     info("📰 Starting RSS feed rewrite pipeline...");
 
     if (!feedContent) throw new Error("No RSS feed content provided");
 
-    // 🧩 Safely convert feedContent to string if necessary
     if (typeof feedContent !== "string") {
       if (typeof feedContent === "object") {
-        feedContent = JSON.stringify(feedContent, null, 2);
-        info("ℹ️ feedContent was an object — converted to string");
-      } else {
-        throw new Error(`Invalid feedContent type: ${typeof feedContent}`);
+        // If an object slipped through, fail fast (we need raw XML)
+        throw new Error("Expected raw XML string, received object");
       }
+      throw new Error(`Invalid feedContent type: ${typeof feedContent}`);
     }
 
-    // ✅ Validate XML structure
-    if (!feedContent.trim().startsWith("<")) {
+    const trimmed = feedContent.trim();
+    if (!trimmed.startsWith("<")) {
       throw new Error("Invalid feed: does not start with XML tag");
     }
 
-    const feed = await parseStringPromise(feedContent);
+    const feed = await parseStringPromise(trimmed);
     const channel = feed?.rss?.channel?.[0];
-    if (!channel?.item) throw new Error("No RSS items found in feed");
+    if (!channel) throw new Error("Invalid RSS: missing <channel>");
+    const items = Array.isArray(channel.item) ? channel.item : [];
 
-    const items = channel.item;
+    const recent = items.filter((it) => isRecent(it.pubDate?.[0] || it.updated?.[0]));
+    const limited = recent.slice(0, maxItemsPerFeed);
+
     const rewriter = resolveModelRewriter();
 
     const rewrittenItems = [];
-
-    for (const item of items) {
+    for (const item of limited) {
       const title = item.title?.[0] || "";
       const snippet = item.description?.[0] || "";
       const link = item.link?.[0] || "";
 
       try {
-        // 🧠 Rewrite with character control
-        const rewrittenText = await rewriter({
+        const text = await rewriter({
           title,
           snippet,
           minLength: 250,
           maxLength: 750,
-          tone: "informative and engaging, summarizing full key ideas naturally",
+          tone: "informative and engaging",
         });
 
-        const text =
-          rewrittenText && rewrittenText.length >= 250
-            ? rewrittenText.slice(0, 750)
-            : snippet;
+        const normalized =
+          typeof text === "string" && text.length >= 250
+            ? text.slice(0, 750)
+            : (snippet || "").slice(0, 750);
 
         const shortLink = await shortenUrl(link);
 
         rewrittenItems.push({
           title,
-          description: text,
-          link: shortLink,
+          description: normalized,
+          link: shortLink || link,
           pubDate: item.pubDate?.[0] || new Date().toUTCString(),
         });
-      } catch (err) {
-        error("⚠️ Rewrite failed for item", { title, err: err.message });
+      } catch (e) {
+        error("⚠️ Item rewrite failed — passing through original", { title, err: e.message });
         rewrittenItems.push(item);
       }
     }
 
-    // 🧱 Rebuild feed
     const builder = new Builder();
     const rewrittenFeed = builder.buildObject({
       rss: {
@@ -87,12 +94,14 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
       },
     });
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const fileName = `feed-rewrite-${timestamp}.xml`;
     const tempPath = path.join("/tmp", fileName);
-
     fs.writeFileSync(tempPath, rewrittenFeed);
-    info(`✅ RSS feed rewritten successfully (${rewrittenItems.length} items)`);
+    info("✅ RSS feed rewritten", {
+      itemsIn: items.length,
+      itemsRecent: recent.length,
+      itemsOut: rewrittenItems.length,
+      fileName,
+    });
 
     const result = await uploadFileToR2({
       bucket: RSS_FEED_BUCKET,
@@ -106,13 +115,13 @@ export async function rewriteRSSFeeds(feedContent, options = {}) {
     return {
       success: true,
       fileName,
-      itemCount: rewrittenItems.length,
       publicUrl,
       r2Result: result,
+      counts: { total: items.length, recent: recent.length, rewritten: rewrittenItems.length },
     };
-  } catch (err) {
-    error("❌ RSS rewrite pipeline failed", { error: err.message });
-    throw err;
+  } catch (e) {
+    error("❌ RSS rewrite pipeline failed", { error: e.message });
+    throw e;
   }
 }
 
