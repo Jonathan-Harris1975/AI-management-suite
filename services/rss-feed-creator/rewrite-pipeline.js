@@ -1,7 +1,7 @@
 
 // services/rss-feed-creator/rewrite-pipeline.js
 import { parseStringPromise, Builder } from "xml2js";
-import { info, error } from "../shared/utils/logger.js";
+import { info, error } from "#logger.js";
 import { putText /*, uploadToR2 */ } from "../shared/utils/r2-client.js";
 import { resolveModelRewriter } from "./utils/models.js";
 import { shortenUrl } from "./utils/shortio.js";
