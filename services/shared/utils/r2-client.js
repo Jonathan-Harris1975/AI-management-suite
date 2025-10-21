@@ -13,7 +13,7 @@ import {
   PutObjectCommand,
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
-import { info, error } from "#shared/logger.js";
+import { info, error } from "#logger.js";
 
 // ------------------------------------------------------------
 // R2 Connection Setup
