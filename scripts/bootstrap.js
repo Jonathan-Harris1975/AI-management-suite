@@ -23,9 +23,7 @@ async function run(cmd, label) {
   log.info("🧩 Starting AI Podcast Suite bootstrap sequence...");
   log.info("---------------------------------------------");
 
-  // Auto-apply R2 text safety migration
-  await import("./apply-r2-text-safety.js");
-
+  
   await run("node ./scripts/envBootstrap.js"),
   await run("node ./scripts/startupCheck.js", "Startup Check");
   await run("node ./scripts/tempStorage.js", "R2 Check");
