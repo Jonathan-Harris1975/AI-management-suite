@@ -4,7 +4,7 @@
 // ============================================================
 
 import { putJson, getObject, putText } from "../../shared/utils/r2-client.js";
-import { info, error } from "#shared/logger.js";
+import { info, error } from "#logger.js";
 
 export async function generatePodcastArtwork(data) {
   const bucket = process.env.R2_BUCKET_ART || process.env.R2_BUCKET_META;
