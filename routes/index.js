@@ -9,8 +9,10 @@ import rssRoutes from "../services/rss-feed-creator/routes/rewrite.js";
 import scriptRoutes from "../services/script/routes/index.js";
 import ttsRoutes from "../services/tts/routes/tts.js";
 import artworkRoutes from "../services/artwork/routes/createArtwork.js";
-import podcastRoutes from "../services/podcast/routes/podcast.js";
-import podcastPipelineRoutes from "../services/podcast/routes/pipeline.js";
+
+// ✅ FIXED IMPORTS — use existing top-level route files
+import podcastRoutes from "./podcast.js";
+import podcastPipelineRoutes from "./podcast-pipeline.js";
 
 const router = express.Router();
 
@@ -27,29 +29,29 @@ try {
   router.use("/rss", rssRoutes);
   info("📰 Mounted: /rss/rewrite");
 
-  // --- SCRIPT SERVICE ---
+  // --- SCRIPT GENERATION ---
   router.use("/script", scriptRoutes);
-  info("📜 Mounted: /script/(intro|main|outro|compose)");
+  info("✍️ Mounted: /script");
 
   // --- TTS SERVICE ---
   router.use("/tts", ttsRoutes);
-  info("🔊 Mounted: /tts");
+  info("🗣️ Mounted: /tts");
 
-  // --- ARTWORK SERVICE ---
+  // --- ARTWORK CREATION ---
   router.use("/artwork", artworkRoutes);
-  info("🎨 Mounted: /artwork/generate");
+  info("🎨 Mounted: /artwork");
 
-  // --- PODCAST SERVICE ---
-  router.get("/api/podcast/health", (_req, res) =>
-    res.status(200).json({ status: "ok", service: "podcast" })
-  );
+  // --- PODCAST GENERATION (FIXED) ---
   router.use("/podcast", podcastRoutes);
+  info("🎧 Mounted: /podcast");
+
+  // --- PODCAST PIPELINE (FIXED) ---
   router.use("/podcast/pipeline", podcastPipelineRoutes);
-  info("🎧 Mounted: /api/podcast/health");
-  info("🎙️ Mounted: /podcast");
-  info("🧵 Mounted: /podcast/pipeline");
+  info("🧩 Mounted: /podcast/pipeline");
+
+  info("✅ All routes mounted successfully.");
 } catch (err) {
-  error("💥 Route registration failed", { err: err.message });
+  error("💥 Failed during route registration", { error: err.stack });
 }
 
 export default router;
