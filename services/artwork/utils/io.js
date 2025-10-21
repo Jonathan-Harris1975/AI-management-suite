@@ -2,7 +2,7 @@
 // Centralized I/O helpers for artwork service (PNG uploads + metadata)
 
 import { putObject, putJson } from "#shared/r2-client.js";
-import { info, error } from "#shared/logger.js";
+import { info, error } from "#logger.js";
 
 const ART_BUCKET  = process.env.R2_BUCKET_ART;     // e.g. "podcastart"
 const META_BUCKET = process.env.R2_BUCKET_META;    // optional, e.g. "podcast-meta"
