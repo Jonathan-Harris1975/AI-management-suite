@@ -7,7 +7,7 @@
 // ============================================================
 
 import { listKeys, R2_BUCKETS } from "#shared/r2-client.js";
-import { info, error } from "#shared/logger.js";
+import { info, error } from "#logger.js";
 
 /**
  * Returns an array of public URLs for all text chunks
