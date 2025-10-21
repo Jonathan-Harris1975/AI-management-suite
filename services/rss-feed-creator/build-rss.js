@@ -16,7 +16,7 @@
 
 import { getObjectAsText, putText } from "../shared/utils/r2-client.js";
 import { shortenIfPossible } from "../shared/utils/shortener.js";
-import { info, error } from "../shared/utils/logger.js";
+import { info, error } from "#logger.js";
 
 const R2_BUCKET =
   process.env.R2_BUCKET_RSS_FEEDS ||
