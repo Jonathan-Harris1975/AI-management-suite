@@ -1,4 +1,4 @@
-import { info, error } from "../shared/utils/logger.js";
+import { info, error } from "#logger.js";
 import { rotateFeeds } from "./utils/rotateFeeds.js";
 import { fetchFeedsXml } from "./utils/fetchFeeds.js";
 import { rewriteRSSFeeds } from "./rewrite-pipeline.js";
