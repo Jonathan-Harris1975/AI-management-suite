@@ -72,23 +72,42 @@ export function buildRSSUserPrompt(item = {}) {
 }
 
 /**
- * Helper to enforce output constraints locally (optional)
+ * Helper to enforce output constraints locally (robust version)
  */
 export function normalizeRewrittenItem(result = "") {
-  const lines = result.trim().split(/\r?\n/);
-  const title = lines.shift()?.trim() || "Untitled";
-  const summary = lines.join(" ").trim();
+  // If the model returned structured data (object with title/summary)
+  if (typeof result === "object" && result !== null) {
+    const title = String(result.title || "").trim();
+    const summary = String(result.summary || "").trim();
 
-  const limitedTitle = title.split(/\s+/).slice(0, 12).join(" ");
-  const clampedSummary =
-    summary.length < 250
-      ? summary.padEnd(250, " ")
-      : summary.length > 600
-      ? summary.slice(0, 600)
-      : summary;
+    const limitedTitle = title.split(/\s+/).slice(0, 12).join(" ");
+    const clampedSummary =
+      summary.length < 250
+        ? summary.padEnd(250, " ")
+        : summary.length > 600
+        ? summary.slice(0, 600)
+        : summary;
 
-  return {
-    title: limitedTitle,
-    summary: clampedSummary,
-  };
+    return { title: limitedTitle, summary: clampedSummary };
+  }
+
+  // If the model returned plain text (string)
+  if (typeof result === "string") {
+    const lines = result.trim().split(/\r?\n/);
+    const title = lines.shift()?.trim() || "Untitled";
+    const summary = lines.join(" ").trim();
+
+    const limitedTitle = title.split(/\s+/).slice(0, 12).join(" ");
+    const clampedSummary =
+      summary.length < 250
+        ? summary.padEnd(250, " ")
+        : summary.length > 600
+        ? summary.slice(0, 600)
+        : summary;
+
+    return { title: limitedTitle, summary: clampedSummary };
+  }
+
+  // Otherwise (invalid or null)
+  return { title: "Untitled", summary: "(No summary available)" };
 }
