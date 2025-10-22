@@ -1,4 +1,9 @@
+// services/rss-feed-creator/routes/rewrite.js
+import express from "express";
 import runRewritePipeline from "../rewrite-pipeline.js";
+import { info, error } from "#logger.js";
+
+const router = express.Router();
 
 router.post("/rewrite", async (req, res) => {
   try {
@@ -10,3 +15,5 @@ router.post("/rewrite", async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+export default router;
