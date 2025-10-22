@@ -10,7 +10,7 @@
 /**
  * System prompt — defines global rewrite rules for all items
  */
-export const RSS_SYSTEM_PROMPT = `
+export const RSS_PROMPTS = `
 You are an expert AI news editor. Rewrite each RSS feed item into a concise,
 factual summary suitable for an AI-focused news digest.
 
