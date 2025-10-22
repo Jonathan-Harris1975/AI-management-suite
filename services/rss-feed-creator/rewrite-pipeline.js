@@ -1,127 +1,87 @@
-// services/rss-feed-creator/rewrite-pipeline.js
-import { parseStringPromise, Builder } from "xml2js";
+// ============================================================
+// 🧠 RSS Feed Creator — Rewrite Pipeline (Final Production Build)
+// ------------------------------------------------------------
+// - Pulls the next feed via ensureR2Sources()
+// - Downloads, parses, and rewrites each article
+// - Uses rss-prompts.js and shared URL shortener
+// - Uploads rewritten RSS XML to R2
+// ============================================================
+
+import Parser from "rss-parser";
 import { info, error } from "#logger.js";
-import { putText } from "#shared/r2-client.js";
-import { resolveModelRewriter } from "./utils/models.js";
-import { shortenUrl } from "./utils/shortio.js";
+import { uploadBuffer } from "#shared/r2-client.js";
+import { shortUrl } from "#shared/utils/urlShorten.js";
+import { RSS_SYSTEM_PROMPT, buildRSSUserPrompt, normalizeRewrittenItem } from "./utils/rss-prompts.js";
+import { ensureR2Sources, saveRotation } from "./utils/rss-bootstrap.js";
+import { callModel } from "../shared/utils/llmClient.js"; // your existing model wrapper
+import { buildXMLFeed } from "./utils/rss-utils.js"; // converts back to valid RSS XML
 
-const RSS_FEED_BUCKET = process.env.R2_BUCKET_RSS_FEEDS || "";
-const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL_RSS || "";
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const parser = new Parser();
 
-function isRecent(pubDate) {
-  const d = new Date(pubDate || Date.now());
-  if (isNaN(d.getTime())) return false;
-  return Date.now() - d.getTime() < ONE_DAY_MS;
-}
-
-/**
- * 🧠 Rewrite RSS feeds using the configured AI model, then upload to R2
- * @param {string} feedXml - Raw RSS/Atom XML string
- * @param {Object} [options]
- * @param {string} [options.fileName]
- * @param {number} [options.maxItemsPerFeed]
- * @returns {Promise<Object>}
- */
-export async function runRewritePipeline(feedXml, options = {}) {
-  const maxItemsPerFeed = Number(
-    options.maxItemsPerFeed ?? process.env.MAX_ITEMS_PER_FEED ?? 20
-  );
-  const fileName = options.fileName || `rewritten-${Date.now()}.xml`;
-
-  if (!RSS_FEED_BUCKET) {
-    throw new Error("Missing env R2_BUCKET_RSS_FEEDS — cannot upload rewritten feed.");
-  }
-
+// Main rewrite pipeline
+export default async function runRewritePipeline(feedXml, options = {}) {
   try {
-    if (typeof feedXml !== "string" || !feedXml.trim().startsWith("<")) {
-      throw new Error("Invalid RSS feed XML input");
-    }
+    const { feeds, rotation } = await ensureR2Sources();
+    const index = rotation?.lastIndex || 0;
+    const feedUrl = feeds[index];
+    const nextIndex = (index + 1) % feeds.length;
+    await saveRotation(nextIndex);
 
-    const parsed = await parseStringPromise(feedXml.trim());
-    const channel = parsed?.rss?.channel?.[0];
-    if (!channel) throw new Error("Invalid RSS: missing <channel>");
+    info(`🌐 Downloading RSS feed: ${feedUrl}`);
+    const feed = await parser.parseURL(feedUrl);
+    if (!feed?.items?.length) throw new Error("No items found in feed.");
 
-    const items = Array.isArray(channel.item) ? channel.item : [];
-    const recent = items.filter((it) =>
-      isRecent(it.pubDate?.[0] || it.updated?.[0] || it["atom:updated"]?.[0])
-    );
-    const limited = recent.slice(0, maxItemsPerFeed);
+    const maxItems = Number(process.env.RSS_MAX_ITEMS || 3);
+    const items = feed.items.slice(0, maxItems);
 
-    const rewriter = resolveModelRewriter();
-    if (typeof rewriter !== "function") {
-      throw new Error("AI model rewriter not configured — resolveModelRewriter() did not return a function.");
-    }
+    info(`🧩 Rewriting ${items.length} recent feed items via AI model...`);
 
     const rewrittenItems = [];
-    info(`🧩 Rewriting ${limited.length} recent feed items via AI model...`);
-
-    for (const item of limited) {
-      const title = item.title?.[0] || "";
-      const snippet = item.description?.[0] || item.summary?.[0] || "";
-      const link = item.link?.[0] || "";
-
+    for (const item of items) {
       try {
-        const generated = await rewriter({
-          title,
-          snippet,
-          minLength: 250,
-          maxLength: 750,
-          tone: "informative",
-        });
+        const system = RSS_SYSTEM_PROMPT;
+        const user = buildRSSUserPrompt(item);
+        const raw = await callModel({ system, user }); // <- uses your GPT model internally
 
-        const shortLink = await shortenUrl(link);
+        const { title, summary } = normalizeRewrittenItem(raw);
+        const shortLink = await shortUrl(item.link);
+
         rewrittenItems.push({
-          title: generated?.title ?? title,
-          description: generated?.body ?? snippet,
-          link: shortLink || link,
-          pubDate: item.pubDate?.[0] || new Date().toUTCString(),
+          title,
+          link: shortLink || item.link,
+          content: summary,
+          pubDate: item.pubDate || item.isoDate || new Date().toUTCString(),
+          author: item.creator || item.author || "Unknown",
         });
       } catch (err) {
-        error("⚠️ Failed to rewrite an item", { message: err.message });
+        error(`❌ Rewrite failed for one item: ${err.message}`);
       }
     }
 
-    const builder = new Builder({ cdata: true });
-    const rewrittenFeed = builder.buildObject({
-      rss: {
-        $: { version: "2.0" },
-        channel: {
-          ...channel,
-          item: rewrittenItems.map((i) => ({
-            title: i.title,
-            description: i.description,
-            link: i.link,
-            pubDate: i.pubDate,
-          })),
-        },
-      },
+    // Build the new RSS XML
+    const rewrittenFeedXml = buildXMLFeed({
+      title: feed.title || "AI News Digest",
+      description: "Rewritten AI industry news summaries.",
+      link: feed.link || feedUrl,
+      items: rewrittenItems,
     });
 
+    // Upload to R2
+    const bucket = process.env.R2_BUCKET_RSS_FEEDS || "rss-feeds";
+    const timestamp = Date.now();
+    const safeName = feedUrl.replace(/https?:\/\//, "").replace(/[^a-zA-Z0-9]/g, "_");
+    const key = `rewritten-${safeName}-${timestamp}.xml`;
+
     info("☁️ Uploading rewritten feed to R2...");
-    const r2Result = await putText(RSS_FEED_BUCKET, fileName, rewrittenFeed);
+    await uploadBuffer(bucket, key, Buffer.from(rewrittenFeedXml, "utf8"));
+    info(`📤 Uploaded rewritten feed: ${key}`);
 
-    const publicUrl = R2_PUBLIC_BASE_URL
-      ? `${R2_PUBLIC_BASE_URL}/${fileName}`
-      : fileName;
+    const publicUrl = `${process.env.R2_PUBLIC_BASE_URL_RSS || process.env.R2_PUBLIC_BASE_URL_PODCAST}/${key}`;
+    info(`🌍 Public feed available at: ${publicUrl}`);
 
-    info("📤 Uploaded rewritten feed", { publicUrl });
-
-    return {
-      success: true,
-      fileName,
-      publicUrl,
-      r2Result,
-      counts: {
-        total: items.length,
-        recent: recent.length,
-        rewritten: rewrittenItems.length,
-      },
-    };
-  } catch (e) {
-    error("💥 RSS rewrite pipeline failed", { message: e.message, stack: e.stack });
-    throw new Error(`Pipeline failure: ${e.message}`);
+    return { success: true, key, publicUrl, itemCount: rewrittenItems.length };
+  } catch (err) {
+    error("💥 Rewrite pipeline failed", { message: err.message, stack: err.stack });
+    return { success: false, error: err.message };
   }
 }
-
-export default runRewritePipeline;
