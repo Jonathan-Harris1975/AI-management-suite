@@ -105,3 +105,5 @@ export async function saveRotation(nextIndex) {
   if (!bucket) throw new Error("Missing R2 bucket for RSS data (set R2_BUCKET_RSS_FEEDS).");
   await putJson(bucket, DATA_PREFIX + ROTATION_KEY, { lastIndex: nextIndex });
   info(`🔁 Saved feed rotation index -> ${nextIndex}`);
+  )
+  
