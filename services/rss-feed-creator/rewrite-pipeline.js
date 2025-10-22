@@ -4,7 +4,7 @@ import { info, error } from "#logger.js";
 import { putText } from "#shared/r2-client.js";
 import { resolveModelRewriter } from "./utils/models.js";
 import { shortenUrl } from "./utils/shortio.js";
-import { RSS_PROMPTS } from "./utils/rss-prompts.js";
+import { buildRSSUserPrompt } from "./utils/rss-prompts.js";
 
 const RSS_FEED_BUCKET = process.env.R2_BUCKET_RSS_FEEDS || "";
 const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL_RSS || "";
@@ -44,7 +44,7 @@ function messagesForItem(siteTitle, item) {
     { role: "system", content: RSS_PROMPTS.SYSTEM },
     {
       role: "user",
-      content: RSS_PROMPTS.USER_ITEM({
+      content: buildRSSUserPrompt.USER_ITEM({
         site: siteTitle || "AI News",
         title: title || "",
         url: link || "",
