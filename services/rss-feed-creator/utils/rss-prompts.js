@@ -1,115 +1,105 @@
 // ============================================================
-// 🧠 RSS Feed Creator — Rewrite Prompts (Gen X Tone Version)
+// 🧠 RSS Feed Creator — Rewrite Prompts (Gen-X tone, robust)
 // ------------------------------------------------------------
 // - Title ≤ 12 words
 // - Summary 250–600 characters
-// - Tone: Gen X — smart, skeptical, understated, and concise
-// - No clickbait, emojis, or hype
-// - Output plain text: first line = title, following = summary
+// - Neutral, concise, "Gen-X" pragmatic tone (no hype)
+// - Output plain text:
+//     Line 1  => title
+//     Line 2+ => summary
+// - No JSON/HTML/Markdown
 // ============================================================
 
-export const RSS_PROMPTS = `
-You are an experienced Gen X technology editor who has followed the evolution
-of artificial intelligence for decades. Rewrite each RSS feed item into a concise,
-factual summary suitable for an AI-focused news digest.
-
-Tone & Style:
-- Mature, clear, and slightly wry; avoid corporate cheerleading or over-excitement.
-- Assume the reader already knows the basics; focus on what's new or why it matters.
-- Avoid buzzwords unless essential. When using them, explain them plainly.
-- No exclamation marks, emojis, or clickbait phrasing.
-- Keep the rhythm tight — one readable paragraph with real information, not fluff.
-- If the source sounds overhyped, bring it back to earth with measured clarity.
+/**
+ * System prompt — global rewrite rules
+ * (exported both named and default to satisfy existing imports)
+ */
+export const SYSTEM = `
+You are an expert AI news editor with a pragmatic, Gen-X voice.
+Rewrite each RSS feed item into a concise, factual brief for an AI news digest.
 
 Rules:
-1. Title: 12 words maximum, factual, no hype or emojis.
-2. Body: 250–600 characters, objective, insightful, and human.
-3. Focus on what happened, why it matters, and real-world context.
-4. Do not invent facts or speculate; stay true to the original meaning.
-5. Return plain text — no JSON, no HTML, no markdown.
-6. Format:
-   Line 1: Rewritten title (≤12 words)
-   Line 2+: Rewritten summary (250–600 characters)
-`;
+1) Title: ≤ 12 words. Factual, no hype, no emojis, no exclamation marks.
+2) Summary: 250–600 characters. Clear, objective, and useful.
+3) Focus on what happened, why it matters, and essential context only.
+4) No speculation. Do not invent facts.
+5) Style: plain text only — no JSON, HTML, or markdown.
+
+Output format (plain text):
+Line 1: Rewritten title (≤12 words)
+Line 2+: Rewritten summary (250–600 chars)
+`.trim();
 
 /**
- * Build a per-item user prompt based on raw feed data
+ * Build the per-item user prompt from raw feed data.
+ * (Function signature kept simple/explicit for the pipeline.)
  */
-export function buildRSSUserPrompt(item = {}) {
-  const {
-    title,
-    link,
-    content,
-    description,
-    summary,
-    pubDate,
-    isoDate,
-    author,
-    siteTitle,
-  } = item;
-
+export function USER_ITEM({
+  site = "AI News",
+  title = "",
+  url = "",
+  text = "",
+  published = "",
+  maxTitleWords = 12,
+  minChars = 250,
+  maxChars = 600,
+} = {}) {
   const clean = (t = "") =>
-    String(t)
-      .replace(/<[^>]*>/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  const text =
-    clean(content) ||
-    clean(description) ||
-    clean(summary) ||
-    "(No description provided)";
+    String(t).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 
   const lines = [
+    `Site: ${clean(site)}`,
     `Original title: ${clean(title) || "(none)"}`,
-    author ? `Author: ${clean(author)}` : null,
-    siteTitle ? `Source: ${clean(siteTitle)}` : null,
-    pubDate || isoDate ? `Published: ${pubDate || isoDate}` : null,
-    link ? `Link: ${clean(link)}` : null,
+    published ? `Published: ${published}` : null,
+    url ? `Link: ${url}` : null,
     "",
-    `Original content:`,
-    text,
+    "Original content:",
+    clean(text) || "(No description provided)",
     "",
-    `Rewrite this into a concise AI news brief following the system rules above.`,
+    "Rewrite this item following the system rules. Remember:",
+    `- Title ≤ ${maxTitleWords} words`,
+    `- Summary ${minChars}–${maxChars} characters`,
+    "",
+    "Return plain text only:",
+    "Line 1 => title",
+    "Line 2+ => summary",
   ].filter(Boolean);
 
   return lines.join("\n");
 }
 
 /**
- * Helper to enforce output constraints locally (robust version)
+ * Normalize a raw model response (string) into { title, summary }
+ * If the model returns a single line, we treat it as title and leave summary empty.
  */
-export function normalizeRewrittenItem(result = "") {
-  if (typeof result === "object" && result !== null) {
-    const title = String(result.title || "").trim();
-    const summary = String(result.summary || "").trim();
+export function normalizeModelText(result = "") {
+  const text = String(result || "").trim();
+  if (!text) return { title: "", summary: "" };
 
-    const limitedTitle = title.split(/\s+/).slice(0, 12).join(" ");
-    const clampedSummary =
-      summary.length < 250
-        ? summary.padEnd(250, " ")
-        : summary.length > 600
-        ? summary.slice(0, 600)
-        : summary;
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return { title: "", summary: "" };
 
-    return { title: limitedTitle, summary: clampedSummary };
-  }
+  const title = lines.shift() || "";
+  const summary = lines.join(" ").trim();
+  return { title, summary };
+}
 
-  if (typeof result === "string") {
-    const lines = result.trim().split(/\r?\n/);
-    const title = lines.shift()?.trim() || "Untitled";
-    const summary = lines.join(" ").trim();
+/**
+ * Enforce output constraints locally (used when we need to clamp)
+ */
+export function clampTitleTo12Words(title = "") {
+  const words = title.trim().split(/\s+/);
+  return words.length <= 12 ? title.trim() : words.slice(0, 12).join(" ");
+}
 
-    const limitedTitle = title.split(/\s+/).slice(0, 12).join(" ");
-    const clampedSummary =
-      summary.length < 250
-        ? summary.padEnd(250, " ")
-        : summary.length > 600
-        ? summary.slice(0, 600)
-        : summary;
+export function clampSummaryToWindow(summary = "", min = 250, max = 600) {
+  const t = String(summary).trim().replace(/\s+/g, " ");
+  if (!t) return "";
+  if (t.length <= max) return t;
+  const cutoff = t.lastIndexOf(".", max);
+  return cutoff > Math.max(200, min) ? t.slice(0, cutoff + 1) : t.slice(0, max);
+}
 
-    return { title: limitedTitle, summary: clampedSummary };
-  }
-
-  return { title: "Untitled", summary: "(No summary available)" };
-       }
+// Back-compat: some modules imported RSS_PROMPTS as a namespace or default.
+const RSS_PROMPTS = { SYSTEM, USER_ITEM, normalizeModelText, clampTitleTo12Words, clampSummaryToWindow };
+export default RSS_PROMPTS;
