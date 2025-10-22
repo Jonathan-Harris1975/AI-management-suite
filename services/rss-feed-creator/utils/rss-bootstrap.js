@@ -14,7 +14,7 @@ const ROTATION_KEY = "feed-rotation.json";
 const DATA_PREFIX = "data/";
 
 /**
- * Local JSON helper for fallback getJson
+ * Local JSON helper (replaces missing getJson)
  */
 const getJson = async (bucket, key) => {
   try {
@@ -26,7 +26,7 @@ const getJson = async (bucket, key) => {
 };
 
 /**
- * ✅ Fully robust local file reader for Render, Koyeb, local dev
+ * ✅ Robust local reader — works in Render and dev
  */
 async function readLocal(relative) {
   const candidates = [
@@ -35,25 +35,31 @@ async function readLocal(relative) {
     path.join(__dirname, "..", "..", "..", "data", relative),
   ];
 
-  for (const filePath of candidates) {
+  for (const candidate of candidates) {
     try {
-      const content = await fs.readFile(filePath, "utf8");
-      info(`📄 Found local data file: ${filePath}`);
-      return content;
-    } catch {}
+      const txt = await fs.readFile(candidate, "utf8");
+      info(`📄 Found local data file: ${candidate}`);
+      return txt;
+    } catch {
+      /* continue */
+    }
   }
 
-  error(`⚠️ No local data file found for: ${relative}`);
+  error(`⚠️ Local data file not found: ${relative}`);
   return null;
 }
 
 /**
- * Ensure feeds, urls, and rotation exist in R2
+ * Ensure R2 data sources exist:
+ * - rss-feeds.txt (list of feed keys)
+ * - url-feeds.txt (list of URLs)
+ * - feed-rotation.json { lastIndex }
  */
 export async function ensureR2Sources() {
   const bucket = process.env.R2_BUCKET_RSS_FEEDS || process.env.R2_BUCKET_PODCAST || "";
   if (!bucket) throw new Error("Missing R2 bucket for RSS data (set R2_BUCKET_RSS_FEEDS).");
 
+  // --- FEEDS LIST ---
   let feedsTxt = await getObjectAsText(bucket, DATA_PREFIX + FEEDS_KEY);
   if (!feedsTxt) {
     feedsTxt = await readLocal(FEEDS_KEY);
@@ -65,6 +71,7 @@ export async function ensureR2Sources() {
     }
   }
 
+  // --- URL LIST ---
   let urlsTxt = await getObjectAsText(bucket, DATA_PREFIX + URLS_KEY);
   if (!urlsTxt) {
     urlsTxt = await readLocal(URLS_KEY);
@@ -87,23 +94,23 @@ export async function ensureR2Sources() {
     .map(s => s.trim())
     .filter(Boolean);
 
+  // --- ROTATION ---
   let rotation = await getJson(bucket, DATA_PREFIX + ROTATION_KEY);
   if (!rotation || typeof rotation.lastIndex !== "number") {
     rotation = { lastIndex: 0 };
     await putJson(bucket, DATA_PREFIX + ROTATION_KEY, rotation);
-    info("🔄 Initialized feed rotation at index 0");
+    info("🔄 Initialized feed rotation to index 0");
   }
 
   return { bucket, feeds, urls, rotation };
 }
 
 /**
- * Save updated rotation index
+ * Persist next rotation index
  */
 export async function saveRotation(nextIndex) {
   const bucket = process.env.R2_BUCKET_RSS_FEEDS || process.env.R2_BUCKET_PODCAST || "";
   if (!bucket) throw new Error("Missing R2 bucket for RSS data (set R2_BUCKET_RSS_FEEDS).");
   await putJson(bucket, DATA_PREFIX + ROTATION_KEY, { lastIndex: nextIndex });
   info(`🔁 Saved feed rotation index -> ${nextIndex}`);
-  
-  
+}
