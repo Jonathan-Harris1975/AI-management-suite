@@ -6,29 +6,33 @@ import { info, error } from "#logger.js";
 const router = express.Router();
 
 /**
- * POST /rss/rewrite
- * Expected body:
+ * POST /rss/rewrite  (mounted from root-level router as /rss/rewrite)
+ * Body:
  * {
- *   "feedXml": "<rss>...</rss>",
- *   "fileName": "optional.xml",
- *   "maxItemsPerFeed": 20
+ *   "feedXml": "<rss>...</rss>",   // REQUIRED: raw RSS/Atom XML as string
+ *   "fileName": "optional.xml",    // OPTIONAL: override output filename
+ *   "maxItemsPerFeed": 20          // OPTIONAL: cap recent items
  * }
  */
 router.post("/rewrite", async (req, res) => {
   try {
     const { feedXml, fileName, maxItemsPerFeed } = req.body || {};
 
-    if (!feedXml || typeof feedXml !== "string" || !feedXml.startsWith("<")) {
+    if (typeof feedXml !== "string" || !feedXml.trim().startsWith("<")) {
       throw new Error("Missing or invalid 'feedXml' string in request body.");
     }
 
     info("📰 RSS rewrite requested");
     const result = await runRewritePipeline(feedXml, { fileName, maxItemsPerFeed });
-
     res.status(200).json({ success: true, result });
   } catch (err) {
-    error("💥 RSS rewrite failed", { error: err.stack || err.message });
-    res.status(500).json({ success: false, error: err.message });
+    error("💥 RSS rewrite failed", { message: err.message, stack: err.stack });
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      // Helpful when testing locally; Prod keeps it terse
+      stack: process.env.NODE_ENV !== "Production" ? err.stack : undefined,
+    });
   }
 });
 
