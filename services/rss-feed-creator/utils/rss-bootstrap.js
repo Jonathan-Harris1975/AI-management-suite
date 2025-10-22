@@ -14,30 +14,32 @@ const URLS_KEY = `${DATA_PREFIX}url-feeds.txt`;
 const ROTATION_KEY = `${DATA_PREFIX}feed-rotation.json`;
 
 /**
- * 🔍 Look for local files in all possible deployment paths
+ * Try multiple search paths for local data.
  */
 async function readLocalFile(filename) {
-  const candidates = [
+  const searchPaths = [
     path.resolve("/app/services/rss-feed-creator/data", filename),
     path.resolve("/app/src/services/rss-feed-creator/data", filename),
-    path.resolve(process.cwd(), "services", "rss-feed-creator", "data", filename),
     path.resolve(__dirname, "../data", filename),
+    path.resolve(process.cwd(), "services/rss-feed-creator/data", filename),
   ];
 
-  for (const candidate of candidates) {
+  for (const p of searchPaths) {
     try {
-      const data = await fs.readFile(candidate, "utf8");
-      info(`📄 Found local file: ${candidate}`);
+      const data = await fs.readFile(p, "utf8");
+      info(`📄 Found local file: ${p}`);
       return data;
     } catch {
-      /* continue */
+      info(`⚙️ Checked but not found: ${p}`);
     }
   }
+
+  error(`❌ Could not locate ${filename} in any known paths.`);
   return null;
 }
 
 /**
- * 🧩 Ensure all RSS data sources exist in R2 (without overwriting real data)
+ * Ensure local and remote data sources exist.
  */
 export async function ensureR2Sources() {
   const bucket =
@@ -47,43 +49,37 @@ export async function ensureR2Sources() {
 
   info(`🪣 Using R2 bucket: ${bucket}`);
 
-  // --- FEEDS LIST ---
+  // --- feeds.txt ---
   let feedsTxt = await getObjectAsText(bucket, FEEDS_KEY).catch(() => null);
   if (!feedsTxt) {
     const localFeeds = await readLocalFile("feeds.txt");
     if (localFeeds) {
       await putText(bucket, FEEDS_KEY, localFeeds);
       feedsTxt = localFeeds;
-      info("📥 Uploaded your actual feeds.txt → R2 ✅");
+      info("📥 Uploaded your real feeds.txt → R2 ✅");
     } else {
-      error("❌ No local feeds.txt found — using last known or fallback feed list.");
-      feedsTxt = `https://feeds.bbci.co.uk/news/technology/rss.xml\nhttps://www.wired.com/feed/category/ai/latest/rss`;
-      await putText(bucket, FEEDS_KEY, feedsTxt);
-      info("📥 Uploaded fallback feeds.txt → R2 ⚠️");
+      throw new Error("❌ feeds.txt missing locally and remotely.");
     }
   } else {
-    info("☁️ Found rss-feeds.txt already in R2 — not overwriting.");
+    info("☁️ Found rss-feeds.txt in R2 (not overwriting).");
   }
 
-  // --- URL LIST ---
+  // --- urls.txt ---
   let urlsTxt = await getObjectAsText(bucket, URLS_KEY).catch(() => null);
   if (!urlsTxt) {
     const localUrls = await readLocalFile("urls.txt");
     if (localUrls) {
       await putText(bucket, URLS_KEY, localUrls);
       urlsTxt = localUrls;
-      info("📥 Uploaded your actual urls.txt → R2 ✅");
+      info("📥 Uploaded your real urls.txt → R2 ✅");
     } else {
-      error("❌ No local urls.txt found — using fallback URL.");
-      urlsTxt = `https://www.bbc.co.uk/news/technology`;
-      await putText(bucket, URLS_KEY, urlsTxt);
-      info("📥 Uploaded fallback urls.txt → R2 ⚠️");
+      throw new Error("❌ urls.txt missing locally and remotely.");
     }
   } else {
-    info("☁️ Found url-feeds.txt already in R2 — not overwriting.");
+    info("☁️ Found url-feeds.txt in R2 (not overwriting).");
   }
 
-  // --- ROTATION STATE ---
+  // --- rotation.json ---
   let rotation;
   try {
     const txt = await getObjectAsText(bucket, ROTATION_KEY);
@@ -102,7 +98,7 @@ export async function ensureR2Sources() {
 }
 
 /**
- * 🔁 Save updated feed rotation index to R2
+ * Save rotation index to R2.
  */
 export async function saveRotation(nextIndex) {
   const bucket =
