@@ -9,7 +9,6 @@ export async function rewriteTextLLM({
   maxLength = 750,
   tone = 'informative',
 }) {
-  // You can thread min/max/tone into the prompt if desired:
   const prompt = RSS_PROMPTS.newsletterQuality({ title, snippet, minLength, maxLength, tone });
   const messages = [{ role: 'user', content: prompt }];
 
@@ -17,7 +16,7 @@ export async function rewriteTextLLM({
   const text = (out || '').trim();
 
   // Heuristic: derive a reasonable short title; keep full content as body
-  const firstLine = text.split(/\n|\.|!|\?/).find(Boolean) || title || 'Rewritten Article';
+  const firstLine = text.split(/\n|\.|\!|\?/).find(Boolean) || title || 'Rewritten Article';
   const safeTitle = firstLine.trim().slice(0, 120);
 
   return { title: safeTitle, body: text };
