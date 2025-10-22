@@ -31,7 +31,6 @@ router.post("/rewrite", async (req, res) => {
     res.status(500).json({
       success: false,
       error: err.message,
-      // Show stack only when not Production to keep prod logs tidy
       stack: process.env.NODE_ENV !== "Production" ? err.stack : undefined,
     });
   }
