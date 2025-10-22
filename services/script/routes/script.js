@@ -1,6 +1,6 @@
 // services/script/routes/script.js
 import { Router } from "express";
-import { info, error } from "#shared/logger.js";
+import { info, error } from "#logger.js";
 import { runScriptPipeline } from "../index.js";
 
 const router = Router();
