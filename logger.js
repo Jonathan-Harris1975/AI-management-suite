@@ -52,10 +52,13 @@ if (!loggerInstance) {
 // ✅ Consistent singleton export
 const log = loggerInstance;
 
-export { log };
-export const info = (...args) => log.info(...args);
-export const warn = (...args) => log.warn(...args);
-export const error = (...args) => log.error(...args);
-export const debug = (...args) => log.debug(...args);
+// --- FIXED WRAPPERS ---
+// Always put the context object first, then the message string.
+// This ensures Pino serialises metadata (message, stack, etc.)
+export const info = (msg, obj = {}) => log.info(obj, msg);
+export const warn = (msg, obj = {}) => log.warn(obj, msg);
+export const error = (msg, obj = {}) => log.error(obj, msg);
+export const debug = (msg, obj = {}) => log.debug(obj, msg);
 
+export { log };
 export default log;
