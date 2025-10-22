@@ -1,4 +1,3 @@
-
 // services/rss-feed-creator/rewrite-pipeline.js
 import { parseStringPromise, Builder } from "xml2js";
 import { info, error } from "#logger.js";
@@ -30,7 +29,7 @@ export async function runRewritePipeline(feedXml, options = {}) {
   );
   const fileName = options.fileName || `rewritten-${Date.now()}.xml`;
 
-  // 🔒 Fail fast with a helpful message instead of vague “rewrite failed”
+  // Fail fast with an explicit message (instead of vague “rewrite failed”)
   if (!RSS_FEED_BUCKET) {
     throw new Error("Missing env R2_BUCKET_RSS_FEEDS — cannot upload rewritten feed.");
   }
@@ -50,7 +49,7 @@ export async function runRewritePipeline(feedXml, options = {}) {
     );
     const limited = recent.slice(0, maxItemsPerFeed);
 
-    const rewriter = resolveModelRewriter(); // returns a function
+    const rewriter = resolveModelRewriter(); // function
     const rewrittenItems = [];
 
     info(`🧩 Rewriting ${limited.length} recent feed items via AI model...`);
@@ -81,7 +80,7 @@ export async function runRewritePipeline(feedXml, options = {}) {
       }
     }
 
-    // --- Build rewritten feed ---
+    // Build rewritten feed XML
     const builder = new Builder({ cdata: true });
     const rewrittenFeed = builder.buildObject({
       rss: {
@@ -98,7 +97,7 @@ export async function runRewritePipeline(feedXml, options = {}) {
       },
     });
 
-    // --- Upload to R2 ---
+    // Upload to R2
     info("☁️ Uploading rewritten feed to R2...");
     const r2Result = await putText(RSS_FEED_BUCKET, fileName, rewrittenFeed);
 
@@ -121,7 +120,7 @@ export async function runRewritePipeline(feedXml, options = {}) {
     };
   } catch (e) {
     error("💥 RSS rewrite pipeline failed", { message: e.message, stack: e.stack });
-    // Rewrap so the route error message is explicit in the log and JSON
+    // Wrap so the route logs/JSON show the explicit cause
     throw new Error(`Pipeline failure: ${e.message}`);
   }
 }
