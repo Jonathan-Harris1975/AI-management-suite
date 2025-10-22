@@ -8,53 +8,28 @@ import { getObjectAsText, putText, putJson } from "#shared/r2-client.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const FEEDS_KEY = "rss-feeds.txt";
-const URLS_KEY = "url-feeds.txt";
-const ROTATION_KEY = "feed-rotation.json";
 const DATA_PREFIX = "data/";
+const FEEDS_KEY = `${DATA_PREFIX}rss-feeds.txt`;
+const URLS_KEY = `${DATA_PREFIX}url-feeds.txt`;
+const ROTATION_KEY = `${DATA_PREFIX}feed-rotation.json`;
 
-/**
- * Graceful JSON parser
- */
-const getJson = async (bucket, key) => {
-  try {
-    const txt = await getObjectAsText(bucket, key);
-    return txt ? JSON.parse(txt) : null;
-  } catch (err) {
-    error(`⚠️ Failed to parse JSON from ${key}: ${err.message}`);
-    return null;
-  }
-};
-
-/**
- * ✅ Universal file locator for Render, Shiper, and local
- */
-async function readLocal(relative) {
+async function readLocalFile(filename) {
   const candidates = [
-    path.join("/app/src/services/rss-feed-creator/data", relative),
-    path.join("/opt/render/project/src/services/rss-feed-creator/data", relative),
-    path.join("/app/services/rss-feed-creator/data", relative),
-    path.join(process.cwd(), "services", "rss-feed-creator", "data", relative),
-    path.join(__dirname, "..", "data", relative),
+    path.join(process.cwd(), "services", "rss-feed-creator", "data", filename),
+    path.join("/app/src/services/rss-feed-creator/data", filename),
+    path.join("/app/services/rss-feed-creator/data", filename),
+    path.join(__dirname, "../data", filename),
   ];
-
-  for (const candidate of candidates) {
+  for (const file of candidates) {
     try {
-      const txt = await fs.readFile(candidate, "utf8");
-      info(`📄 Found local data file: ${candidate}`);
-      return txt;
-    } catch {
-      // continue to next candidate
-    }
+      const data = await fs.readFile(file, "utf8");
+      info(`📄 Found local file: ${file}`);
+      return data;
+    } catch { /* skip */ }
   }
-
-  error(`❌ Local data file not found for ${relative}`);
   return null;
 }
 
-/**
- * Ensures the feeds, urls, and rotation data exist in R2
- */
 export async function ensureR2Sources() {
   const bucket =
     process.env.R2_BUCKET_RSS_FEEDS ||
@@ -63,60 +38,40 @@ export async function ensureR2Sources() {
 
   info(`🪣 Using R2 bucket: ${bucket}`);
 
-  // --- Feeds list ---
-  let feedsTxt = await getObjectAsText(bucket, DATA_PREFIX + FEEDS_KEY);
+  // --- feeds.txt ---
+  let feedsTxt = await getObjectAsText(bucket, FEEDS_KEY).catch(() => null);
   if (!feedsTxt) {
-    feedsTxt = await readLocal(FEEDS_KEY);
-    if (feedsTxt) {
-      await putText(bucket, DATA_PREFIX + FEEDS_KEY, feedsTxt);
-      info("📥 Uploaded local rss-feeds.txt to R2 ✅");
-    } else {
-      throw new Error("❌ rss-feeds.txt missing both locally and remotely.");
-    }
+    const localFeeds = await readLocalFile("feeds.txt");
+    if (!localFeeds) throw new Error("❌ feeds.txt missing locally and remotely.");
+    await putText(bucket, FEEDS_KEY, localFeeds);
+    feedsTxt = localFeeds;
+    info("📥 Uploaded feeds.txt → R2 ✅");
   }
 
-  // --- URL list ---
-  let urlsTxt = await getObjectAsText(bucket, DATA_PREFIX + URLS_KEY);
+  // --- urls.txt ---
+  let urlsTxt = await getObjectAsText(bucket, URLS_KEY).catch(() => null);
   if (!urlsTxt) {
-    urlsTxt = await readLocal(URLS_KEY);
-    if (urlsTxt) {
-      await putText(bucket, DATA_PREFIX + URLS_KEY, urlsTxt);
-      info("📥 Uploaded local url-feeds.txt to R2 ✅");
-    } else {
-      throw new Error("❌ url-feeds.txt missing both locally and remotely.");
-    }
+    const localUrls = await readLocalFile("urls.txt");
+    if (!localUrls) throw new Error("❌ urls.txt missing locally and remotely.");
+    await putText(bucket, URLS_KEY, localUrls);
+    urlsTxt = localUrls;
+    info("📥 Uploaded urls.txt → R2 ✅");
   }
 
-  // --- Parse text content ---
-  const feeds = (feedsTxt || "")
-    .split(/\r?\n/)
-    .map(s => s.trim())
-    .filter(Boolean);
-  const urls = (urlsTxt || "")
-    .split(/\r?\n/)
-    .map(s => s.trim())
-    .filter(Boolean);
-
-  // --- Rotation file ---
-  let rotation = await getJson(bucket, DATA_PREFIX + ROTATION_KEY);
-  if (!rotation || typeof rotation.lastIndex !== "number") {
+  // --- rotation ---
+  let rotation;
+  try {
+    const txt = await getObjectAsText(bucket, ROTATION_KEY);
+    rotation = JSON.parse(txt);
+  } catch {
     rotation = { lastIndex: 0 };
-    await putJson(bucket, DATA_PREFIX + ROTATION_KEY, rotation);
-    info("🔄 Initialized feed rotation index to 0");
+    await putJson(bucket, ROTATION_KEY, rotation);
+    info("🔄 Initialized feed rotation to 0");
   }
 
-  info(`✅ Loaded ${feeds.length} feeds and ${urls.length} URLs`);
-  return { bucket, feeds, urls, rotation };
-}
+  const feeds = feedsTxt.split(/\r?\n/).filter(Boolean);
+  const urls = urlsTxt.split(/\r?\n/).filter(Boolean);
 
-/**
- * Saves rotation progress
- */
-export async function saveRotation(nextIndex) {
-  const bucket =
-    process.env.R2_BUCKET_RSS_FEEDS ||
-    process.env.R2_BUCKET_PODCAST ||
-    "rss-feeds";
-  await putJson(bucket, DATA_PREFIX + ROTATION_KEY, { lastIndex: nextIndex });
-  info(`🔁 Saved feed rotation index -> ${nextIndex}`);
+  info(`✅ Feeds loaded: ${feeds.length}, URLs: ${urls.length}`);
+  return { bucket, feeds, urls, rotation };
 }
