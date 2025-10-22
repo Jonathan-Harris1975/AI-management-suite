@@ -1,4 +1,4 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../shared/utils/r2-client.js";
+import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from \"#shared/r2-client.js\";
 // test-tts.js
 import { processTextToSpeechPipeline } from './utils/ttsProcessor.js';
 
