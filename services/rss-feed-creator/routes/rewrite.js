@@ -24,13 +24,14 @@ router.post("/rewrite", async (req, res) => {
 
     info("📰 RSS rewrite requested");
     const result = await runRewritePipeline(feedXml, { fileName, maxItemsPerFeed });
+
     res.status(200).json({ success: true, result });
   } catch (err) {
     error("💥 RSS rewrite failed", { message: err.message, stack: err.stack });
     res.status(500).json({
       success: false,
       error: err.message,
-      // Helpful when testing locally; Prod keeps it terse
+      // Show stack only when not Production to keep prod logs tidy
       stack: process.env.NODE_ENV !== "Production" ? err.stack : undefined,
     });
   }
