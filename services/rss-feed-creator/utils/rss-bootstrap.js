@@ -13,16 +13,15 @@ const FEEDS_KEY = `${DATA_PREFIX}rss-feeds.txt`;
 const URLS_KEY = `${DATA_PREFIX}url-feeds.txt`;
 const ROTATION_KEY = `${DATA_PREFIX}feed-rotation.json`;
 
-/**
- * Safely locate and read a local file across both dev and container environments.
- */
+// 💾 Auto-create minimal fallback feeds if missing
+const FALLBACK_FEEDS = `https://feeds.bbci.co.uk/news/technology/rss.xml
+https://www.wired.com/feed/category/ai/latest/rss`;
+const FALLBACK_URLS = `https://www.bbc.co.uk/news/technology`;
+
 async function readLocalFile(filename) {
   const candidates = [
-    // Primary Render deployment path
-    `/app/services/rss-feed-creator/data/${filename}`,
-    // Local dev environments (src layout)
-    `/app/src/services/rss-feed-creator/data/${filename}`,
-    // Fallback relative paths
+    "/app/services/rss-feed-creator/data/" + filename,
+    "/app/src/services/rss-feed-creator/data/" + filename,
     path.resolve(process.cwd(), "services", "rss-feed-creator", "data", filename),
     path.resolve(__dirname, "../data", filename),
   ];
@@ -33,17 +32,27 @@ async function readLocalFile(filename) {
       info(`📄 Found local data file: ${file}`);
       return data;
     } catch {
-      // continue trying other paths
+      /* continue */
     }
   }
 
-  error(`❌ Could not locate ${filename} in any known paths.`);
-  return null;
+  // 🛠️ Auto-create if missing in Render
+  const defaultPath = "/app/services/rss-feed-creator/data";
+  try {
+    await fs.mkdir(defaultPath, { recursive: true });
+    const fallback =
+      filename === "feeds.txt" ? FALLBACK_FEEDS : FALLBACK_URLS;
+    await fs.writeFile(path.join(defaultPath, filename), fallback, "utf8");
+    info(`🆕 Created fallback ${filename} at ${defaultPath}`);
+    return fallback;
+  } catch (err) {
+    error(`❌ Failed to create fallback file: ${filename}`, err);
+    return null;
+  }
 }
 
 /**
- * Ensures all essential RSS data sources exist on R2.
- * If missing remotely, uploads from local /data directory.
+ * Ensure RSS data exists locally and in R2.
  */
 export async function ensureR2Sources() {
   const bucket =
@@ -53,7 +62,7 @@ export async function ensureR2Sources() {
 
   info(`🪣 Using R2 bucket: ${bucket}`);
 
-  // --- FEEDS ---
+  // --- feeds.txt ---
   let feedsTxt = await getObjectAsText(bucket, FEEDS_KEY).catch(() => null);
   if (!feedsTxt) {
     const localFeeds = await readLocalFile("feeds.txt");
@@ -64,7 +73,7 @@ export async function ensureR2Sources() {
     info("📥 Uploaded feeds.txt → R2 ✅");
   }
 
-  // --- URLS ---
+  // --- urls.txt ---
   let urlsTxt = await getObjectAsText(bucket, URLS_KEY).catch(() => null);
   if (!urlsTxt) {
     const localUrls = await readLocalFile("urls.txt");
@@ -75,7 +84,7 @@ export async function ensureR2Sources() {
     info("📥 Uploaded urls.txt → R2 ✅");
   }
 
-  // --- ROTATION STATE ---
+  // --- rotation.json ---
   let rotation;
   try {
     const txt = await getObjectAsText(bucket, ROTATION_KEY);
@@ -94,7 +103,7 @@ export async function ensureR2Sources() {
 }
 
 /**
- * Save updated feed rotation index to R2.
+ * Save rotation index update.
  */
 export async function saveRotation(nextIndex) {
   const bucket =
@@ -108,4 +117,4 @@ export async function saveRotation(nextIndex) {
   } catch (err) {
     error(`❌ Failed to save rotation index: ${err.message}`);
   }
-}
+  }
