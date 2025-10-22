@@ -1,5 +1,5 @@
 import { parseStringPromise, Builder } from "xml2js";
-import { info, error, warn } from "#logger.js";
+import { info, error } from "#logger.js";
 import { putText } from "#shared/r2-client.js";
 import { resolveModelRewriter } from "./utils/models.js";
 import { shortenUrl } from "./utils/shortio.js";
@@ -14,53 +14,30 @@ import {
 const RSS_FEED_BUCKET = process.env.R2_BUCKET_RSS_FEEDS || "";
 const R2_PUBLIC_BASE_URL = (process.env.R2_PUBLIC_BASE_URL_RSS || "").replace(/\/+$/, "");
 const FEED_CUTOFF_HOURS = Number(process.env.FEED_CUTOFF_HOURS || 24);
+const MAX_ITEMS_PER_FEED = Number(process.env.MAX_ITEMS_PER_FEED || 5);
 const MIN_SUMMARY_CHARS = Number(process.env.MIN_SUMMARY_CHARS || 300);
 const MAX_SUMMARY_CHARS = Number(process.env.MAX_SUMMARY_CHARS || 1100);
 
-/**
- * Clean & sanitize incoming XML to avoid xml2js parse errors.
- */
-function sanitizeXml(xml = "") {
-  return String(xml)
-    // Remove control chars & invalid bytes
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
-    // Escape stray ampersands that aren’t part of entities
-    .replace(/&(?!#?[a-z0-9]+;)/gi, "&amp;")
-    // Trim BOM or whitespace
-    .trim();
+function stripHtml(s = "") {
+  return String(s).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-/**
- * Check recency of feed item.
- */
 function isRecent(pubDate, cutoffHours = FEED_CUTOFF_HOURS) {
   const d = new Date(pubDate || Date.now());
-  if (Number.isNaN(d.getTime())) return false;
-  return Date.now() - d.getTime() <= cutoffHours * 60 * 60 * 1000;
+  return !Number.isNaN(d.getTime()) && Date.now() - d.getTime() <= cutoffHours * 60 * 60 * 1000;
 }
 
-/**
- * Strip HTML + entities safely.
- */
-function stripHtml(s = "") {
-  return String(s)
-    .replace(/&[a-z]+;/gi, " ")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/**
- * Build LLM messages per item.
- */
 function messagesForItem(siteTitle, item) {
-  const txt = stripHtml(item.content || item.contentSnippet || "");
+  const txt =
+    stripHtml(item.content) ||
+    stripHtml(item.contentSnippet) ||
+    "";
   return [
     { role: "system", content: SYSTEM },
     {
       role: "user",
       content: USER_ITEM({
-        site: siteTitle || "AI News",
+        site: siteTitle,
         title: stripHtml(item.title || ""),
         url: item.link || "",
         text: txt,
@@ -73,49 +50,27 @@ function messagesForItem(siteTitle, item) {
   ];
 }
 
-/**
- * 🧠 Main RSS rewrite pipeline
- */
-export async function runRewritePipeline(feedXml, options = {}) {
-  const maxItemsPerFeed = Number(options.maxItemsPerFeed || process.env.MAX_ITEMS_PER_FEED || 20);
+export async function runRewritePipeline(feedXml) {
   const outputKey = "feed.xml";
+  const src = await parseStringPromise(String(feedXml || ""), {
+    explicitArray: false,
+    mergeAttrs: true,
+  });
 
-  // 1️⃣ Sanitize XML before parsing
-  const cleanXml = sanitizeXml(feedXml || "");
-  if (!cleanXml.startsWith("<")) throw new Error("Feed content is empty or invalid XML.");
-
-  let src;
-  try {
-    src = await parseStringPromise(cleanXml, { explicitArray: false, mergeAttrs: true });
-  } catch (e) {
-    throw new Error(`Failed to parse RSS XML (${e.message})`);
-  }
-
-  // Support multiple feed structures
-  const channel =
-    src?.rss?.channel ||
-    src?.channel ||
-    src?.feed ||
-    src?.["rdf:RDF"]?.channel ||
-    null;
-
+  const channel = src?.rss?.channel || src?.feed;
   if (!channel) throw new Error("Unrecognized RSS/Atom structure.");
 
-  const siteTitle =
-    stripHtml(channel.title || channel["title._"] || channel["title"]?.["_"] || "AI News");
+  const siteTitle = stripHtml(
+    channel.title || channel["title._"] || channel["title"]?.["_"] || "AI News"
+  );
 
-  // 2️⃣ Normalize entries
   let items = [];
   if (Array.isArray(channel.item)) items = channel.item;
   else if (channel.item) items = [channel.item];
   else if (Array.isArray(channel.entry)) items = channel.entry;
   else if (channel.entry) items = [channel.entry];
 
-  if (!items.length) {
-    warn(`⚠️ Feed '${siteTitle}' contains no items — skipping.`);
-    return { key: null, publicUrl: null, count: 0 };
-  }
-
+  // Normalize
   const normalized = items.map((it) => {
     let link = "";
     if (it.link?.href) link = it.link.href;
@@ -143,7 +98,7 @@ export async function runRewritePipeline(feedXml, options = {}) {
       "";
 
     return {
-      title: it.title?._ || it.title || "",
+      title: stripHtml(it.title?._ || it.title || ""),
       link,
       contentSnippet: summary,
       content: it.content?._ || it.content || "",
@@ -152,17 +107,17 @@ export async function runRewritePipeline(feedXml, options = {}) {
     };
   });
 
-  // 3️⃣ Filter recent
-  const fresh = normalized.filter((x) => isRecent(x.isoDate || x.pubDate));
-  if (!fresh.length) {
-    info(`⚠️ No items newer than ${FEED_CUTOFF_HOURS}h found — skipping rewrite.`);
-    return { key: null, publicUrl: null, count: 0 };
-  }
+  // Step 1: Recent first, fill if fewer than MAX_ITEMS_PER_FEED
+  const recent = normalized.filter((x) => isRecent(x.isoDate || x.pubDate));
+  const fallback = [...normalized].sort(
+    (a, b) => new Date(b.isoDate || b.pubDate) - new Date(a.isoDate || a.pubDate)
+  );
+  const picked = [...recent, ...fallback]
+    .filter((v, i, arr) => arr.findIndex((x) => x.link === v.link) === i)
+    .slice(0, MAX_ITEMS_PER_FEED);
 
-  const picked = fresh.slice(0, maxItemsPerFeed);
-  info(`🧩 Rewriting ${picked.length} recent feed items via AI model...`);
+  info(`🧩 Rewriting ${picked.length} feed items via AI model...`);
 
-  // 4️⃣ Rewrite loop
   const rewritten = [];
   for (const item of picked) {
     try {
@@ -181,19 +136,18 @@ export async function runRewritePipeline(feedXml, options = {}) {
         summary = norm.summary;
       }
 
-      // fallback to raw source
       if (!title) title = stripHtml(item.title || "");
       if (!summary) summary = stripHtml(item.contentSnippet || item.content || "");
 
-      title = clampTitleTo12Words(title.replace(/[“”‘’"]/g, "'"));
-      summary = clampSummaryToWindow(summary.replace(/[“”‘’"]/g, "'"), MIN_SUMMARY_CHARS, MAX_SUMMARY_CHARS);
+      title = clampTitleTo12Words(title);
+      summary = clampSummaryToWindow(summary, MIN_SUMMARY_CHARS, MAX_SUMMARY_CHARS);
 
       let linkOut = item.link || "";
       if (linkOut) {
         try {
           linkOut = await shortenUrl(linkOut);
         } catch {
-          /* ignore failures */
+          /* ignore */
         }
       }
 
@@ -209,24 +163,23 @@ export async function runRewritePipeline(feedXml, options = {}) {
   }
 
   if (!rewritten.length) {
-    info("⚠️ No valid rewritten items to publish — skipping upload.");
+    info("⚠️ No valid rewritten items; skipping upload.");
     return { key: null, publicUrl: null, count: 0 };
   }
 
-  // 5️⃣ Build UTF-8 RSS XML
-  const asciiDesc = `Summarized headlines from ${siteTitle}: titles <= 12 words; summaries ${MIN_SUMMARY_CHARS}-${MAX_SUMMARY_CHARS} chars.`;
+  // Step 2: Build RSS 2.0 (UTF-8, valid XML)
   const rssObj = {
     rss: {
       $: { version: "2.0" },
       channel: {
         title: `${siteTitle} — AI Condensed`,
         link: `${R2_PUBLIC_BASE_URL}/feed.xml`,
-        description: asciiDesc,
+        description: `Summarized headlines from ${siteTitle}: titles <= 12 words; summaries ${MIN_SUMMARY_CHARS}-${MAX_SUMMARY_CHARS} chars.`,
         lastBuildDate: new Date().toUTCString(),
         item: rewritten.map((r) => ({
-          title: r.title,
+          title: { _: r.title },
           link: r.link,
-          description: r.description,
+          description: { _: r.description },
           pubDate: r.pubDate,
         })),
       },
@@ -234,17 +187,19 @@ export async function runRewritePipeline(feedXml, options = {}) {
   };
 
   const builder = new Builder({
-    cdata: false,
-    xmldec: { version: "1.0", encoding: "UTF-8", standalone: true },
+    xmldec: { version: "1.0", encoding: "UTF-8" },
+    renderOpts: { pretty: true },
+    cdata: true,
   });
+
   const xmlOut = builder.buildObject(rssObj);
 
-  // 6️⃣ Upload to R2
+  // Step 3: Upload
   info("☁️ Uploading rewritten feed to R2...");
   await putText(RSS_FEED_BUCKET, outputKey, xmlOut, "application/rss+xml");
 
   const publicUrl = `${R2_PUBLIC_BASE_URL}/feed.xml`;
-  info("📤 Uploaded rewritten feed", { publicUrl, count: rewritten.length });
+  info("📤 Uploaded rewritten feed", { publicUrl });
 
   return { key: outputKey, publicUrl, count: rewritten.length };
 }
