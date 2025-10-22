@@ -14,7 +14,7 @@ const ROTATION_KEY = "feed-rotation.json";
 const DATA_PREFIX = "data/";
 
 /**
- * Simple JSON parser that fails gracefully
+ * Graceful JSON loader
  */
 const getJson = async (bucket, key) => {
   try {
@@ -27,27 +27,25 @@ const getJson = async (bucket, key) => {
 };
 
 /**
- * ✅ Robust local file reader that works on:
- * - Render ( /app/... )
- * - Shiper ( /opt/render/project/src/... )
- * - Local dev ( ./services/rss-feed-creator/data/... )
+ * ✅ Ultimate file locator (Render, Shiper, local)
  */
 async function readLocal(relative) {
   const candidates = [
-    `/app/services/rss-feed-creator/data/${relative}`, // Render
-    `/opt/render/project/src/services/rss-feed-creator/data/${relative}`, // Shiper
-    path.join(process.cwd(), "services", "rss-feed-creator", "data", relative), // Local dev
-    path.join(__dirname, "..", "data", relative), // relative to utils
-    path.join(process.cwd(), "data", relative), // fallback
+    // Shiper/Render live paths
+    `/opt/render/project/src/services/rss-feed-creator/data/${relative}`,
+    `/app/services/rss-feed-creator/data/${relative}`,
+    // Local dev or fallback
+    path.join(process.cwd(), "services", "rss-feed-creator", "data", relative),
+    path.join(__dirname, "..", "data", relative),
   ];
 
-  for (const candidate of candidates) {
+  for (const filePath of candidates) {
     try {
-      const txt = await fs.readFile(candidate, "utf8");
-      info(`📄 Found local data file: ${candidate}`);
+      const txt = await fs.readFile(filePath, "utf8");
+      info(`📄 Found local data file: ${filePath}`);
       return txt;
     } catch {
-      // Try next candidate
+      // try next
     }
   }
 
@@ -56,21 +54,19 @@ async function readLocal(relative) {
 }
 
 /**
- * Ensures the presence of:
- * - rss-feeds.txt   (list of feed URLs)
- * - url-feeds.txt   (list of destination URLs)
- * - feed-rotation.json
+ * Ensures R2 data sources exist
  */
 export async function ensureR2Sources() {
   const bucket =
     process.env.R2_BUCKET_RSS_FEEDS ||
     process.env.R2_BUCKET_PODCAST ||
     "rss-feeds";
+
   if (!bucket) throw new Error("❌ Missing R2 bucket for RSS data.");
 
   info(`🪣 Using R2 bucket: ${bucket}`);
 
-  // --- Feeds list ---
+  // --- FEEDS LIST ---
   let feedsTxt = await getObjectAsText(bucket, DATA_PREFIX + FEEDS_KEY);
   if (!feedsTxt) {
     feedsTxt = await readLocal(FEEDS_KEY);
@@ -82,7 +78,7 @@ export async function ensureR2Sources() {
     }
   }
 
-  // --- URL list ---
+  // --- URL LIST ---
   let urlsTxt = await getObjectAsText(bucket, DATA_PREFIX + URLS_KEY);
   if (!urlsTxt) {
     urlsTxt = await readLocal(URLS_KEY);
@@ -94,22 +90,23 @@ export async function ensureR2Sources() {
     }
   }
 
-  // --- Parse content ---
+  // --- Parse text ---
   const feeds = (feedsTxt || "")
     .split(/\r?\n/)
     .map(s => s.trim())
     .filter(Boolean);
+
   const urls = (urlsTxt || "")
     .split(/\r?\n/)
     .map(s => s.trim())
     .filter(Boolean);
 
-  // --- Rotation file ---
+  // --- ROTATION FILE ---
   let rotation = await getJson(bucket, DATA_PREFIX + ROTATION_KEY);
   if (!rotation || typeof rotation.lastIndex !== "number") {
     rotation = { lastIndex: 0 };
     await putJson(bucket, DATA_PREFIX + ROTATION_KEY, rotation);
-    info("🔄 Initialized feed rotation at index 0");
+    info("🔄 Initialized feed rotation index to 0");
   }
 
   info(`✅ Loaded ${feeds.length} feeds and ${urls.length} URLs from R2`);
@@ -117,7 +114,7 @@ export async function ensureR2Sources() {
 }
 
 /**
- * Saves the rotation index back to R2
+ * Saves rotation progress
  */
 export async function saveRotation(nextIndex) {
   const bucket =
