@@ -7,18 +7,14 @@ import { info, error } from "#logger.js";
 // ===============================
 import rssRoutes from "../services/rss-feed-creator/routes/rewrite.js";
 import scriptRoutes from "../services/script/routes/index.js";
+import orchestrateRoutes from "./script-orchestrate.js"; // ✅ NEW
 import ttsRoutes from "../services/tts/routes/tts.js";
 import artworkRoutes from "../services/artwork/routes/createArtwork.js";
-
-// ✅ FIXED IMPORTS — use existing top-level route files
 import podcastRoutes from "./podcast.js";
 import podcastPipelineRoutes from "./podcast-pipeline.js";
 
 const router = express.Router();
 
-// ===============================
-// ROUTE REGISTRATION
-// ===============================
 info("🚀 Starting route registration...");
 
 try {
@@ -29,9 +25,13 @@ try {
   router.use("/rss", rssRoutes);
   info("📰 Mounted: /rss/rewrite");
 
-  // --- SCRIPT GENERATION ---
+  // --- SCRIPT GENERATION (main logic) ---
   router.use("/script", scriptRoutes);
   info("✍️ Mounted: /script");
+
+  // --- SCRIPT ORCHESTRATOR (runs intro → main → outro → compose) ---
+  router.use("/", orchestrateRoutes); // ✅ Ensures /script/orchestrate is active
+  info("🎬 Mounted: /script/orchestrate");
 
   // --- TTS SERVICE ---
   router.use("/tts", ttsRoutes);
@@ -41,11 +41,11 @@ try {
   router.use("/artwork", artworkRoutes);
   info("🎨 Mounted: /artwork");
 
-  // --- PODCAST GENERATION (FIXED) ---
+  // --- PODCAST GENERATION ---
   router.use("/podcast", podcastRoutes);
   info("🎧 Mounted: /podcast");
 
-  // --- PODCAST PIPELINE (FIXED) ---
+  // --- PODCAST PIPELINE ---
   router.use("/podcast/pipeline", podcastPipelineRoutes);
   info("🧩 Mounted: /podcast/pipeline");
 
