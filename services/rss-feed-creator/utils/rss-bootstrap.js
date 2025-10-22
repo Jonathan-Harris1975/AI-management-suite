@@ -1,5 +1,6 @@
 // services/rss-feed-creator/utils/rss-bootstrap.js
-import fs from "fs/promises";
+import fs from "fs";
+import fsp from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { info, error } from "#logger.js";
@@ -13,73 +14,82 @@ const FEEDS_KEY = `${DATA_PREFIX}rss-feeds.txt`;
 const URLS_KEY = `${DATA_PREFIX}url-feeds.txt`;
 const ROTATION_KEY = `${DATA_PREFIX}feed-rotation.json`;
 
-/**
- * Try multiple search paths for local data.
- */
+function ensureLocalDataFilesExist() {
+  const dataDir = path.join(process.cwd(), "services/rss-feed-creator/data");
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+  const feedsPath = path.join(dataDir, "feeds.txt");
+  const urlsPath = path.join(dataDir, "urls.txt");
+
+  // if missing, write placeholders for debugging
+  if (!fs.existsSync(feedsPath)) {
+    fs.writeFileSync(
+      feedsPath,
+      `https://feeds.bbci.co.uk/news/technology/rss.xml\nhttps://www.wired.com/feed/category/ai/latest/rss`
+    );
+    info("🆕 Created placeholder feeds.txt locally for bootstrapping.");
+  }
+  if (!fs.existsSync(urlsPath)) {
+    fs.writeFileSync(urlsPath, "https://www.bbc.co.uk/news/technology");
+    info("🆕 Created placeholder urls.txt locally for bootstrapping.");
+  }
+
+  return { feedsPath, urlsPath };
+}
+
 async function readLocalFile(filename) {
-  const searchPaths = [
+  const locations = [
     path.resolve("/app/services/rss-feed-creator/data", filename),
-    path.resolve("/app/src/services/rss-feed-creator/data", filename),
-    path.resolve(__dirname, "../data", filename),
     path.resolve(process.cwd(), "services/rss-feed-creator/data", filename),
+    path.resolve(__dirname, "../data", filename),
   ];
 
-  for (const p of searchPaths) {
-    try {
-      const data = await fs.readFile(p, "utf8");
-      info(`📄 Found local file: ${p}`);
-      return data;
-    } catch {
-      info(`⚙️ Checked but not found: ${p}`);
+  for (const candidate of locations) {
+    if (fs.existsSync(candidate)) {
+      const txt = await fsp.readFile(candidate, "utf8");
+      info(`📄 Found local file: ${candidate}`);
+      return txt;
     }
   }
 
-  error(`❌ Could not locate ${filename} in any known paths.`);
+  error(`❌ ${filename} not found in any expected paths.`);
   return null;
 }
 
-/**
- * Ensure local and remote data sources exist.
- */
 export async function ensureR2Sources() {
   const bucket =
     process.env.R2_BUCKET_RSS_FEEDS ||
     process.env.R2_BUCKET_PODCAST ||
     "rss-feeds";
-
   info(`🪣 Using R2 bucket: ${bucket}`);
 
-  // --- feeds.txt ---
+  ensureLocalDataFilesExist();
+
+  // --- FEEDS ---
   let feedsTxt = await getObjectAsText(bucket, FEEDS_KEY).catch(() => null);
   if (!feedsTxt) {
     const localFeeds = await readLocalFile("feeds.txt");
-    if (localFeeds) {
-      await putText(bucket, FEEDS_KEY, localFeeds);
-      feedsTxt = localFeeds;
-      info("📥 Uploaded your real feeds.txt → R2 ✅");
-    } else {
-      throw new Error("❌ feeds.txt missing locally and remotely.");
-    }
+    if (!localFeeds) throw new Error("❌ feeds.txt missing locally and remotely.");
+    await putText(bucket, FEEDS_KEY, localFeeds);
+    feedsTxt = localFeeds;
+    info("📥 Uploaded feeds.txt → R2 ✅");
   } else {
-    info("☁️ Found rss-feeds.txt in R2 (not overwriting).");
+    info("☁️ Found rss-feeds.txt already in R2.");
   }
 
-  // --- urls.txt ---
+  // --- URLS ---
   let urlsTxt = await getObjectAsText(bucket, URLS_KEY).catch(() => null);
   if (!urlsTxt) {
     const localUrls = await readLocalFile("urls.txt");
-    if (localUrls) {
-      await putText(bucket, URLS_KEY, localUrls);
-      urlsTxt = localUrls;
-      info("📥 Uploaded your real urls.txt → R2 ✅");
-    } else {
-      throw new Error("❌ urls.txt missing locally and remotely.");
-    }
+    if (!localUrls) throw new Error("❌ urls.txt missing locally and remotely.");
+    await putText(bucket, URLS_KEY, localUrls);
+    urlsTxt = localUrls;
+    info("📥 Uploaded urls.txt → R2 ✅");
   } else {
-    info("☁️ Found url-feeds.txt in R2 (not overwriting).");
+    info("☁️ Found url-feeds.txt already in R2.");
   }
 
-  // --- rotation.json ---
+  // --- ROTATION ---
   let rotation;
   try {
     const txt = await getObjectAsText(bucket, ROTATION_KEY);
@@ -87,29 +97,21 @@ export async function ensureR2Sources() {
   } catch {
     rotation = { lastIndex: 0 };
     await putJson(bucket, ROTATION_KEY, rotation);
-    info("🔄 Initialized feed rotation index → 0");
+    info("🔄 Initialized rotation index → 0");
   }
 
-  const feeds = feedsTxt.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-  const urls = urlsTxt.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const feeds = feedsTxt.split(/\r?\n/).filter(Boolean);
+  const urls = urlsTxt.split(/\r?\n/).filter(Boolean);
 
   info(`✅ Feeds loaded: ${feeds.length}, URLs: ${urls.length}`);
   return { bucket, feeds, urls, rotation };
 }
 
-/**
- * Save rotation index to R2.
- */
 export async function saveRotation(nextIndex) {
   const bucket =
     process.env.R2_BUCKET_RSS_FEEDS ||
     process.env.R2_BUCKET_PODCAST ||
     "rss-feeds";
-
-  try {
-    await putJson(bucket, ROTATION_KEY, { lastIndex: nextIndex });
-    info(`🔁 Saved feed rotation index → ${nextIndex}`);
-  } catch (err) {
-    error(`❌ Failed to save rotation index: ${err.message}`);
-  }
+  await putJson(bucket, ROTATION_KEY, { lastIndex: nextIndex });
+  info(`🔁 Saved feed rotation index → ${nextIndex}`);
 }
