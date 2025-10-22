@@ -25,11 +25,16 @@ async function readLocalFile(filename) {
       const data = await fs.readFile(file, "utf8");
       info(`📄 Found local file: ${file}`);
       return data;
-    } catch { /* skip */ }
+    } catch {
+      /* continue */
+    }
   }
   return null;
 }
 
+/**
+ * Ensure R2 contains all feed resources.
+ */
 export async function ensureR2Sources() {
   const bucket =
     process.env.R2_BUCKET_RSS_FEEDS ||
@@ -58,7 +63,7 @@ export async function ensureR2Sources() {
     info("📥 Uploaded urls.txt → R2 ✅");
   }
 
-  // --- rotation ---
+  // --- rotation.json ---
   let rotation;
   try {
     const txt = await getObjectAsText(bucket, ROTATION_KEY);
@@ -74,4 +79,21 @@ export async function ensureR2Sources() {
 
   info(`✅ Feeds loaded: ${feeds.length}, URLs: ${urls.length}`);
   return { bucket, feeds, urls, rotation };
+}
+
+/**
+ * Save rotation index update.
+ */
+export async function saveRotation(nextIndex) {
+  const bucket =
+    process.env.R2_BUCKET_RSS_FEEDS ||
+    process.env.R2_BUCKET_PODCAST ||
+    "rss-feeds";
+
+  try {
+    await putJson(bucket, ROTATION_KEY, { lastIndex: nextIndex });
+    info(`🔁 Saved feed rotation index → ${nextIndex}`);
+  } catch (err) {
+    error(`❌ Failed to save rotation index: ${err.message}`);
+  }
 }
