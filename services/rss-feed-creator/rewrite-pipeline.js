@@ -1,3 +1,4 @@
+
 // services/rss-feed-creator/rewrite-pipeline.js
 import { parseStringPromise, Builder } from "xml2js";
 import { info, error } from "#logger.js";
@@ -9,9 +10,6 @@ const RSS_FEED_BUCKET = process.env.R2_BUCKET_RSS_FEEDS || "";
 const R2_PUBLIC_BASE_URL = process.env.R2_PUBLIC_BASE_URL_RSS || "";
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Utility: check if an item is recent (within 24h)
- */
 function isRecent(pubDate) {
   const d = new Date(pubDate || Date.now());
   if (isNaN(d.getTime())) return false;
@@ -20,17 +18,22 @@ function isRecent(pubDate) {
 
 /**
  * 🧠 Rewrite RSS feeds using the configured AI model, then upload to R2
- * @param {string} feedXml - Raw RSS XML string
+ * @param {string} feedXml - Raw RSS/Atom XML string
  * @param {Object} [options]
- * @param {string} [options.fileName] - Optional target file name in R2
- * @param {number} [options.maxItemsPerFeed] - Max items per feed
- * @returns {Promise<Object>} Summary with rewritten feed + upload result
+ * @param {string} [options.fileName]
+ * @param {number} [options.maxItemsPerFeed]
+ * @returns {Promise<Object>}
  */
 export async function runRewritePipeline(feedXml, options = {}) {
   const maxItemsPerFeed = Number(
     options.maxItemsPerFeed ?? process.env.MAX_ITEMS_PER_FEED ?? 20
   );
   const fileName = options.fileName || `rewritten-${Date.now()}.xml`;
+
+  // 🔒 Fail fast with a helpful message instead of vague “rewrite failed”
+  if (!RSS_FEED_BUCKET) {
+    throw new Error("Missing env R2_BUCKET_RSS_FEEDS — cannot upload rewritten feed.");
+  }
 
   try {
     if (typeof feedXml !== "string" || !feedXml.trim().startsWith("<")) {
@@ -47,7 +50,7 @@ export async function runRewritePipeline(feedXml, options = {}) {
     );
     const limited = recent.slice(0, maxItemsPerFeed);
 
-    const rewriter = resolveModelRewriter();
+    const rewriter = resolveModelRewriter(); // returns a function
     const rewrittenItems = [];
 
     info(`🧩 Rewriting ${limited.length} recent feed items via AI model...`);
@@ -68,13 +71,13 @@ export async function runRewritePipeline(feedXml, options = {}) {
 
         const shortLink = await shortenUrl(link);
         rewrittenItems.push({
-          title: generated.title ?? title,
-          description: generated.body ?? snippet,
+          title: generated?.title ?? title,
+          description: generated?.body ?? snippet,
           link: shortLink || link,
           pubDate: item.pubDate?.[0] || new Date().toUTCString(),
         });
       } catch (err) {
-        error("⚠️ Failed to rewrite an item", { err: err.message });
+        error("⚠️ Failed to rewrite an item", { message: err.message });
       }
     }
 
@@ -117,8 +120,9 @@ export async function runRewritePipeline(feedXml, options = {}) {
       },
     };
   } catch (e) {
-    error("💥 RSS rewrite pipeline failed", { error: e.stack });
-    throw e;
+    error("💥 RSS rewrite pipeline failed", { message: e.message, stack: e.stack });
+    // Rewrap so the route error message is explicit in the log and JSON
+    throw new Error(`Pipeline failure: ${e.message}`);
   }
 }
 
