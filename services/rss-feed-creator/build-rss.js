@@ -14,8 +14,8 @@
 //  - SHORTIO_API_KEY, SHORTIO_DOMAIN (optional) for link shortening
 // ============================================================
 
-import { getObjectAsText, putText } from \"#shared/r2-client.js\";
-import { shortenIfPossible } from \"#shared/shortener.js\";
+import { getObjectAsText, putText } from "#shared/r2-client.js";
+import { shortenIfPossible } from "#shared/shortener.js";
 import { info, error } from "#logger.js";
 
 const R2_BUCKET =
