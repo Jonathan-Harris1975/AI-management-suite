@@ -1,57 +1,60 @@
+// services/rss-feed-creator/index.js
 import { info, error } from "#logger.js";
+import { ensureR2Sources } from "./utils/rss-bootstrap.js";
 import { rotateFeeds } from "./utils/rotateFeeds.js";
 import { fetchFeedsXml } from "./utils/fetchFeeds.js";
 import { rewriteRSSFeeds } from "./rewrite-pipeline.js";
 
 const MAX_FEEDS_PER_RUN = Number(process.env.MAX_FEEDS_PER_RUN || 5);
 
+/**
+ * Bootstrap job that ensures R2 has all sources and optionally rewrites the first feed.
+ */
 export default async function bootstrapRssFeedCreator() {
   try {
     info("🧠 RSS Feed Creator — bootstrap start");
 
-    const { feeds, site } = await rotateFeeds({ maxFeeds: MAX_FEEDS_PER_RUN });
-    info("🔁 Rotation result", { feedsCount: feeds.length, site });
+    // 🪣 Make sure the real feeds and URLs exist both locally and in R2
+    const { bucket, feeds, urls, rotation } = await ensureR2Sources();
 
-    const sources = [...feeds, ...(site ? [site] : [])];
-    if (!sources.length) {
-      info("⚠️ No sources to process — exiting");
-      return;
-    }
-
-    const fetched = await fetchFeedsXml(sources);
-    info("🌐 Fetched sources", {
-      okCount: fetched.filter((f) => f.ok).length,
-      failCount: fetched.filter((f) => !f.ok).length,
+    info("✅ Verified R2 sources", {
+      bucket,
+      feedsCount: feeds.length,
+      urlsCount: urls.length,
     });
 
-    for (const { ok, url, xml, err } of fetched) {
-      if (!ok) {
-        error("❌ Fetch failed", { url, err });
-        continue;
-      }
+    // Optionally prefetch and rewrite one or more feeds (for warmup)
+    const { feeds: rotationFeeds } = await rotateFeeds({
+      feeds,
+      rotation,
+      maxFeeds: MAX_FEEDS_PER_RUN,
+    });
 
-      // use a stable filename suffix per source to avoid collisions in the same run
+    info(`🔁 Selected ${rotationFeeds.length} feed(s) for initial rewrite.`);
+
+    const fetched = await fetchFeedsXml(rotationFeeds);
+    const okFeeds = fetched.filter(f => f.ok);
+
+    info("🌐 Fetched initial feeds", {
+      okCount: okFeeds.length,
+      failCount: fetched.length - okFeeds.length,
+    });
+
+    for (const { url, xml, ok } of okFeeds) {
+      if (!ok) continue;
       const suffix = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, "_");
-      const fileName = `feed-rewrite-${suffix}-${new Date().toISOString().replace(/[:.]/g, "-")}.xml`;
-
-      try {
-        await rewriteRSSFeeds(xml, {
-          fileName,
-          maxItemsPerFeed: Number(process.env.MAX_ITEMS_PER_FEED || 20),
-        });
-      } catch (e) {
-        error("💥 Rewrite failed", { url, err: e.message });
-      }
+      const fileName = `feed-${suffix}-${Date.now()}.xml`;
+      await rewriteRSSFeeds(xml, { fileName });
+      info(`✍️ Rewrote RSS feed: ${url}`);
     }
 
     info("✅ RSS Feed Creator — bootstrap complete");
-  } catch (e) {
-    error("💥 RSS Feed Creator — bootstrap error", { err: e.message });
-    throw e;
+  } catch (err) {
+    error("💥 RSS Feed Creator bootstrap error", { err: err.message });
   }
 }
 
-// Allow running directly (node services/rss-feed-creator/index.js)
+// ✅ Allow manual execution via CLI
 if (process.argv[1] && process.argv[1].endsWith("index.js")) {
   bootstrapRssFeedCreator().catch(() => process.exit(1));
-    }
+}
