@@ -23,21 +23,31 @@ const getJson = async (bucket, key) => {
     const txt = await getObjectAsText(bucket, key);
     if (!txt) return null;
     return JSON.parse(txt);
-  } catch (e) {
+  } catch {
     return null;
   }
 };
 
 /**
- * Read local text file from /data as fallback.
+ * ✅ Robust local reader: works on Render, local dev, or any cwd
+ * Attempts to read from both absolute repo and relative paths.
  */
 async function readLocal(relative) {
-  const p = path.join(__dirname, "..", "..", "..", "data", relative);
-  try {
-    return await fs.readFile(p, "utf8");
-  } catch {
-    return null;
+  const candidates = [
+    path.join(process.cwd(), "services", "rss-feed-creator", "data", relative),
+    path.join(__dirname, "..", "..", "..", "data", relative),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      const txt = await fs.readFile(candidate, "utf8");
+      info(`📄 Found local data file: ${candidate}`);
+      return txt;
+    } catch {}
   }
+
+  error(`⚠️ Local data file not found: ${relative}`);
+  return null;
 }
 
 /**
@@ -74,7 +84,7 @@ export async function ensureR2Sources() {
     .split(/\r?\n/)
     .map(s => s.trim())
     .filter(Boolean)
-    .map(s => s.startsWith(DATA_PREFIX) ? s : DATA_PREFIX + s);
+    .map(s => (s.startsWith(DATA_PREFIX) ? s : DATA_PREFIX + s));
 
   const urls = (urlsTxt || "")
     .split(/\r?\n/)
