@@ -30,7 +30,8 @@ Rules:
 6. Format:
    Line 1: Rewritten title (≤12 words)
    Line 2+: Rewritten summary (250–600 characters)
-`;,
+`;
+
 /**
  * Build a per-item user prompt based on raw feed data
  */
@@ -79,7 +80,6 @@ export function buildRSSUserPrompt(item = {}) {
  * Helper to enforce output constraints locally (robust version)
  */
 export function normalizeRewrittenItem(result = "") {
-  // If the model returned structured data (object with title/summary)
   if (typeof result === "object" && result !== null) {
     const title = String(result.title || "").trim();
     const summary = String(result.summary || "").trim();
@@ -95,7 +95,6 @@ export function normalizeRewrittenItem(result = "") {
     return { title: limitedTitle, summary: clampedSummary };
   }
 
-  // If the model returned plain text (string)
   if (typeof result === "string") {
     const lines = result.trim().split(/\r?\n/);
     const title = lines.shift()?.trim() || "Untitled";
@@ -112,6 +111,5 @@ export function normalizeRewrittenItem(result = "") {
     return { title: limitedTitle, summary: clampedSummary };
   }
 
-  // Otherwise (invalid or null)
   return { title: "Untitled", summary: "(No summary available)" };
-}
+       }
