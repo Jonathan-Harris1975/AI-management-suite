@@ -1,4 +1,4 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
+
 // utils/promptTemplates.js
 import getSponsor from './getSponsor.js';
 import generateCta from './generateCta.js';
