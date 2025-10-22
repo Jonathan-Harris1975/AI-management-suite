@@ -1,60 +1,67 @@
-// services/rss-feed-creator/index.js
+// ============================================================
+// 🧠 RSS Feed Creator — Simplified Index
+// ============================================================
+// Cleaned up to remove redundant bootstrap steps:
+// - Removed ensureR2Sources (handled in rss-bootstrap.js)
+// - Removed rotateFeeds (rotation handled dynamically at runtime)
+// Keeps only feed fetching and rewrite functionality
+// ============================================================
+
 import { info, error } from "#logger.js";
-import { ensureR2Sources } from "./utils/rss-bootstrap.js";
-import { rotateFeeds } from "./utils/rotateFeeds.js";
 import { fetchFeedsXml } from "./utils/fetchFeeds.js";
 import { rewriteRSSFeeds } from "./rewrite-pipeline.js";
 
 const MAX_FEEDS_PER_RUN = Number(process.env.MAX_FEEDS_PER_RUN || 5);
 
 /**
- * Bootstrap job that ensures R2 has all sources and optionally rewrites the first feed.
+ * Optional standalone task to fetch and rewrite up to MAX_FEEDS_PER_RUN feeds.
+ * Normally not needed during container bootstrap (rss-bootstrap.js covers R2 setup).
  */
 export default async function bootstrapRssFeedCreator() {
   try {
-    info("🧠 RSS Feed Creator — bootstrap start");
+    info("🧠 RSS Feed Creator — simplified bootstrap start");
 
-    // 🪣 Make sure the real feeds and URLs exist both locally and in R2
-    const { bucket, feeds, urls, rotation } = await ensureR2Sources();
+    // Load feed URLs from environment or static list if needed
+    const rawList = process.env.FEED_URLS || "";
+    const feeds = rawList
+      .split(/[\n,]/)
+      .map(f => f.trim())
+      .filter(Boolean)
+      .slice(0, MAX_FEEDS_PER_RUN);
 
-    info("✅ Verified R2 sources", {
-      bucket,
-      feedsCount: feeds.length,
-      urlsCount: urls.length,
-    });
+    if (!feeds.length) {
+      info("⚠️ No feed URLs provided via FEED_URLS — nothing to rewrite.");
+      return;
+    }
 
-    // Optionally prefetch and rewrite one or more feeds (for warmup)
-    const { feeds: rotationFeeds } = await rotateFeeds({
-      feeds,
-      rotation,
-      maxFeeds: MAX_FEEDS_PER_RUN,
-    });
-
-    info(`🔁 Selected ${rotationFeeds.length} feed(s) for initial rewrite.`);
-
-    const fetched = await fetchFeedsXml(rotationFeeds);
+    info(`🌐 Fetching up to ${feeds.length} feeds for rewrite...`);
+    const fetched = await fetchFeedsXml(feeds);
     const okFeeds = fetched.filter(f => f.ok);
 
-    info("🌐 Fetched initial feeds", {
+    info("✅ Fetch results", {
       okCount: okFeeds.length,
       failCount: fetched.length - okFeeds.length,
     });
 
-    for (const { url, xml, ok } of okFeeds) {
-      if (!ok) continue;
+    // Run rewrite pipeline for each successfully fetched feed
+    for (const { url, xml } of okFeeds) {
       const suffix = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, "_");
       const fileName = `feed-${suffix}-${Date.now()}.xml`;
-      await rewriteRSSFeeds(xml, { fileName });
-      info(`✍️ Rewrote RSS feed: ${url}`);
+      try {
+        await rewriteRSSFeeds(xml, { fileName });
+        info(`✍️ Rewrote RSS feed: ${url}`);
+      } catch (err) {
+        error("💥 Rewrite failed for feed", { url, err: err.message });
+      }
     }
 
-    info("✅ RSS Feed Creator — bootstrap complete");
+    info("✅ RSS Feed Creator — simplified bootstrap complete");
   } catch (err) {
     error("💥 RSS Feed Creator bootstrap error", { err: err.message });
   }
 }
 
-// ✅ Allow manual execution via CLI
+// ✅ Allow manual execution via CLI (node services/rss-feed-creator/index.js)
 if (process.argv[1] && process.argv[1].endsWith("index.js")) {
   bootstrapRssFeedCreator().catch(() => process.exit(1));
 }
