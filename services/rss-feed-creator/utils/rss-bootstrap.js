@@ -31,10 +31,10 @@ const getJson = async (bucket, key) => {
  */
 async function readLocal(relative) {
   const candidates = [
-    path.join("/app/src/services/rss-feed-creator/data", relative),   // Render modern
-    path.join("/opt/render/project/src/services/rss-feed-creator/data", relative), // Shiper legacy
-    path.join("/app/services/rss-feed-creator/data", relative),       // Dockerized
-    path.join(process.cwd(), "services", "rss-feed-creator", "data", relative),    // Local
+    path.join("/app/src/services/rss-feed-creator/data", relative),
+    path.join("/opt/render/project/src/services/rss-feed-creator/data", relative),
+    path.join("/app/services/rss-feed-creator/data", relative),
+    path.join(process.cwd(), "services", "rss-feed-creator", "data", relative),
     path.join(__dirname, "..", "data", relative),
   ];
 
@@ -44,7 +44,7 @@ async function readLocal(relative) {
       info(`📄 Found local data file: ${candidate}`);
       return txt;
     } catch {
-      // continue
+      // continue to next candidate
     }
   }
 
