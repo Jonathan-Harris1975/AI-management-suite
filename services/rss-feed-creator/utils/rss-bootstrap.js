@@ -13,27 +13,37 @@ const FEEDS_KEY = `${DATA_PREFIX}rss-feeds.txt`;
 const URLS_KEY = `${DATA_PREFIX}url-feeds.txt`;
 const ROTATION_KEY = `${DATA_PREFIX}feed-rotation.json`;
 
+/**
+ * Safely locate and read a local file across both dev and container environments.
+ */
 async function readLocalFile(filename) {
   const candidates = [
-    path.join(process.cwd(), "services", "rss-feed-creator", "data", filename),
-    path.join("/app/src/services/rss-feed-creator/data", filename),
-    path.join("/app/services/rss-feed-creator/data", filename),
-    path.join(__dirname, "../data", filename),
+    // Primary Render deployment path
+    `/app/services/rss-feed-creator/data/${filename}`,
+    // Local dev environments (src layout)
+    `/app/src/services/rss-feed-creator/data/${filename}`,
+    // Fallback relative paths
+    path.resolve(process.cwd(), "services", "rss-feed-creator", "data", filename),
+    path.resolve(__dirname, "../data", filename),
   ];
+
   for (const file of candidates) {
     try {
       const data = await fs.readFile(file, "utf8");
-      info(`📄 Found local file: ${file}`);
+      info(`📄 Found local data file: ${file}`);
       return data;
     } catch {
-      /* continue */
+      // continue trying other paths
     }
   }
+
+  error(`❌ Could not locate ${filename} in any known paths.`);
   return null;
 }
 
 /**
- * Ensure R2 contains all feed resources.
+ * Ensures all essential RSS data sources exist on R2.
+ * If missing remotely, uploads from local /data directory.
  */
 export async function ensureR2Sources() {
   const bucket =
@@ -43,27 +53,29 @@ export async function ensureR2Sources() {
 
   info(`🪣 Using R2 bucket: ${bucket}`);
 
-  // --- feeds.txt ---
+  // --- FEEDS ---
   let feedsTxt = await getObjectAsText(bucket, FEEDS_KEY).catch(() => null);
   if (!feedsTxt) {
     const localFeeds = await readLocalFile("feeds.txt");
-    if (!localFeeds) throw new Error("❌ feeds.txt missing locally and remotely.");
+    if (!localFeeds)
+      throw new Error("❌ feeds.txt missing locally and remotely.");
     await putText(bucket, FEEDS_KEY, localFeeds);
     feedsTxt = localFeeds;
     info("📥 Uploaded feeds.txt → R2 ✅");
   }
 
-  // --- urls.txt ---
+  // --- URLS ---
   let urlsTxt = await getObjectAsText(bucket, URLS_KEY).catch(() => null);
   if (!urlsTxt) {
     const localUrls = await readLocalFile("urls.txt");
-    if (!localUrls) throw new Error("❌ urls.txt missing locally and remotely.");
+    if (!localUrls)
+      throw new Error("❌ urls.txt missing locally and remotely.");
     await putText(bucket, URLS_KEY, localUrls);
     urlsTxt = localUrls;
     info("📥 Uploaded urls.txt → R2 ✅");
   }
 
-  // --- rotation.json ---
+  // --- ROTATION STATE ---
   let rotation;
   try {
     const txt = await getObjectAsText(bucket, ROTATION_KEY);
@@ -71,18 +83,18 @@ export async function ensureR2Sources() {
   } catch {
     rotation = { lastIndex: 0 };
     await putJson(bucket, ROTATION_KEY, rotation);
-    info("🔄 Initialized feed rotation to 0");
+    info("🔄 Initialized feed rotation index → 0");
   }
 
-  const feeds = feedsTxt.split(/\r?\n/).filter(Boolean);
-  const urls = urlsTxt.split(/\r?\n/).filter(Boolean);
+  const feeds = feedsTxt.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const urls = urlsTxt.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
   info(`✅ Feeds loaded: ${feeds.length}, URLs: ${urls.length}`);
   return { bucket, feeds, urls, rotation };
 }
 
 /**
- * Save rotation index update.
+ * Save updated feed rotation index to R2.
  */
 export async function saveRotation(nextIndex) {
   const bucket =
