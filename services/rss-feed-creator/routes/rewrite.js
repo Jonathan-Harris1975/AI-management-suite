@@ -1,80 +1,90 @@
-import express from "express";
-import { info, error, warn } from "#logger.js";
-import { getText, putText } from "#shared/r2-client.js";
+// ==========================================================
+// 🧠 RSS Feed Rewriter — AI Podcast Suite
+// ----------------------------------------------------------
+// Fetches next feed from rotation in R2, downloads raw XML,
+// rewrites each item using LLM model, and uploads feed.xml.
+// ==========================================================
+
+import { Router } from "express";
+import { info, error } from "#logger.js";
+import { getObjectAsText, putText } from "#shared/r2-client.js";
+import { fetchWithTimeout } from "../../../shared/http-client.js";
 import { runRewritePipeline } from "../rewrite-pipeline.js";
-import { fetchWithTimeout } from "../../shared/http-client.js"; // your existing HTTP util
-import { ensureR2Sources, rotateFeeds } from "../utils/rss-bootstrap.js";
 
-const router = express.Router();
+const router = Router();
+const RSS_FEED_BUCKET = process.env.R2_BUCKET_RSS_FEEDS || "";
+const ROTATION_FILE = "data/feed-rotation.json";
+const RSS_LIST_FILE = "data/rss-feeds.txt";
 
-/**
- * 🧠 RSS Rewrite API
- * POST /rss/rewrite
- */
+// ==========================================================
+// Utility: Load next RSS feed from rotation
+// ==========================================================
+async function loadNextFeed() {
+  try {
+    info("⚙️ No feedXml provided — fetching next RSS feed from R2 rotation...");
+    info("🪣 Using R2 bucket:", RSS_FEED_BUCKET);
+
+    const feedsTxt = await getObjectAsText(RSS_FEED_BUCKET, RSS_LIST_FILE);
+    if (!feedsTxt) throw new Error("rss-feeds.txt missing or empty.");
+    const feeds = feedsTxt.split(/\r?\n/).filter(Boolean);
+
+    // rotation index
+    let rotation = 0;
+    try {
+      const rotationJson = await getObjectAsText(RSS_FEED_BUCKET, ROTATION_FILE);
+      if (rotationJson) rotation = JSON.parse(rotationJson).index || 0;
+    } catch {
+      rotation = 0;
+    }
+
+    // pick feed & advance
+    const feedUrl = feeds[rotation % feeds.length];
+    const next = (rotation + 1) % feeds.length;
+    await putText(
+      RSS_FEED_BUCKET,
+      ROTATION_FILE,
+      JSON.stringify({ index: next }),
+      "application/json"
+    );
+
+    info(`📡 Using feed [${rotation + 1}/${feeds.length}]: ${feedUrl}`);
+    return feedUrl;
+  } catch (err) {
+    error("💥 Failed to load feed rotation", { err: err.message });
+    throw err;
+  }
+}
+
+// ==========================================================
+// Route: POST /rewrite
+// ==========================================================
 router.post("/rewrite", async (req, res) => {
   try {
-    info("📰 RSS rewrite requested");
+    let feedXml = req.body?.feedXml;
+    let feedUrl = req.body?.feedUrl;
 
-    let feedXml = req.body.feedXml;
     if (!feedXml) {
-      info("⚙️ No feedXml provided — fetching next RSS feed from R2 rotation...");
-
-      const { feeds, rotation } = await ensureR2Sources();
-      const { feeds: selected } = await rotateFeeds({
-        feeds,
-        rotation,
-        maxFeeds: 1,
-      });
-
-      if (!selected.length) {
-        throw new Error("No feeds found in rotation.");
+      // get next feed URL from R2 rotation
+      feedUrl = feedUrl || (await loadNextFeed());
+      info("🌐 Downloading RSS feed from remote URL...");
+      const response = await fetchWithTimeout(feedUrl, { timeout: 15000 });
+      if (!response.ok) {
+        throw new Error(`Failed to download ${feedUrl}: HTTP ${response.status}`);
       }
-
-      const nextFeedUrl = selected[0];
-      info(`📡 Using feed: ${nextFeedUrl}`);
-
-      // 1️⃣ Download feed with HTTP validation
-      const resp = await fetchWithTimeout(nextFeedUrl, { timeout: 15000 });
-      if (!resp.ok) throw new Error(`Failed to download ${nextFeedUrl}: HTTP ${resp.status}`);
-
-      const contentType = resp.headers.get("content-type") || "";
-      const text = await resp.text();
-
-      // 2️⃣ Validate XML vs HTML or wrong mime
-      if (
-        !contentType.includes("xml") &&
-        !text.trim().startsWith("<") &&
-        /<!DOCTYPE html>|<html/i.test(text)
-      ) {
-        warn(`⚠️ Skipping feed — non-XML content from ${nextFeedUrl}`);
-        return res.status(204).json({
-          skipped: true,
-          reason: "Non-XML response (likely HTML or 404)",
-          feed: nextFeedUrl,
-        });
-      }
-
-      feedXml = text;
+      feedXml = await response.text();
     }
 
-    // 3️⃣ Run rewrite
+    info("📰 RSS rewrite requested");
     const result = await runRewritePipeline(feedXml);
-    if (!result.key) {
-      warn("⚠️ No rewritten output generated — nothing uploaded.");
-      return res.status(204).json({ skipped: true });
-    }
 
     res.json({
       success: true,
-      count: result.count,
+      rewritten: result.count,
       publicUrl: result.publicUrl,
     });
   } catch (err) {
     error("💥 RSS rewrite failed", { message: err.message, stack: err.stack });
-    res.status(500).json({
-      success: false,
-      error: err.message,
-    });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
