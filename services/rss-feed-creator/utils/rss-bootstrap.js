@@ -3,7 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { info, error } from "#logger.js";
-import { getObjectAsText, putText, putJson, getJson } from "../shared/utils/r2-client.js";
+import { getObjectAsText, putText, putJson, getJson } from "#shared/r2-client.js";
 
 const FEEDS_KEY = "rss-feeds.txt";
 const URLS_KEY = "url-feeds.txt";
