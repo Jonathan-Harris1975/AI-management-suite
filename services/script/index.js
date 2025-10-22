@@ -1,7 +1,7 @@
 // services/script/index.js
 // Podcast Script Pipeline (centralized R2 + OpenRouter)
 
-import { info, warn, error } from "#shared/logger.js";
+import { info, warn, error } from "#logger.js";
 import {
   writeRawText,
   writeChunk,
