@@ -1,66 +1,94 @@
 // ============================================================
-// 🧠 AI Podcast Suite — RSS Feed Rewriting Prompts
+// 🧠 RSS Feed Creator — Rewrite Prompts (Simplified + Robust)
 // ------------------------------------------------------------
-// This module defines the structured system + user prompts
-// for rewriting RSS feed items into concise, factual summaries.
-// Enforces the following editorial standards:
-//  • Title ≤ 12 words
-//  • Body 250–600 characters
-//  • Neutral, professional tone
-//  • No clickbait, fluff, or emojis
+// - Title ≤ 12 words
+// - Summary 250–600 characters
+// - Neutral tone, no clickbait, emojis, or fluff
+// - Output plain text: first line = title, following = summary
 // ============================================================
 
-export const RSS_PROMPTS = {
-  system: `
-You are an expert AI news editor who rewrites RSS feed items into concise,
-factual, and engaging summaries suitable for inclusion in a daily AI industry digest.With a gen-x style of writing.
+/**
+ * System prompt — defines global rewrite rules for all items
+ */
+export const RSS_SYSTEM_PROMPT = `
+You are an expert AI news editor. Rewrite each RSS feed item into a concise,
+factual summary suitable for an AI-focused news digest.
 
-Follow these strict editorial rules:
+Rules:
+1. Title: 12 words maximum, factual, no hype or emojis.
+2. Body: 250–600 characters, objective, clear, and professional.
+3. No clickbait, exclamation marks, or unnecessary adjectives.
+4. Focus on what happened, why it matters, or key context.
+5. Keep it human-readable and grammatically correct.
+6. Do not invent facts or speculate.
+7. Return plain text — no JSON, no HTML, no markdown.
+8. Format:
+   Line 1: Rewritten title (≤12 words)
+   Line 2+: Rewritten summary (250–600 characters)
+`;
 
-1. **Title**
-   - Max 12 words.
-   - Clear and factual; no sensationalism or emojis.
-   - Do not invent details or use vague marketing language.
+/**
+ * Build a per-item user prompt based on raw feed data
+ */
+export function buildRSSUserPrompt(item = {}) {
+  const {
+    title,
+    link,
+    content,
+    description,
+    summary,
+    pubDate,
+    isoDate,
+    author,
+    siteTitle,
+  } = item;
 
-2. **Body**
-   - Between 250 and 600 characters (not words).
-   - Write in neutral, professional tone — concise, clear, and informative.
-   - Focus on what happened, why it matters, or what trend it reflects.
-   - Avoid repetition, speculation, and adjectives like “amazing”, “incredible”, etc.
+  const clean = (t = "") =>
+    String(t)
+      .replace(/<[^>]*>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
-3. **Formatting**
-   - Return clean JSON (UTF-8 safe, single object per item).
-   - No Markdown, no HTML tags, no XML entities.
+  const text =
+    clean(content) ||
+    clean(description) ||
+    clean(summary) ||
+    "(No description provided)";
 
-4. **Output structure**
-   {
-     "title": "rewritten concise title (≤12 words)",
-     "summary": "main body text between 250–600 characters",
-     "link": "original article link (if provided)",
-     "publishedAt": "ISO 8601 UTC timestamp"
-   }
+  const lines = [
+    `Original title: ${clean(title) || "(none)"}`,
+    author ? `Author: ${clean(author)}` : null,
+    siteTitle ? `Source: ${clean(siteTitle)}` : null,
+    pubDate || isoDate ? `Published: ${pubDate || isoDate}` : null,
+    link ? `Link: ${clean(link)}` : null,
+    "",
+    `Original content:`,
+    text,
+    "",
+    `Rewrite this into a concise AI news brief following the system rules above.`,
+  ].filter(Boolean);
 
-5. **Scope**
-   - Skip promotional or unrelated content.
-   - If the summary or link is missing, reconstruct only from available info.
-   - Do NOT include your own commentary or disclaimers.
-`,
+  return lines.join("\n");
+}
 
-  user: ({ title, summary, link, publishedAt }) => `
-Original RSS item:
-- Title: ${title || "(none)"}
-- Summary: ${summary || "(none)"}
-- Link: ${link || "(none)"}
-- Published At: ${publishedAt || "(unknown)"}
+/**
+ * Helper to enforce output constraints locally (optional)
+ */
+export function normalizeRewrittenItem(result = "") {
+  const lines = result.trim().split(/\r?\n/);
+  const title = lines.shift()?.trim() || "Untitled";
+  const summary = lines.join(" ").trim();
 
-Rewrite this into a short, factual AI news brief following the above editorial rules.
-Return ONLY valid JSON for one item. No additional text, explanations, or commentary.
-`,
-};
+  const limitedTitle = title.split(/\s+/).slice(0, 12).join(" ");
+  const clampedSummary =
+    summary.length < 250
+      ? summary.padEnd(250, " ")
+      : summary.length > 600
+      ? summary.slice(0, 600)
+      : summary;
 
-// ============================================================
-// Example usage:
-// const prompt = RSS_PROMPTS.user({ title, summary, link, publishedAt });
-// model.generate([ { role: "system", content: RSS_PROMPTS.system },
-//                  { role: "user", content: prompt } ])
-// ============================================================
+  return {
+    title: limitedTitle,
+    summary: clampedSummary,
+  };
+}
