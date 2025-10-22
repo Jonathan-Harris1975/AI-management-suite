@@ -14,7 +14,7 @@ const ROTATION_KEY = "feed-rotation.json";
 const DATA_PREFIX = "data/";
 
 /**
- * Graceful JSON loader
+ * Graceful JSON parser
  */
 const getJson = async (bucket, key) => {
   try {
@@ -27,25 +27,24 @@ const getJson = async (bucket, key) => {
 };
 
 /**
- * ✅ Ultimate file locator (Render, Shiper, local)
+ * ✅ Universal file locator for Render, Shiper, and local
  */
 async function readLocal(relative) {
   const candidates = [
-    // Shiper/Render live paths
-    `/opt/render/project/src/services/rss-feed-creator/data/${relative}`,
-    `/app/services/rss-feed-creator/data/${relative}`,
-    // Local dev or fallback
-    path.join(process.cwd(), "services", "rss-feed-creator", "data", relative),
+    path.join("/app/src/services/rss-feed-creator/data", relative),   // Render modern
+    path.join("/opt/render/project/src/services/rss-feed-creator/data", relative), // Shiper legacy
+    path.join("/app/services/rss-feed-creator/data", relative),       // Dockerized
+    path.join(process.cwd(), "services", "rss-feed-creator", "data", relative),    // Local
     path.join(__dirname, "..", "data", relative),
   ];
 
-  for (const filePath of candidates) {
+  for (const candidate of candidates) {
     try {
-      const txt = await fs.readFile(filePath, "utf8");
-      info(`📄 Found local data file: ${filePath}`);
+      const txt = await fs.readFile(candidate, "utf8");
+      info(`📄 Found local data file: ${candidate}`);
       return txt;
     } catch {
-      // try next
+      // continue
     }
   }
 
@@ -54,7 +53,7 @@ async function readLocal(relative) {
 }
 
 /**
- * Ensures R2 data sources exist
+ * Ensures the feeds, urls, and rotation data exist in R2
  */
 export async function ensureR2Sources() {
   const bucket =
@@ -62,11 +61,9 @@ export async function ensureR2Sources() {
     process.env.R2_BUCKET_PODCAST ||
     "rss-feeds";
 
-  if (!bucket) throw new Error("❌ Missing R2 bucket for RSS data.");
-
   info(`🪣 Using R2 bucket: ${bucket}`);
 
-  // --- FEEDS LIST ---
+  // --- Feeds list ---
   let feedsTxt = await getObjectAsText(bucket, DATA_PREFIX + FEEDS_KEY);
   if (!feedsTxt) {
     feedsTxt = await readLocal(FEEDS_KEY);
@@ -78,7 +75,7 @@ export async function ensureR2Sources() {
     }
   }
 
-  // --- URL LIST ---
+  // --- URL list ---
   let urlsTxt = await getObjectAsText(bucket, DATA_PREFIX + URLS_KEY);
   if (!urlsTxt) {
     urlsTxt = await readLocal(URLS_KEY);
@@ -90,18 +87,17 @@ export async function ensureR2Sources() {
     }
   }
 
-  // --- Parse text ---
+  // --- Parse text content ---
   const feeds = (feedsTxt || "")
     .split(/\r?\n/)
     .map(s => s.trim())
     .filter(Boolean);
-
   const urls = (urlsTxt || "")
     .split(/\r?\n/)
     .map(s => s.trim())
     .filter(Boolean);
 
-  // --- ROTATION FILE ---
+  // --- Rotation file ---
   let rotation = await getJson(bucket, DATA_PREFIX + ROTATION_KEY);
   if (!rotation || typeof rotation.lastIndex !== "number") {
     rotation = { lastIndex: 0 };
@@ -109,7 +105,7 @@ export async function ensureR2Sources() {
     info("🔄 Initialized feed rotation index to 0");
   }
 
-  info(`✅ Loaded ${feeds.length} feeds and ${urls.length} URLs from R2`);
+  info(`✅ Loaded ${feeds.length} feeds and ${urls.length} URLs`);
   return { bucket, feeds, urls, rotation };
 }
 
