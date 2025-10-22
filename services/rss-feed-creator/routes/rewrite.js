@@ -2,7 +2,7 @@ import express from "express";
 import { info, error, warn } from "#logger.js";
 import { getText, putText } from "#shared/r2-client.js";
 import { runRewritePipeline } from "../rewrite-pipeline.js";
-import { fetchWithTimeout } from "#shared/http-client.js"; // your existing HTTP util
+import { fetchWithTimeout } from "import { fetchWithTimeout } from "../../../shared/http-client.js";"; // your existing HTTP util
 import { ensureR2Sources, rotateFeeds } from "../utils/rss-bootstrap.js";
 
 const router = express.Router();
