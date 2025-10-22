@@ -25,6 +25,7 @@ async function run(cmd, label) {
 
   
   await run("node ./scripts/envBootstrap.js"),
+  await run("node.services/rss-feed-creator/startup/rss-init.js"),
   await run("node ./scripts/startupCheck.js", "Startup Check");
   await run("node ./scripts/tempStorage.js", "R2 Check");
   await run("node server.js", "Start Server");
