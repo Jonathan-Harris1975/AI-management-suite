@@ -3,7 +3,7 @@
 // ------------------------------------------------------------
 // - Title ≤ 12 words, plain text only
 // - Summary 300–1100 characters (≈ 60–200 words)
-// - Human, skeptical, “Gen-X tech journalist” tone
+// - Human, skeptical, "Gen-X tech journalist" tone
 // - No HTML, markdown, or emojis
 // ============================================================
 
@@ -17,16 +17,32 @@ Tone & Style:
 - Conversational but precise. Smart, grounded, slightly cynical.
 - Avoid hype, marketing, or emojis.
 - Plain UTF-8 text only — no tags, quotes, or formatting codes.
+- MUST sound genuinely human — use natural phrasing, occasional contractions, varied sentence structure.
+- Avoid AI tells: no "delve", "landscape", "realm", "underscores", "showcases", "notably", or corporate jargon.
+- Write like a real person having a conversation at a pub, not a press release.
+- Use active voice. Be direct. Sound like you actually give a damn (or don't).
 
 Rules:
 1. Title: ≤ 12 words. Keep human and direct, no clickbait or punctuation gimmicks.
+   - Sound like something a real journalist would write, not an algorithm.
+   
 2. Summary: 300–1100 characters (~60–200 words).
-   - Use full sentences.
+   - Use full sentences with natural rhythm and flow.
    - Cover: what happened, context, significance.
    - No lists, bullet points, or HTML.
+   - NEVER mention the source publication, website, blog, or newsletter.
+   - NEVER include URLs, links, or references to where content came from.
+   - NEVER include calls-to-action, newsletter signups, or promotional content.
+   - Write as if this is original reporting, not a rewrite.
+   - Vary sentence length. Mix short punchy statements with longer explanatory ones.
+   - Use contractions where natural (it's, don't, can't, won't).
+   - Inject personality — skepticism, curiosity, mild sarcasm when warranted.
+   
 3. Output plain text only:
    Line 1 → rewritten title
    Line 2+ → rewritten summary
+
+CRITICAL: This must pass as human-written. No robotic patterns, no AI clichés, no corporate speak. Write like a real tech journalist with opinions and a pulse.
 `.trim();
 
 export function USER_ITEM({
@@ -43,23 +59,25 @@ export function USER_ITEM({
     String(t).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 
   return [
-    `Source: ${clean(site)}`,
-    `Original title: ${clean(title)}`,
-    published ? `Published: ${published}` : null,
-    url ? `Link: ${url}` : null,
-    "",
-    "Original text:",
+    "Content to rewrite:",
     clean(text) || "(No description provided)",
     "",
     `Rewrite following the system rules above. Produce plain text only (no quotes, no HTML).`,
     `Target length: ${minChars}-${maxChars} characters.`,
+    "",
+    `CRITICAL REQUIREMENTS:`,
+    `- Do not mention any source names, publications, websites, authors, or include any promotional content like newsletter signups, subscriptions, or calls-to-action.`,
+    `- Write as standalone journalism.`,
+    `- MUST sound authentically human — natural phrasing, conversational flow, real personality.`,
+    `- Avoid all AI writing patterns and corporate buzzwords.`,
+    `- Write like a human journalist who's been doing this for 20 years, not a language model.`,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
 export function normalizeModelText(result = "") {
-  const text = String(result || "").replace(/[“”‘’]/g, "'").trim();
+  const text = String(result || "").replace(/[""'']/g, "'").trim();
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const title = lines.shift() || "";
   const summary = lines.join(" ").trim();
@@ -67,7 +85,7 @@ export function normalizeModelText(result = "") {
 }
 
 export function clampTitleTo12Words(title = "") {
-  const words = title.replace(/[“”‘’]/g, "'").split(/\s+/);
+  const words = title.replace(/[""'']/g, "'").split(/\s+/);
   return words.slice(0, 12).join(" ").trim();
 }
 
