@@ -10,8 +10,10 @@
 import { info, error } from "#logger.js";
 import { fetchFeedsXml } from "./utils/fetchFeeds.js";
 import { rewriteRSSFeeds } from "./rewrite-pipeline.js";
+import { getRotationOffset, updateRotationOffset } from "./utils/feedRotationManager.js";
 
 const MAX_FEEDS_PER_RUN = Number(process.env.MAX_FEEDS_PER_RUN || 5);
+const ROTATION_STEP = 5; // User specified rotation by 5 each time
 
 /**
  * Optional standalone task to fetch and rewrite up to MAX_FEEDS_PER_RUN feeds.
@@ -23,11 +25,30 @@ export default async function bootstrapRssFeedCreator() {
 
     // Load feed URLs from environment or static list if needed
     const rawList = process.env.FEED_URLS || "";
-    const feeds = rawList
+    // Use a simple rotation mechanism based on a persistent counter or timestamp
+    // For this example, let's assume a simple rotation by 5 feeds.
+    // In a real-world scenario, this would involve a database or persistent storage
+    // to keep track of the last processed index for each FEED_URLS list.
+    const allFeeds = rawList
       .split(/[\n,]/)
       .map(f => f.trim())
-      .filter(Boolean)
-      .slice(0, MAX_FEEDS_PER_RUN);
+      .filter(Boolean);
+
+    // Simple rotation: take the first N feeds, then the next N, etc.
+    // For demonstration, we'll use a fixed offset. In a real system, this offset
+    // would be stored and updated after each run.
+    const currentRotationOffset = await getRotationOffset();
+    const rotationOffset = currentRotationOffset % allFeeds.length; // Apply rotation offset
+    const rotatedFeeds = [
+      ...allFeeds.slice(rotationOffset),
+      ...allFeeds.slice(0, rotationOffset),
+    ];
+
+    const feeds = rotatedFeeds.slice(0, MAX_FEEDS_PER_RUN);
+
+    // Update rotation offset for the next run
+    const newRotationOffset = (currentRotationOffset + ROTATION_STEP) % allFeeds.length;
+    await updateRotationOffset(newRotationOffset);
 
     if (!feeds.length) {
       info("⚠️ No feed URLs provided via FEED_URLS — nothing to rewrite.");
