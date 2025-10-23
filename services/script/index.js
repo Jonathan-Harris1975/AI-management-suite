@@ -1,68 +1,46 @@
 // services/script/index.js
-// Podcast Script Pipeline (centralized R2 + OpenRouter)
+// Lightweight generators used by routes {intro, main, outro, compose}. No disk writes.
 
-import { info, warn, error } from "#logger.js";
-import { writeRawText, writeChunk, writeTranscript, writeMeta } from "./utils/io.js";
-import { rewriteOutline, expandSection, tightenRead } from "./utils/models.js";
-import { buildPrompts } from "./utils/prompts.js";
-import { orchestrateScript } from "./utils/orchestrator.js";
+import { info, error } from "#logger.js";
+import { resilientRequest } from "../shared/utils/ai-service.js";
+import prompts from "./utils/promptTemplates.js";
 
 /**
- * runScriptPipeline
- * @param {Object} input
- * @param {string} input.episodeId - stable id (e.g. date)
- * @param {string} input.topic - main topic/title
- * @param {string} input.rawText - seed text for the episode
- * @param {Object} input.tone - optional tone hints (kept; used by buildPrompts)
- * @returns {Object} result { ok, chunks, transcriptUrl, metaUrl }
+ * Helper: call LLM with a single user prompt. Returns plain text.
  */
-export async function runScriptPipeline({ episodeId, topic, rawText, tone = {} }) {
-  const started = Date.now();
-  info("script.pipeline.start", { episodeId, topic });
-
-  if (!episodeId || !topic) {
-    throw new Error("episodeId and topic are required");
-  }
-
-  const rawUrl = await writeRawText({ episodeId, text: rawText || "" });
-  info("script.raw.saved", { rawUrl });
-
-  const { systemOutline, promptOutline } = buildPrompts().outline({ topic, rawText, tone });
-  const outline = await rewriteOutline({ system: systemOutline, prompt: promptOutline });
-  info("script.outline.done");
-
-  const sections = Array.isArray(outline?.sections) && outline.sections.length
-    ? outline.sections
-    : (outline?.text ? outline.text.split(/\n{2,}/) : []);
-
-  const chunks = [];
-  for (let i = 0; i < sections.length; i++) {
-    const sectionTitle = typeof sections[i] === "string" ? sections[i].slice(0, 120) : sections[i]?.title || \`Section \${i+1}\`;
-    const { systemExpand, promptExpand } = buildPrompts().expand({ topic, section: sections[i], tone });
-    const expanded = await expandSection({ system: systemExpand, prompt: promptExpand });
-    const { systemTighten, promptTighten } = buildPrompts().tighten({ topic, text: expanded?.text || expanded, tone });
-    const tightened = await tightenRead({ system: systemTighten, prompt: promptTighten });
-
-    const chunkText = (tightened?.text || tightened || "").trim();
-    if (!chunkText) {
-      warn("script.chunk.empty", { index: i, sectionTitle });
-      continue;
-    }
-
-    const chunkUrl = await writeChunk({ episodeId, index: i, text: chunkText });
-    chunks.push({ index: i, title: sectionTitle, url: chunkUrl });
-  }
-
-  const transcript = chunks.length
-    ? await writeTranscript({ episodeId, text: chunks.map(c => c.url).join("\n") })
-    : null;
-
-  const meta = { episodeId, topic, chunks, createdAt: new Date().toISOString(), rawUrl, transcriptUrl: transcript };
-  const metaUrl = await writeMeta({ episodeId, meta });
-
-  info("script.pipeline.done", { episodeId, chunks: chunks.length, tookMs: Date.now() - started });
-
-  return { ok: true, chunks, transcriptUrl: transcript, metaUrl };
+async function callLLM(promptText, { model = process.env.OPENROUTER_MODEL, temperature = 0.4 } = {}) {
+  const messages = [{ role: "user", content: promptText }];
+  const result = await resilientRequest({
+    provider: "openrouter",
+    model,
+    temperature,
+    messages
+  });
+  const text = typeof result?.text === "string" ? result.text : (typeof result === "string" ? result : "");
+  return String(text || "").trim();
 }
 
-export default { runScriptPipeline, orchestrateScript };
+export async function generateIntro({ sessionId, date, weatherSummary = "", turingQuote = "" }) {
+  info("script.generateIntro", { sessionId, date });
+  const prompt = prompts.getIntroPrompt({ weatherSummary, turingQuote });
+  return { text: await callLLM(prompt, { temperature: 0.3 }) };
+}
+
+export async function generateMain({ sessionId, topic, articleTextArray = [], targetDuration = 12 }) {
+  info("script.generateMain", { sessionId, topic, articles: articleTextArray.length, targetDuration });
+  const prompt = prompts.getMainPrompt({ topic, articleTextArray, targetDuration });
+  return { text: await callLLM(prompt, { temperature: 0.5 }) };
+}
+
+export async function generateOutro({ sessionId, topic, callsToAction = [] }) {
+  info("script.generateOutro", { sessionId, topic, ctaCount: callsToAction.length });
+  const prompt = prompts.getOutroPromptFull({ topic, callsToAction });
+  return { text: await callLLM(prompt, { temperature: 0.35 }) };
+}
+
+// Kept for backwards compatibility if something imports default
+export default {
+  generateIntro,
+  generateMain,
+  generateOutro,
+};
