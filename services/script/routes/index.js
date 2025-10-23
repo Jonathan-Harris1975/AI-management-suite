@@ -1,21 +1,22 @@
 // services/script/routes/index.js
-import express from "express";
+
 import { orchestrateScript } from "../utils/orchestrator.js";
-import { info } from "#logger.js";
+import express from "express";
+import intro from "./intro.js";
+import main from "./main.js";
+import outro from "./outro.js";
+import compose from "./compose.js";
+
 
 const router = express.Router();
 
-router.post("/orchestrate", async (req, res) => {
-  try {
-    const sessionId = req.body.sessionId || `session-${Date.now()}`;
-    info("🎬 Script orchestration start", { sessionId });
+// Individual stage endpoints
+router.use("/", intro);
+router.use("/", main);
+router.use("/", outro);
+router.use("/", compose);
 
-    const result = await orchestrateScript({ sessionId });
-    return res.json({ ok: true, ...result });
-  } catch (err) {
-    console.error("❌ Orchestration error", err);
-    return res.status(500).json({ ok: false, error: err.message });
-  }
-});
+// Central orchestrator endpoint
+router.post("/orchestrate", orchestrateHandler);
 
 export default router;
