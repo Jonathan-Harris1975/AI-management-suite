@@ -17,6 +17,6 @@ router.use("/", outro);
 router.use("/", compose);
 
 // Central orchestrator endpoint
-router.post("/orchestrate", orchestrateHandler);
+router.post("/orchestrate");
 
 export default router;
