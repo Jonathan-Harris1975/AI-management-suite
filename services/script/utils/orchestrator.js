@@ -40,7 +40,7 @@ async function postJson(url, payload) {
  * These routes are responsible for writing/reading temp storage. We only
  * pass the sessionId/topic/date forward and check responses.
  */
-export async function orchestrate({ sessionId, topic, date }) {
+export async function orchestrateScript({ sessionId, topic, date }) {
   const started = Date.now();
   const base = getBaseUrl();
 
@@ -102,4 +102,4 @@ export async function orchestrateHandler(req, res) {
   }
 }
 
-export default { orchestrate, orchestrateHandler };
+export default { orchestrate, orchestrateHandler,orchestrateScript };
