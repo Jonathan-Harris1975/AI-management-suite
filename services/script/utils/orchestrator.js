@@ -102,4 +102,4 @@ export async function orchestrateHandler(req, res) {
   }
 }
 
-export default { orchestrate, orchestrateHandler,orchestrateScript };
+export default { orchestrateScript };
