@@ -24,7 +24,7 @@ export const aiConfig = {
     
     anthropic: {
       name: process.env.OPENROUTER_ANTHROPIC,
-      apiKey: process.env.OPENROUTER_API_KEY_GROK,
+      apiKey: process.env.OPENROUTER_API_KEY_ANTHROPIC,
     },
     // Standard Llama 3 is a fast and cheap final fallback.
     meta: {
