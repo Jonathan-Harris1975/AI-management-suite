@@ -1,5 +1,5 @@
 import { info, error } from "#logger.js";
-import aiConfig from "../ai-config.js";
+import aiConfig from "./ai-config.js";
 
 // low-level OpenRouter call
 async function callModelOnce({ model, apiKey, prompt, temperature }) {
