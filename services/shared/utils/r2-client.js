@@ -364,19 +364,5 @@ export {
   putText as putText,
   putJson as putJson,
   buildPublicUrl as buildPublicUrl,
-};
+}
 
-export default {
-  s3,
-  R2_BUCKETS,
-  getObjectAsText,
-  getObjectAsJson,
-  getR2ReadStream,
-  uploadBuffer,
-  uploadJson,
-  listKeys,
-  deleteObject,
-  putText,
-  putJson,
-  buildPublicUrl,
-};
