@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 export default function getRandomSponsor() {
-  const filePath = path.resolve('data/books.json');
+  const filePath = path.resolve('data','books.json');
   const rawData = fs.readFileSync(filePath, 'utf-8');
   const books = JSON.parse(rawData);
 
