@@ -19,7 +19,7 @@ export async function rebuildRss(items) {
     return { items: 0, wrote: [] };
   }
   
-  const bucket = getBucketName();
+  const bucket = process.env.R2_BUCKET_RSS_FEEDS || "";;
   const publicBase = getPublicBase();
 
   const now = new Date().toUTCString();
