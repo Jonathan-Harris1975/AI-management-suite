@@ -1,3 +1,7 @@
+// services/script/utils/models.js
+// Centralized model runners for intro / main / outro / composed
+// Uses shared ai-service.js for model fallback + vendor routing
+
 import { info, error } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import promptTemplates from "./promptTemplates.js";
@@ -18,6 +22,9 @@ const {
   validateOutro,
 } = promptTemplates;
 
+// ─────────────────────────────
+// Shared LLM runner
+// ─────────────────────────────
 async function runLLM(routeName, promptPack = {}) {
   const { system = "", user = "" } = promptPack;
   const messages = [
@@ -28,7 +35,8 @@ async function runLLM(routeName, promptPack = {}) {
   info("script.llm.call", { routeName });
 
   const raw = await resilientRequest(routeName, messages);
-  if (!raw || typeof raw !== "string") throw new Error(`Empty LLM response for ${routeName}`);
+  if (!raw || typeof raw !== "string")
+    throw new Error(`Empty LLM response for ${routeName}`);
   return raw.trim();
 }
 
@@ -70,7 +78,13 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
     const { system, user } = getMainPrompt({ date, articles, vibe: tone.vibe });
     const raw = await runLLM("main", { system, user });
 
-    let cleaned = validateScript(raw);
+    const validation = validateScript(raw);
+    let cleaned = raw;
+
+    if (validation && validation.isValid === false) {
+      info("script.main.validation", { issues: validation.violations.length });
+    }
+
     cleaned = humanize(cleaned);
     cleaned = enforceTransitions(cleaned);
     return cleaned.trim();
@@ -91,9 +105,19 @@ export async function generateOutro({
   tone = {},
 } = {}) {
   try {
-    const { system, user } = getOutroPromptFull({ date, vibe: tone.vibe, siteUrl });
+    const { system, user } = await getOutroPromptFull({
+      date,
+      vibe: tone.vibe,
+      siteUrl,
+    });
     const raw = await runLLM("outro", { system, user });
-    let cleaned = validateOutro(raw, { expectedCta, episodeTitle, siteUrl });
+    const validation = validateOutro(raw, expectedCta, episodeTitle, siteUrl);
+
+    let cleaned = raw;
+    if (validation && validation.isValid === false) {
+      info("script.outro.validation", { issues: validation.issues.length });
+    }
+
     cleaned = humanize(cleaned);
     cleaned = enforceTransitions(cleaned);
     return cleaned.trim();
@@ -104,7 +128,7 @@ export async function generateOutro({
 }
 
 // ─────────────────────────────
-// COMPOSE
+// COMPOSE (includes metadata)
 // ─────────────────────────────
 export async function generateComposedEpisode({
   introText = "",
@@ -116,21 +140,40 @@ export async function generateComposedEpisode({
     info("script.compose.start");
 
     const composedText = `${introText}\n\n${mainText}\n\n${outroText}`.trim();
+
+    // Reuse the existing "compose" model route from ai-config.js
     const titlePrompt = getTitleDescriptionPrompt(composedText);
-    const titleResponse = await resilientRequest("metadata", { prompt: titlePrompt });
+    const titleResponse = await resilientRequest("compose", {
+      prompt: titlePrompt,
+    });
     const parsedMeta = extractAndParseJson(titleResponse);
 
-    const seoPrompt = getSEOKeywordsPrompt(parsedMeta?.description || composedText);
-    const seoResponse = await resilientRequest("metadata", { prompt: seoPrompt });
+    const seoPrompt = getSEOKeywordsPrompt(
+      parsedMeta?.description || composedText
+    );
+    const seoResponse = await resilientRequest("compose", {
+      prompt: seoPrompt,
+    });
 
-    const artworkPrompt = getArtworkPrompt(parsedMeta?.description || composedText);
-    const artResponse = await resilientRequest("metadata", { prompt: artworkPrompt });
+    const artworkPrompt = getArtworkPrompt(
+      parsedMeta?.description || composedText
+    );
+    const artResponse = await resilientRequest("compose", {
+      prompt: artworkPrompt,
+    });
 
     const metadata = {
       title: parsedMeta?.title || "Untitled Episode",
-      description: parsedMeta?.description || "No description generated.",
-      seoKeywords: typeof seoResponse === "string" ? seoResponse.trim() : JSON.stringify(seoResponse),
-      artworkPrompt: typeof artResponse === "string" ? artResponse.trim() : JSON.stringify(artResponse),
+      description:
+        parsedMeta?.description || "No description generated.",
+      seoKeywords:
+        typeof seoResponse === "string"
+          ? seoResponse.trim()
+          : JSON.stringify(seoResponse),
+      artworkPrompt:
+        typeof artResponse === "string"
+          ? artResponse.trim()
+          : JSON.stringify(artResponse),
     };
 
     info("script.compose.success", { title: metadata.title });
@@ -141,4 +184,9 @@ export async function generateComposedEpisode({
   }
 }
 
-export default { generateIntro, generateMain, generateOutro, generateComposedEpisode };
+export default {
+  generateIntro,
+  generateMain,
+  generateOutro,
+  generateComposedEpisode,
+};
