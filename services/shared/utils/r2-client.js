@@ -12,7 +12,7 @@ import {
   ListObjectsV2Command,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
-import { info, error } from '../../shared/utils/logger.js';
+import { info, error } from '#logger.js';
 
 // Create R2 client
 const r2Client = new S3Client({
