@@ -1,123 +1,114 @@
 // services/script/utils/models.js
-// Centralised model runners for intro / main / outro / compose
-// Uses shared ai-service.js with resilientRequest() for OpenRouter model handling
+// Centralised model runners for intro / main / outro
+// Uses shared ai-service.js resilientRequest() for model routing / fallback
 
 import { info, error } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import {
-  getIntroPrompt,
-  getMainPrompt,
-  getOutroPromptFull,
-  validateScript,
-  validateOutro
-  
-} from "./promptTemplates.js"; // ✅ matches actual export
-import {
-  extractAndParseJson,
-  getTitleDescriptionPrompt,
-  getSEOKeywordsPrompt,
-  getArtworkPrompt,
-} from "./podcastHelpers.js"; // ✅ matches actual export
+  buildIntroPrompt,
+  buildMainPrompt,
+  buildOutroPrompt,
+} from "./promptTemplates.js"; // ✅ actual file name
+// NOTE: compose is handled by /script/compose using temp storage
+// so we do NOT import or generate anything for compose here.
 
 /**
- * Wrapper for resilientRequest with consistent logging and fallback handling.
- * @param {string} label - Section label ("intro", "main", "outro", "compose")
- * @param {object} param1 - { system, user, routeKey }
- * @returns {Promise<string>}
+ * Internal helper: run a single LLM job for a given section.
+ * We pass a routeKey so ai-service.js can pick the correct model chain.
+ *
+ * @param {string} label   - "intro" | "main" | "outro"
+ * @param {string} system  - system prompt text
+ * @param {string} user    - user prompt text
+ * @returns {Promise<string>} cleaned model text
  */
-async function runModel({ label, system, user, routeKey }) {
+async function runSectionModel({ label, system, user }) {
   try {
-    info("script.llm.call", { label, routeKey });
+    info("script.llm.call", { section: label });
 
-    const response = await resilientRequest({
+    // resilientRequest signature (from shared/utils/ai-service.js):
+    //    resilientRequest(routeKey, { system, prompt })
+    //
+    // Earlier log "No model route defined for: [object Object]"
+    // happened because it was called with only an object.
+    // We now pass the string label ("intro" | "main" | "outro")
+    // as the first arg so ai-service can route to the right model.
+    const raw = await resilientRequest(label, {
       system,
       prompt: user,
-      routeKey, // OpenRouter route key defined in ai-config.js
     });
 
-    if (!response) return "";
-    if (typeof response === "string") return response.trim();
-    if (typeof response.text === "string") return response.text.trim();
-    if (response.output && typeof response.output === "string") return response.output.trim();
+    // ai-service normally returns either a string, or { text: "..." }
+    if (!raw) return "";
+    if (typeof raw === "string") return raw.trim();
+    if (typeof raw.text === "string") return raw.text.trim();
 
-    // fallback: stringify object if unknown structure
-    return JSON.stringify(response);
+    // fallback: stringify whatever came back
+    return JSON.stringify(raw);
   } catch (err) {
-    error("script.llm.fail", { label, err: err.message });
-    throw new Error(`Model request failed for ${label}: ${err.message}`);
+    error("script.llm.fail", { section: label, err: err.message });
+    throw new Error(err.message || "LLM call failed");
   }
 }
 
-// ──────────────────────────────────────────────
-// INTRO GENERATOR
-// ──────────────────────────────────────────────
+/**
+ * generateIntro
+ * Builds the intro prompt and runs the "intro" model route.
+ *
+ * @param {Object} params
+ * @param {string} params.topic
+ * @param {string} params.date
+ * @param {Object} [params.tone]
+ * @returns {Promise<string>}
+ */
 export async function generateIntro({ topic, date, tone = {} }) {
   const { system, user } = buildIntroPrompt({ topic, date, tone });
-  const raw = await runModel({
+  return runSectionModel({
     label: "intro",
     system,
     user,
-    routeKey: "openrouter",
   });
-  return raw;
 }
 
-// ──────────────────────────────────────────────
-// MAIN BODY GENERATOR
-// ──────────────────────────────────────────────
+/**
+ * generateMain
+ * Builds main/body prompt and runs the "main" model route.
+ *
+ * @param {Object} params
+ * @param {string} params.topic
+ * @param {string[]} [params.talkingPoints]
+ * @param {Object} [params.tone]
+ * @returns {Promise<string>}
+ */
 export async function generateMain({ topic, talkingPoints = [], tone = {} }) {
   const { system, user } = buildMainPrompt({ topic, talkingPoints, tone });
-  const raw = await runModel({
+  return runSectionModel({
     label: "main",
     system,
     user,
-    routeKey: "openrouter",
   });
-  return raw;
 }
 
-// ──────────────────────────────────────────────
-// OUTRO GENERATOR
-// ──────────────────────────────────────────────
+/**
+ * generateOutro
+ * Builds outro prompt and runs the "outro" model route.
+ *
+ * @param {Object} params
+ * @param {string} params.topic
+ * @param {Object} [params.tone]
+ * @returns {Promise<string>}
+ */
 export async function generateOutro({ topic, tone = {} }) {
   const { system, user } = buildOutroPrompt({ topic, tone });
-  const raw = await runModel({
+  return runSectionModel({
     label: "outro",
     system,
     user,
-    routeKey: "openrouter",
   });
-  return raw;
 }
 
-// ──────────────────────────────────────────────
-// COMPOSER (FINAL STITCH)
-// ──────────────────────────────────────────────
-export async function generateComposedEpisode({
-  introText = "",
-  mainText = "",
-  outroText = "",
-  tone = {},
-}) {
-  const { system, user } = buildComposePrompt({
-    introText,
-    mainText,
-    outroText,
-    tone,
-  });
-
-  const raw = await runModel({
-    label: "compose",
-    system,
-    user,
-    routeKey: "openrouter",
-  });
-  return raw;
-}
-
+// keep default export object because other code may import models.js default
 export default {
   generateIntro,
   generateMain,
   generateOutro,
-  generateComposedEpisode,
 };
