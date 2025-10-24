@@ -20,7 +20,7 @@ export async function rebuildRss(items) {
   }
   
   const bucket = process.env.R2_BUCKET_RSS_FEEDS || "";;
-  const publicBase = getPublicBase();
+  const publicBase = (process.env.R2_PUBLIC_BASE_URL_RSS || "").replace(/\/+$/, "");
 
   const now = new Date().toUTCString();
   
