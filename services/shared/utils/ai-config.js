@@ -18,7 +18,7 @@ export const aiConfig = {
     },
     // Standard Deepseek for reliable JSON generation.
     deepseek: {
-      name: process.env.OPENROUTER_DEEPSEEK",
+      name: process.env.OPENROUTER_DEEPSEEK,
       apiKey: process.env.OPENROUTER_API_KEY_DEEPSEEK,
     },
     
