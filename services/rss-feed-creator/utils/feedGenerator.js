@@ -1,61 +1,70 @@
-// Builds RSS XML and JSON metadata from the processed items list.
-import { getObject, putJson }from "#shared/r2-client.js"; // Adjusted path to shared R2 client
-import { log } from "#logger.js"; // Adjusted path for logger
+// Builds RSS XML + JSON metadata from feeds.txt + urls.txt in R2
+import { r2GetText, r2Put, r2GetPublicBase, getBucketName } from "./r2Client.js";
 
-// R2 object keys (match repo layout in production)
-const ITEMS_KEY = "items.json";
-const RSS_XML_KEY = "feed.xml";
-const RSS_JSON_KEY = "feed.json";
-const RSS_TITLE = "AI News - AI Condensed";
-const RSS_DESCRIPTION = "Daily summarized headlines from various sources: titles <= 12 words; summaries 200-400 chars.";
+function jlog(message, meta = undefined) {
+  const line = { time: new Date().toISOString(), message };
+  if (meta && typeof meta === "object") line.meta = meta;
+  process.stdout.write(JSON.stringify(line) + "\n");
+}
+
+const PREFIX = "rss-feeds/";
+const FILE_FEEDS = PREFIX + "feeds.txt";
+const FILE_URLS = PREFIX + "urls.txt";
+const FILE_XML = PREFIX + "feed.xml";
+const FILE_JSON = PREFIX + "feed.json";
+const FILE_CURSOR = PREFIX + "cursor.json";
 
 function esc(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
-export async function rebuildRss(items) {
-  if (!Array.isArray(items) || items.length === 0) {
-    log.warn("⚠️ rebuildRss called with no items. Skipping XML generation.");
-    return { items: 0, wrote: [] };
+export async function generateAndUploadFeed() {
+  const bucket = getBucketName();
+  const publicBase = r2GetPublicBase();
+
+  const feedsTxt = await r2GetText(bucket, FILE_FEEDS);
+  const urlsTxt  = await r2GetText(bucket, FILE_URLS);
+  const feeds = (feedsTxt || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const urls  = (urlsTxt  || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+  jlog("🟡 rss:process", { feeds: feeds.length, urls: urls.length });
+
+  const now = new Date().toISOString();
+  const items = [];
+  const max = Math.max(feeds.length, urls.length);
+  for (let i = 0; i < max; i++) {
+    const f = feeds[i] || feeds[feeds.length-1] || "";
+    const u = urls[i]  || urls[urls.length-1]  || "";
+    if (!f && !u) continue;
+    items.push({
+      title: `Item ${i+1}`,
+      link: u || f,
+      guid: `${u || f}#${i+1}`,
+      pubDate: now,
+      source: f || null
+    });
   }
-  
-  const bucket = process.env.R2_BUCKET_RSS_FEEDS || "";;
-  const publicBase = (process.env.R2_PUBLIC_BASE_URL_RSS || "").replace(/\/+$/, "");
 
-  const now = new Date().toUTCString();
-  
-  // Sort items by timestamp descending (most recent first)
-  const sortedItems = items.sort((a, b) => b.ts - a.ts);
+  const channelTitle = "AI Podcast Suite Feed";
+  const channelLink  = publicBase;
+  const channelDesc  = "Auto-generated feed from feeds.txt + urls.txt";
 
-  const xmlItems = sortedItems.map(it => {
-    // Convert timestamp to RFC 2822 date format
-    const pubDate = new Date(it.ts).toUTCString();
-    
-    // Use the rewritten content as the description
-    // The description content should be wrapped in CDATA for safety, but since we are escaping, we can skip CDATA for simplicity if the content is clean.
-    // Given the original rewrite-pipeline used CDATA, we will use it here for the description.
-    // However, the original `feedGenerator.js` did not use CDATA, and the `index.js` uses `rebuildRss` which is a placeholder.
-    // Let's use a simple escaped description for now, as the `index.js` logic is independent of the old `rewrite-pipeline.js` logic.
-    // We will use a simple HTML description for better formatting in some readers.
-    const description = `<p>${esc(it.rewrite)}</p><p>Original article: <a href="${esc(it.url)}">${esc(it.url)}</a></p>`;
-
-    return [
-      "<item>",
-      `<title>${esc(it.title)}</title>`,
-      `<link>${esc(it.shortUrl || it.url)}</link>`,
-      `<guid>${esc(it.guid)}</guid>`,
-      `<pubDate>${pubDate}</pubDate>`,
-      `<description><![CDATA[${description}]]></description>`,
-      "</item>"
-    ].join("");
-  }).join("");
+  const xmlItems = items.map(it => [
+    "<item>",
+    `<title>${esc(it.title)}</title>`,
+    `<link>${esc(it.link)}</link>`,
+    `<guid>${esc(it.guid)}</guid>`,
+    `<pubDate>${esc(it.pubDate)}</pubDate>`,
+    it.source ? `<source>${esc(it.source)}</source>` : "",
+    "</item>"
+  ].join("")).join("");
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
-    <title>${esc(RSS_TITLE)}</title>
-    <link>${esc(publicBase)}/${RSS_XML_KEY}</link>
-    <description>${esc(RSS_DESCRIPTION)}</description>
+    <title>${esc(channelTitle)}</title>
+    <link>${esc(channelLink)}</link>
+    <description>${esc(channelDesc)}</description>
     <lastBuildDate>${esc(now)}</lastBuildDate>
     ${xmlItems}
   </channel>
@@ -64,17 +73,14 @@ export async function rebuildRss(items) {
   const meta = {
     generatedAt: now,
     publicBase: publicBase,
-    items: sortedItems.length
+    items: items.length
   };
 
-  // Upload XML feed
-  await putText(bucket, RSS_XML_KEY, xml, "application/rss+xml; charset=utf-8");
-  log.info({ key: RSS_XML_KEY, count: sortedItems.length }, "💾 RSS XML feed saved");
+  await r2Put(bucket, FILE_XML, Buffer.from(xml, "utf-8"), "application/rss+xml; charset=utf-8");
+  await r2Put(bucket, FILE_JSON, Buffer.from(JSON.stringify(meta, null, 2), "utf-8"), "application/json; charset=utf-8");
 
-  // Upload JSON metadata (optional but good practice)
-  await putText(bucket, RSS_JSON_KEY, JSON.stringify(meta, null, 2), "application/json; charset=utf-8");
-  log.info({ key: RSS_JSON_KEY }, "💾 RSS JSON metadata saved");
+  const cursor = { lastRun: now, items: items.length };
+  await r2Put(bucket, FILE_CURSOR, Buffer.from(JSON.stringify(cursor, null, 2), "utf-8"), "application/json; charset=utf-8");
 
-  return { items: sortedItems.length, wrote: [RSS_XML_KEY, RSS_JSON_KEY] };
+  return { items: items.length, wrote: [FILE_XML, FILE_JSON, FILE_CURSOR] };
 }
-
