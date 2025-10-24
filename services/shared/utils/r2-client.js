@@ -352,17 +352,16 @@ export function buildPublicUrl({ bucket, key }) {
 /*  Exports                                                                    */
 /* -------------------------------------------------------------------------- */
 
+
 export {
   s3,
-  getObjectAsText as getObjectAsText,
-  getObjectAsJson as getObjectAsJson,
-  getR2ReadStream as getR2ReadStream,
-  uploadBuffer as uploadBuffer,
-  uploadJson as uploadJson,
-  listKeys as listKeys,
-  deleteObject as deleteObject,
-  putText as putText,
-  putJson as putJson,
-  buildPublicUrl as buildPublicUrl,
+  getObjectAsText,
+  getObjectAsJson,
+  getR2ReadStream,
+  uploadBuffer,
+  uploadJson,
+  listKeys,
+  deleteObject,
+  putText,
+  putJson
 }
-
