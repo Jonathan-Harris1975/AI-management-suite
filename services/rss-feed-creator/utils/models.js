@@ -1,30 +1,51 @@
-import { resilientRequest } from '../../shared/utils/ai-service.js';
-import { RSS_PROMPTS } from './rss-prompts.js';
+// services/rss-feed-creator/utils/models.js
+// Thin model runner for RSS rewriting.
+// - We let rewrite-pipeline.js build the full messages array
+//   (SYSTEM / USER_ITEM etc from rss-prompts.js)
+// - We just call the AI via resilientRequest() with the correct route
+//   configured in shared/utils/ai-config.js (routeModels.rssRewrite)
+//
+// NOTE: We intentionally do NOT import rss-prompts.js here anymore.
+//       That avoids the old "RSS_PROMPTS is not a function" / bad import issues.
 
-// Return a structured object so the pipeline can use title/body
-export async function rewriteTextLLM({
-  title,
-  snippet,
-  minLength = 250,
-  maxLength = 750,
-  tone = 'informative',
-}) {
-  const prompt = RSS_PROMPTS.newsletterQuality({ title, snippet, minLength, maxLength, tone });
-  const messages = [{ role: 'user', content: prompt }];
+import { info, error } from "#logger.js";
+import { resilientRequest } from "../../shared/utils/ai-service.js";
 
-  const out = await resilientRequest('rssRewrite', messages);
-  const text = (out || '').trim();
+/**
+ * Call the model(s) for RSS rewriting using the fallback chain
+ * defined for route "rssRewrite" in ai-config.js.
+ *
+ * @param {Array<{role:string, content:string}>} messages
+ *   Conversation messages: system + user, already constructed.
+ *
+ * @returns {Promise<string>}
+ *   We return the raw model text. The pipeline will parse it
+ *   into { title, summary } using normalizeModelText(), etc.
+ */
+export async function resolveModelRewriter(messages = []) {
+  try {
+    info("rss.model.call", {
+      route: "rssRewrite",
+      messagesCount: Array.isArray(messages) ? messages.length : 0,
+    });
 
-  // Heuristic: derive a reasonable short title; keep full content as body
-  const firstLine = text.split(/\n|\.|\!|\?/).find(Boolean) || title || 'Rewritten Article';
-  const safeTitle = firstLine.trim().slice(0, 120);
+    const out = await resilientRequest("rssRewrite", messages);
 
-  return { title: safeTitle, body: text };
+    // resilientRequest() returns model "content" as a string.
+    // We do NOT parse here. Let rewrite-pipeline handle shape/validation.
+    if (!out || typeof out !== "string") {
+      return "";
+    }
+    return out.trim();
+  } catch (err) {
+    error("rss.model.fail", {
+      route: "rssRewrite",
+      err: err.message,
+    });
+    throw err;
+  }
 }
 
-export const runLLMRewrite = rewriteTextLLM;
-export const rewriteFeed = rewriteTextLLM;
-export function resolveModelRewriter() {
-  return rewriteTextLLM;
-}
-export default rewriteTextLLM;
+export default {
+  resolveModelRewriter,
+};
