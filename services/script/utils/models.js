@@ -1,136 +1,116 @@
 // services/script/utils/models.js
-// Centralized model runners for intro / main / outro / compose
-// Uses shared ai-service.js to handle model fallback + vendor routing
+// Centralised model runners for intro / main / outro / compose
+// Uses shared ai-service.js with resilientRequest() for OpenRouter model handling
 
 import { info, error } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import {
-  getIntroPrompt,
-  getMainPrompt,
-  getOutroPromptFull,
-  validateScript,
-  validateOutro,
+  buildIntroPrompt,
+  buildMainPrompt,
+  buildOutroPrompt,
+  buildComposePrompt,
 } from "./promptTemplates.js";
+import { applyPodcastStyleHints } from "./podcastHelpers.js";
 
-import {
-  extractAndParseJson,
-  getTitleDescriptionPrompt,
-  getSEOKeywordsPrompt,
-  getArtworkPrompt,
-} from "./podcastHelpers.js";
-
-// Helper: run one LLM job with system/user prompts
-async function runLLM({ label, prompt }) {
+/**
+ * Wrapper for resilientRequest with consistent logging and fallback handling.
+ * @param {string} label - Section label ("intro", "main", "outro", "compose")
+ * @param {object} param1 - { system, user, routeKey }
+ * @returns {Promise<string>}
+ */
+async function runModel({ label, system, user, routeKey }) {
   try {
-    info("script.llm.call", { label });
-    const result = await resilientRequest({
-      prompt,
-      // ai-service.js handles:
-      // - model priority / fallback chain
-      // - temperature defaults / vendor routing
+    info("script.llm.call", { label, routeKey });
+
+    const response = await resilientRequest({
+      system,
+      prompt: user,
+      routeKey, // OpenRouter route key defined in ai-config.js
     });
 
-    if (!result) return "";
-    if (typeof result === "string") return result.trim();
-    if (typeof result.text === "string") return result.text.trim();
-    return JSON.stringify(result);
+    if (!response) return "";
+    if (typeof response === "string") return response.trim();
+    if (typeof response.text === "string") return response.text.trim();
+    if (response.output && typeof response.output === "string") return response.output.trim();
+
+    // fallback: stringify object if unknown structure
+    return JSON.stringify(response);
   } catch (err) {
     error("script.llm.fail", { label, err: err.message });
-    throw err;
+    throw new Error(`Model request failed for ${label}: ${err.message}`);
   }
 }
 
-// ─────────────────────────────────────────
+// ──────────────────────────────────────────────
 // INTRO GENERATOR
-// ─────────────────────────────────────────
-export async function generateIntro({ weatherSummary, turingQuote }) {
-  const prompt = getIntroPrompt({ weatherSummary, turingQuote });
-  const raw = await runLLM({ label: "intro", prompt });
-  return raw.trim();
+// ──────────────────────────────────────────────
+export async function generateIntro({ topic, date, tone = {} }) {
+  const { system, user } = buildIntroPrompt({ topic, date, tone });
+  const raw = await runModel({
+    label: "intro",
+    system,
+    user,
+    routeKey: "openrouter", // same model group as RSS Feed Creator
+  });
+  return applyPodcastStyleHints(raw, { section: "intro", topic, tone });
 }
 
-// ─────────────────────────────────────────
+// ──────────────────────────────────────────────
 // MAIN BODY GENERATOR
-// ─────────────────────────────────────────
-export async function generateMain({ articleTextArray = [], targetDuration = 60 }) {
-  const prompt = getMainPrompt(articleTextArray, targetDuration);
-  const raw = await runLLM({ label: "main", prompt });
-  const validated = validateScript(raw);
-  if (!validated.isValid) {
-    error("script.main.validation", { violations: validated.violations });
-  }
-  return raw.trim();
+// ──────────────────────────────────────────────
+export async function generateMain({ topic, talkingPoints = [], tone = {} }) {
+  const { system, user } = buildMainPrompt({ topic, talkingPoints, tone });
+  const raw = await runModel({
+    label: "main",
+    system,
+    user,
+    routeKey: "openrouter",
+  });
+  return applyPodcastStyleHints(raw, { section: "main", topic, tone });
 }
 
-// ─────────────────────────────────────────
+// ──────────────────────────────────────────────
 // OUTRO GENERATOR
-// ─────────────────────────────────────────
-export async function generateOutro({ expectedCta, expectedTitle, expectedUrl }) {
-  const prompt = await getOutroPromptFull();
-  const raw = await runLLM({ label: "outro", prompt });
-  const outroCheck = validateOutro(raw, expectedCta, expectedTitle, expectedUrl);
-  if (!outroCheck.isValid) {
-    error("script.outro.validation", { issues: outroCheck.issues });
-  }
-  return raw.trim();
+// ──────────────────────────────────────────────
+export async function generateOutro({ topic, tone = {} }) {
+  const { system, user } = buildOutroPrompt({ topic, tone });
+  const raw = await runModel({
+    label: "outro",
+    system,
+    user,
+    routeKey: "openrouter",
+  });
+  return applyPodcastStyleHints(raw, { section: "outro", topic, tone });
 }
 
-// ─────────────────────────────────────────
-// COMPOSER (FINAL EPISODE STITCH)
-// ─────────────────────────────────────────
+// ──────────────────────────────────────────────
+// COMPOSER (FINAL STITCH)
+// ──────────────────────────────────────────────
 export async function generateComposedEpisode({
   introText = "",
   mainText = "",
   outroText = "",
+  tone = {},
 }) {
-  const compositePrompt = `
-Combine the following podcast sections into one cohesive episode script.
-Maintain a single, consistent British Gen X voice (Jonathan Harris style),
-and ensure natural transitions between intro, main content, and outro.
+  const { system, user } = buildComposePrompt({
+    introText,
+    mainText,
+    outroText,
+    tone,
+  });
 
---- INTRO ---
-${introText}
-
---- MAIN ---
-${mainText}
-
---- OUTRO ---
-${outroText}
-
-Output one continuous narrative. No section labels, no meta-commentary.
-  `;
-  const raw = await runLLM({ label: "compose", prompt: compositePrompt });
-  return raw.trim();
+  const raw = await runModel({
+    label: "compose",
+    system,
+    user,
+    routeKey: "openrouter",
+  });
+  return applyPodcastStyleHints(raw, { section: "compose", tone });
 }
 
-// ─────────────────────────────────────────
-// TITLE + DESCRIPTION GENERATOR
-// ─────────────────────────────────────────
-export async function generateTitleAndDescription({ transcript }) {
-  const prompt = getTitleDescriptionPrompt(transcript);
-  const raw = await resilientRequest({ prompt, temperature: 0.7 });
-  const parsed = extractAndParseJson(raw);
-  if (!parsed) {
-    error("script.titledesc.parse.fail", { raw });
-    return { title: "Untitled Episode", description: "No description available." };
-  }
-  return parsed;
-}
-
-// ─────────────────────────────────────────
-// SEO KEYWORDS GENERATOR
-// ─────────────────────────────────────────
-export async function generateSEOKeywords({ description }) {
-  const prompt = getSEOKeywordsPrompt(description);
-  const raw = await resilientRequest({ prompt, temperature: 0.5 });
-  return raw.trim().replace(/\s+/g, " ");
-}
-
-// ─────────────────────────────────────────
-// ARTWORK PROMPT GENERATOR
-// ─────────────────────────────────────────
-export async function generateArtworkPrompt({ description }) {
-  const prompt = getArtworkPrompt(description);
-  const raw = await resilientRequest({ prompt, temperature: 0.5 });
-  return raw.trim();
-}
+export default {
+  generateIntro,
+  generateMain,
+  generateOutro,
+  generateComposedEpisode,
+};
