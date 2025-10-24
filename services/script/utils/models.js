@@ -7,8 +7,7 @@ import { resilientRequest } from "../../shared/utils/ai-service.js";
 import {
   buildIntroPrompt,
   buildMainPrompt,
-  buildOutroPrompt,
-  buildComposePrompt,
+  buildOutroPrompt
 } from "./promptTemplates.js"; // ✅ matches actual export
 import {
   extractAndParseJson,
