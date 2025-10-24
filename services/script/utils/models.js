@@ -7,7 +7,7 @@ import { resilientRequest } from "../../shared/utils/ai-service.js";
 import {
   buildIntroPrompt,
   buildMainPrompt,
-  buildOutroPrompt,
+  buildOutroPrompt
 } from "./promptTemplates.js"; // ✅ actual file name
 // NOTE: compose is handled by /script/compose using temp storage
 // so we do NOT import or generate anything for compose here.
