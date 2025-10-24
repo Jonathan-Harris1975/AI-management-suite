@@ -5,9 +5,12 @@
 import { info, error } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import {
-  buildIntroPrompt,
-  buildMainPrompt,
-  buildOutroPrompt
+  getIntroPrompt,
+  getMainPrompt,
+  getOutroPromptFull,
+  validateScript,
+  validateOutro,
+  humanize
 } from "./promptTemplates.js"; // ✅ matches actual export
 import {
   extractAndParseJson,
