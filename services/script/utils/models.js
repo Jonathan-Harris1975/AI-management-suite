@@ -12,7 +12,7 @@ import {
   getArtworkPrompt,
 } from "./podcastHelpers.js";
 
-// Destructure the helpers from promptTemplates.js
+// Destructure helpers from promptTemplates.js
 const {
   getIntroPrompt,
   getMainPrompt,
@@ -36,7 +36,11 @@ async function runLLM(routeName, promptPack = {}) {
   info("script.llm.call", { routeName });
 
   const raw = await resilientRequest(routeName, messages);
-  if (!raw || typeof raw !== "string") throw new Error(`Empty LLM response for ${routeName}`);
+
+  if (!raw || typeof raw !== "string") {
+    throw new Error(`Empty LLM response for ${routeName}`);
+  }
+
   return raw.trim();
 }
 
@@ -45,10 +49,16 @@ async function runLLM(routeName, promptPack = {}) {
 // ────────────────────────────────────────────────
 export async function generateIntro({ date, tone = {} } = {}) {
   try {
-    const { system, user } = getIntroPrompt({ date, vibe: tone.vibe });
+    const { system, user } = getIntroPrompt({
+      date,
+      vibe: tone.vibe,
+    });
+
     const raw = await runLLM("intro", { system, user });
+
     let cleaned = humanize(raw);
     cleaned = enforceTransitions(cleaned);
+
     return cleaned.trim();
   } catch (err) {
     error("script.intro.fail", { err: err.message });
@@ -57,34 +67,41 @@ export async function generateIntro({ date, tone = {} } = {}) {
 }
 
 // ────────────────────────────────────────────────
-// MAIN BODY GENERATOR (with array normalization fix)
+// MAIN BODY GENERATOR
 // ────────────────────────────────────────────────
+// NOTE: promptTemplates.getMainPrompt() expects `articles`,
+//       and inside it likely does `articles.forEach(...)`.
+//       We MUST pass an array called `articles`.
 export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   try {
-    // Normalize: ensure newsItems is always an array
-    const normalizedItems =
-      Array.isArray(newsItems)
-        ? newsItems
-        : typeof newsItems === "string" && newsItems.trim() !== ""
-        ? [newsItems]
-        : [];
+    // normalize incoming "newsItems" (Make.com payload etc.) into `articles` array
+    // If it's already an array, keep it. If it's a string, wrap it.
+    // If it's something else (null/undefined), use [].
+    const articles = Array.isArray(newsItems)
+      ? newsItems
+      : (typeof newsItems === "string" && newsItems.trim() !== "")
+      ? [newsItems]
+      : [];
 
     info("script.main.input", {
       type: typeof newsItems,
       isArray: Array.isArray(newsItems),
-      count: normalizedItems.length,
+      count: articles.length,
     });
 
     const { system, user } = getMainPrompt({
       date,
-      newsItems: normalizedItems,
+      articles,        // <-- CRITICAL FIX
       vibe: tone.vibe,
     });
 
     const raw = await runLLM("main", { system, user });
+
+    // Clean / validate the generated body
     let cleaned = validateScript(raw);
     cleaned = humanize(cleaned);
     cleaned = enforceTransitions(cleaned);
+
     return cleaned.trim();
   } catch (err) {
     error("script.main.fail", { err: err.message });
@@ -93,7 +110,7 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
 }
 
 // ────────────────────────────────────────────────
-// OUTRO GENERATOR
+— OUTRO GENERATOR
 // ────────────────────────────────────────────────
 export async function generateOutro({
   date,
@@ -103,11 +120,24 @@ export async function generateOutro({
   tone = {},
 } = {}) {
   try {
-    const { system, user } = getOutroPromptFull({ date, vibe: tone.vibe, siteUrl });
+    const { system, user } = getOutroPromptFull({
+      date,
+      vibe: tone.vibe,
+      siteUrl,
+    });
+
     const raw = await runLLM("outro", { system, user });
-    let cleaned = validateOutro(raw, { expectedCta, episodeTitle, siteUrl });
+
+    // tighten the outro to required CTA / signoff rules
+    let cleaned = validateOutro(raw, {
+      expectedCta,
+      episodeTitle,
+      siteUrl,
+    });
+
     cleaned = humanize(cleaned);
     cleaned = enforceTransitions(cleaned);
+
     return cleaned.trim();
   } catch (err) {
     error("script.outro.fail", { err: err.message });
@@ -127,22 +157,33 @@ export async function generateComposedEpisode({
   try {
     info("script.compose.start");
 
+    // final stitched script that TTS will read in order
     const composedText = `${introText}\n\n${mainText}\n\n${outroText}`.trim();
 
-    // Generate metadata (title, description, SEO, artwork)
+    //
+    // Metadata block:
+    //  - title + description JSON
+    //  - SEO keyword line
+    //  - artwork prompt line
+    //
     const titlePrompt = getTitleDescriptionPrompt(composedText);
     const titleResponse = await resilientRequest("metadata", { prompt: titlePrompt });
     const parsedMeta = extractAndParseJson(titleResponse);
 
-    const seoPrompt = getSEOKeywordsPrompt(parsedMeta?.description || composedText);
+    const seoPrompt = getSEOKeywordsPrompt(
+      parsedMeta?.description || composedText
+    );
     const seoResponse = await resilientRequest("metadata", { prompt: seoPrompt });
 
-    const artworkPrompt = getArtworkPrompt(parsedMeta?.description || composedText);
+    const artworkPrompt = getArtworkPrompt(
+      parsedMeta?.description || composedText
+    );
     const artResponse = await resilientRequest("metadata", { prompt: artworkPrompt });
 
     const metadata = {
       title: parsedMeta?.title || "Untitled Episode",
-      description: parsedMeta?.description || "No description generated.",
+      description:
+        parsedMeta?.description || "No description generated.",
       seoKeywords:
         typeof seoResponse === "string"
           ? seoResponse.trim()
@@ -154,7 +195,11 @@ export async function generateComposedEpisode({
     };
 
     info("script.compose.success", { title: metadata.title });
-    return { composedText, metadata };
+
+    return {
+      composedText,
+      metadata,
+    };
   } catch (err) {
     error("script.compose.fail", { err: err.message });
     throw err;
