@@ -1,5 +1,5 @@
 // services/script/utils/models.js
-// Centralised model runners for intro / main / outro / compose
+// Centralized model runners for intro / main / outro / compose
 // Uses shared ai-service.js to handle model fallback + vendor routing
 
 import { info, error } from "#logger.js";
@@ -10,7 +10,13 @@ import {
   buildOutroPrompt,
   buildComposePrompt,
 } from "./promptTemplates.js";
-import { applyPodcastStyleHints } from "./podcastHelper.js";
+
+import {
+  extractAndParseJson,
+  getTitleDescriptionPrompt,
+  getSEOKeywordsPrompt,
+  getArtworkPrompt
+} from "./podcastHelpers.js";
 
 // helper: run one LLM job with system/user prompts
 async function runLLM({ label, system, user }) {
@@ -19,18 +25,12 @@ async function runLLM({ label, system, user }) {
     const result = await callAI({
       system,
       prompt: user,
-      // ai-service.js already knows:
-      // - model priority / fallback chain
-      // - max tokens / temperature defaults
-      // - vendor auth
+      // ai-service.js handles model priority, temperature, and vendor routing
     });
 
-    // callAI is expected to return either { text } or a plain string.
     if (!result) return "";
     if (typeof result === "string") return result.trim();
     if (typeof result.text === "string") return result.text.trim();
-
-    // last ditch stringify
     return JSON.stringify(result);
   } catch (err) {
     error("script.llm.fail", { label, err: err.message });
@@ -44,8 +44,7 @@ async function runLLM({ label, system, user }) {
 export async function generateIntro({ topic, date, tone = {} }) {
   const { system, user } = buildIntroPrompt({ topic, date, tone });
   const raw = await runLLM({ label: "intro", system, user });
-  // give it light style polish (host voice, pacing rules, etc.)
-  return applyPodcastStyleHints(raw, { section: "intro", topic, tone });
+  return raw.trim();
 }
 
 // ─────────────────────────────────────────
@@ -54,7 +53,7 @@ export async function generateIntro({ topic, date, tone = {} }) {
 export async function generateMain({ topic, talkingPoints = [], tone = {} }) {
   const { system, user } = buildMainPrompt({ topic, talkingPoints, tone });
   const raw = await runLLM({ label: "main", system, user });
-  return applyPodcastStyleHints(raw, { section: "main", topic, tone });
+  return raw.trim();
 }
 
 // ─────────────────────────────────────────
@@ -63,7 +62,7 @@ export async function generateMain({ topic, talkingPoints = [], tone = {} }) {
 export async function generateOutro({ topic, tone = {} }) {
   const { system, user } = buildOutroPrompt({ topic, tone });
   const raw = await runLLM({ label: "outro", system, user });
-  return applyPodcastStyleHints(raw, { section: "outro", topic, tone });
+  return raw.trim();
 }
 
 // ─────────────────────────────────────────
@@ -82,8 +81,38 @@ export async function generateComposedEpisode({
     tone,
   });
 
-  // compose should produce final read-through script in broadcast order,
-  // single speaker voice, no TODO notes.
   const raw = await runLLM({ label: "compose", system, user });
-  return applyPodcastStyleHints(raw, { section: "compose", tone });
+  return raw.trim();
+}
+
+// ─────────────────────────────────────────
+// TITLE + DESCRIPTION GENERATOR
+// ─────────────────────────────────────────
+export async function generateTitleAndDescription({ transcript }) {
+  const prompt = getTitleDescriptionPrompt(transcript);
+  const raw = await callAI({ prompt, temperature: 0.7 });
+  const parsed = extractAndParseJson(raw);
+  if (!parsed) {
+    error("script.titledesc.parse.fail", { raw });
+    return { title: "Untitled Episode", description: "No description available." };
   }
+  return parsed;
+}
+
+// ─────────────────────────────────────────
+// SEO KEYWORDS GENERATOR
+// ─────────────────────────────────────────
+export async function generateSEOKeywords({ description }) {
+  const prompt = getSEOKeywordsPrompt(description);
+  const raw = await callAI({ prompt, temperature: 0.5 });
+  return raw.trim().replace(/\s+/g, " ");
+}
+
+// ─────────────────────────────────────────
+// ARTWORK PROMPT GENERATOR
+// ─────────────────────────────────────────
+export async function generateArtworkPrompt({ description }) {
+  const prompt = getArtworkPrompt(description);
+  const raw = await callAI({ prompt, temperature: 0.5 });
+  return raw.trim();
+}
