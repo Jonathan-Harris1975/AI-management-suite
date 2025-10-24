@@ -21,8 +21,21 @@ Your persona has the following traits:
 
 **TRANSITION ENFORCEMENT:** If you violate these rules, your response will be rejected and you'll have to start over.`;
 
-// --- AGGRESSIVE TRANSITION ENFORCER ---
-function enforceTransitions(text) {
+// --- AGGRESSIVE TRANSITION ENFORCER (hardened) ---
+function enforceTransitions(input) {
+  // Coerce any input to a safe string
+  let modifiedText = "";
+
+  if (Array.isArray(input)) {
+    modifiedText = input.join(" ");
+  } else if (typeof input === "object" && input !== null) {
+    modifiedText = input.text || JSON.stringify(input);
+  } else if (typeof input === "string") {
+    modifiedText = input;
+  } else {
+    modifiedText = String(input ?? "");
+  }
+
   const forbiddenPatterns = [
     /(Right|Well|So),\s*(another|a)\s*(week|day|batch|flurry)/gi,
     /(Right|Well|So),\s*(another|a)\s*/gi,
@@ -33,34 +46,42 @@ function enforceTransitions(text) {
     /Now,\s*moving on to/gi
   ];
 
-  let modifiedText = text;
   let violations = 0;
 
-  forbiddenPatterns.forEach(pattern => {
-    const matches = modifiedText.match(pattern);
-    if (matches) {
-      violations += matches.length;
-      modifiedText = modifiedText.replace(pattern, () => {
-        const alternatives = [
-          'This brings us to',
-          'Meanwhile,',
-          'In a related development,',
-          'Shifting focus to',
-          'Which naturally leads to',
-          'This story connects to'
-        ];
-        return alternatives[Math.floor(Math.random() * alternatives.length)];
-      });
+  for (const pattern of forbiddenPatterns) {
+    if (typeof modifiedText.match === "function") {
+      const matches = modifiedText.match(pattern);
+      if (matches) {
+        violations += matches.length;
+        modifiedText = modifiedText.replace(pattern, () => {
+          const alternatives = [
+            'This brings us to',
+            'Meanwhile,',
+            'In a related development,',
+            'Shifting focus to',
+            'Which naturally leads to',
+            'This story connects to'
+          ];
+          return alternatives[Math.floor(Math.random() * alternatives.length)];
+        });
+      }
     }
-  });
+  }
 
   if (violations > 0) console.log(`🚫 Fixed ${violations} transition violations`);
 
   return modifiedText;
 }
 
-// --- ENHANCED HUMANIZER WITH TRANSITION FOCUS ---
-function humanize(text) {
+// --- ENHANCED HUMANIZER WITH TRANSITION FOCUS (hardened) ---
+function humanize(input) {
+  // Coerce to string before applying regexes
+  let text = "";
+  if (Array.isArray(input)) text = input.join(" ");
+  else if (typeof input === "object" && input !== null)
+    text = input.text || JSON.stringify(input);
+  else text = String(input ?? "");
+
   let result = enforceTransitions(text);
 
   const synonyms = {
@@ -96,7 +117,7 @@ Use the quote as a springboard into the show's theme, rolling smoothly into:
 Keep it compact and conversational.`;
 }
 
-// --- ULTRA-STRICT MAIN PROMPT (fixed) ---
+// --- ULTRA-STRICT MAIN PROMPT (safe normalization) ---
 export function getMainPrompt({ articles = [], targetDuration = 60 }) {
   const normalizedArticles = Array.isArray(articles)
     ? articles.filter(a => typeof a === 'string' && a.trim().length > 0)
@@ -163,7 +184,7 @@ function analyzeArticleThemes(articles) {
   };
 
   articles.forEach(article => {
-    const articleText = article.toLowerCase();
+    const articleText = (typeof article === "string" ? article : JSON.stringify(article)).toLowerCase();
     for (const [theme, keywords] of Object.entries(themeKeywords)) {
       if (keywords.some(keyword => articleText.includes(keyword))) {
         themes.add(theme);
@@ -223,8 +244,10 @@ export function validateScript(script) {
     /So,\s*there you have it/gi
   ];
 
+  const safeScript = String(script ?? "");
+
   forbiddenPatterns.forEach(pattern => {
-    const matches = script.match(pattern);
+    const matches = safeScript.match(pattern);
     if (matches) {
       violations.push({
         pattern: pattern.toString(),
@@ -234,7 +257,7 @@ export function validateScript(script) {
     }
   });
 
-  const sentences = script.split(/[.!?]+/).filter(s => s.trim().length > 0);
+  const sentences = safeScript.split(/[.!?]+/).filter(s => s.trim().length > 0);
   const starters = sentences.map(s => s.trim().split(' ')[0].toLowerCase());
   const starterFrequency = starters.reduce((acc, starter) => {
     acc[starter] = (acc[starter] || 0) + 1;
@@ -260,26 +283,27 @@ export function validateScript(script) {
 
 export function validateOutro(script, expectedCta, expectedTitle, expectedUrl) {
   const issues = [];
+  const safeScript = String(script ?? "");
 
-  if (expectedCta && !script.includes(expectedCta))
+  if (expectedCta && !safeScript.includes(expectedCta))
     issues.push(`Missing CTA: "${expectedCta}"`);
-  if (expectedTitle && !script.includes(expectedTitle))
+  if (expectedTitle && !safeScript.includes(expectedTitle))
     issues.push(`Missing book title: "${expectedTitle}"`);
 
   const cleanUrl = expectedUrl?.replace(/^https?:\/\//, '');
-  if (cleanUrl && !script.includes(cleanUrl))
+  if (cleanUrl && !safeScript.includes(cleanUrl))
     issues.push(`Missing website: "${cleanUrl}"`);
 
-  const transitionViolations = validateScript(script).violations;
+  const transitionViolations = validateScript(safeScript).violations;
   if (transitionViolations.length > 0)
     issues.push(...transitionViolations.map(v => v.message));
 
   return {
     isValid: issues.length === 0,
     issues,
-    hasCta: expectedCta ? script.includes(expectedCta) : false,
-    hasBook: expectedTitle ? script.includes(expectedTitle) : false,
-    hasUrl: cleanUrl ? script.includes(cleanUrl) : false
+    hasCta: expectedCta ? safeScript.includes(expectedCta) : false,
+    hasBook: expectedTitle ? safeScript.includes(expectedTitle) : false,
+    hasUrl: cleanUrl ? safeScript.includes(cleanUrl) : false
   };
 }
 
