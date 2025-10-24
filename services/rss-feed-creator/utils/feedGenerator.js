@@ -1,5 +1,5 @@
 // Builds RSS XML and JSON metadata from the processed items list.
-import { putText, getPublicBase, getBucketName } from "../shared/utils/r2-client.js"; // Adjusted path to shared R2 client
+import { putText, getPublicBase, getBucketName } from "#shared/r2-client.js"; // Adjusted path to shared R2 client
 import { log } from "#logger.js"; // Adjusted path for logger
 
 // R2 object keys (match repo layout in production)
