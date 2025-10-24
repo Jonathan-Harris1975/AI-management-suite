@@ -25,6 +25,12 @@ const aiConfig = {
   },
 
   routeModels: {
+    rssRewrite: {
+      mode: "chat",
+      models: ["chatgpt", "google", "meta"],
+      maxTokens: 1600,
+      temperature: 0.7,
+    
     intro: {
       models: ["google", "chatgpt", "meta"],
       temperature: 0.7,
