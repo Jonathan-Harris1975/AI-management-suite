@@ -3,15 +3,13 @@
 // ============================================================
 // Cleaned up to remove redundant bootstrap steps:
 // - Removed ensureR2Sources (handled in rss-bootstrap.js)
-// - Removed rotateFeeds (rotation handled dynamically at runtime)
+
 // Keeps only feed fetching and rewrite functionality
 // ============================================================
 
 import { info, error } from "#logger.js";
 import { fetchFeedsXml } from "./utils/fetchFeeds.js";
 import { rewriteRSSFeeds } from "./rewrite-pipeline.js";
-import { getRotationOffset, updateRotationOffset } from "./utils/feedRotationManager.js";
-
 const MAX_FEEDS_PER_RUN = Number(process.env.MAX_FEEDS_PER_RUN || 5);
 const ROTATION_STEP = 5; // User specified rotation by 5 each time
 
@@ -34,26 +32,7 @@ export default async function bootstrapRssFeedCreator() {
       .map(f => f.trim())
       .filter(Boolean);
 
-    // Simple rotation: take the first N feeds, then the next N, etc.
-    // For demonstration, we'll use a fixed offset. In a real system, this offset
-    // would be stored and updated after each run.
-    const currentRotationOffset = await getRotationOffset();
-    const rotationOffset = currentRotationOffset % allFeeds.length; // Apply rotation offset
-    const rotatedFeeds = [
-      ...allFeeds.slice(rotationOffset),
-      ...allFeeds.slice(0, rotationOffset),
-    ];
-
-    const feeds = rotatedFeeds.slice(0, MAX_FEEDS_PER_RUN);
-
-    // Update rotation offset for the next run
-    const newRotationOffset = (currentRotationOffset + ROTATION_STEP) % allFeeds.length;
-    await updateRotationOffset(newRotationOffset);
-
-    if (!feeds.length) {
-      info("⚠️ No feed URLs provided via FEED_URLS — nothing to rewrite.");
-      return;
-    }
+    
 
     info(`🌐 Fetching up to ${feeds.length} feeds for rewrite...`);
     const fetched = await fetchFeedsXml(feeds);
