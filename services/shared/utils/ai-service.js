@@ -1,146 +1,101 @@
-// shared/utils/ai-service.js
-import aiConfig from "./ai-config.js";
+// services/script/utils/llmClient.js
 import { info, error } from "#logger.js";
 
-/**
- * Normalize and extract text content from OpenRouter responses.
- * Handles OpenAI-style, Anthropic-style, and fallback JSON cases.
- */
-async function readOpenRouterResponse(res) {
+// Pick a single primary model for podcast script voice.
+// You can still expose a fallback list if you want, but keep it local here.
+const MODEL_CANDIDATES = [
+  process.env.OPENROUTER_CHATGPT,
+  process.env.OPENROUTER_GOOGLE,
+  process.env.OPENROUTER_META,
+].filter(Boolean);
+
+// Build OpenRouter headers once
+function buildHeaders(apiKey) {
+  return {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${apiKey}`,
+    "HTTP-Referer": process.env.APP_URL || "https://ai-management-suite.on.shiper.app",
+    "X-Title": "Turing's Torch Script Generator",
+  };
+}
+
+// Normalize OpenRouter response to plain text
+async function readResponse(res) {
   const data = await res.json().catch(() => ({}));
 
-  // --- OpenAI-style response ---
-  if (data.choices && data.choices.length) {
-    const choice = data.choices[0];
-    if (choice.message?.content) return choice.message.content.trim();
-    if (choice.text) return choice.text.trim();
+  // OpenAI-style
+  if (data?.choices?.[0]?.message?.content) {
+    return data.choices[0].message.content.trim();
+  }
+  if (data?.choices?.[0]?.text) {
+    return data.choices[0].text.trim();
   }
 
-  // --- Anthropic / Claude-style response ---
-  if (Array.isArray(data.content) && data.content.length) {
-    const firstBlock = data.content.find(
-      b => b.type === "text" && typeof b.text === "string"
-    );
-    if (firstBlock) return firstBlock.text.trim();
+  // Anthropic-style passthrough block format
+  if (Array.isArray(data.content)) {
+    const txt = data.content
+      .filter(b => b && b.type === "text" && typeof b.text === "string")
+      .map(b => b.text.trim())
+      .join("\n\n")
+      .trim();
+    if (txt) return txt;
   }
 
-  // --- Fallback: stringify everything ---
+  // last resort
   return JSON.stringify(data);
 }
 
 /**
- * Call a single model using OpenRouter API.
- * Supports both "chat" and "prompt" modes.
+ * callLLM(messages)
+ * messages = [{role:"system",content:"..."},{role:"user",content:"..."}]
  */
-async function callSingleModel({
-  vendor,
-  model,
-  apiKey,
-  mode,
-  messages,
-  prompt,
-  maxTokens,
-  temperature,
-}) {
-  const url = "https://openrouter.ai/api/v1/chat/completions";
+export async function callLLM(messages, opts = {}) {
+  const temperature = opts.temperature ?? 0.7;
+  const max_tokens = opts.maxTokens ?? 1500;
 
-  // Build the body according to mode
-  let body;
-  if (mode === "chat") {
-    body = {
-      model,
-      messages,
-      max_tokens: maxTokens,
-      temperature,
-    };
-  } else {
-    // prompt mode -> wrap as single user message
-    body = {
-      model,
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: maxTokens,
-      temperature,
-    };
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new Error("callLLM: messages[] required");
   }
 
-  const headers = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${apiKey || process.env.OPENROUTER_API_KEY || ""}`,
-    "HTTP-Referer": process.env.APP_URL || "https://ai-management-suite.on.shiper.app",
-    "X-Title": process.env.APP_TITLE || "AI Podcast Suite",
-  };
-
-  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
-
-  if (!res.ok) {
-    const errTxt = await res.text();
-    throw new Error(`${res.status} ${res.statusText} — ${errTxt}`);
-  }
-
-  return readOpenRouterResponse(res);
-}
-
-/**
- * Resilient AI request with model fallback chain.
- *
- * @param {string} routeName - Route key from ai-config.routes (e.g. "intro", "compose", "metadata").
- * @param {object} payload - { messages:[...] } for chat mode, { prompt:"..." } for prompt mode.
- */
-export async function resilientRequest(routeName, payload = {}) {
-  const routeCfg = aiConfig.routes[routeName];
-  if (!routeCfg) throw new Error(`No model route defined for: ${routeName}`);
-
-  const { mode, models, maxTokens = 1000, temperature = 0.7 } = routeCfg;
-
-  // Validate payload shape
-  if (mode === "chat") {
-    if (!Array.isArray(payload.messages)) {
-      throw new Error(`Chat route "${routeName}" expects {messages:[...]}, got ${JSON.stringify(payload)}`);
-    }
-  } else if (mode === "prompt") {
-    if (typeof payload.prompt !== "string" || !payload.prompt.trim()) {
-      throw new Error(`Prompt route "${routeName}" expects {prompt:"..."}, got ${JSON.stringify(payload)}`);
-    }
-  }
-
-  let lastErr = null;
-
-  // Iterate through each model vendor fallback chain
-  for (const vendorKey of models) {
-    const vendor = aiConfig.models[vendorKey];
-    if (!vendor) {
-      error("ai.call.vendor.missing", { routeName, vendorKey });
-      continue;
-    }
+  let lastErr;
+  for (const model of MODEL_CANDIDATES) {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!model || !apiKey) continue;
 
     try {
-      info("ai.call.start", { routeName, vendor: vendorKey, model: vendor.name });
-
-      const text = await callSingleModel({
-        vendor: vendorKey,
-        model: vendor.name,
-        apiKey: vendor.apiKey,
-        mode,
-        messages: payload.messages,
-        prompt: payload.prompt,
-        maxTokens,
-        temperature,
+      info("llm.request", { model });
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: buildHeaders(apiKey),
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature,
+          max_tokens,
+        }),
       });
 
-      if (text && typeof text === "string") {
-        info("ai.call.success", { routeName, vendor: vendorKey });
-        return text.trim();
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`${res.status} ${res.statusText} - ${body}`);
       }
+
+      const out = await readResponse(res);
+      if (typeof out === "string" && out.trim().length) {
+        return out.trim();
+      }
+
+      throw new Error("Empty LLM output");
     } catch (err) {
-      error("ai.call.fail", { routeName, vendor: vendorKey, err: err.message });
+      error("llm.request.fail", { model, err: err.message });
       lastErr = err;
       continue;
     }
   }
 
   throw new Error(
-    `All models failed for route '${routeName}'. Last error: ${lastErr?.message || "unknown"}`
+    lastErr
+      ? `All podcast models failed. Last error: ${lastErr.message}`
+      : "No usable model found for podcast script generation"
   );
 }
-
-export default { resilientRequest };
