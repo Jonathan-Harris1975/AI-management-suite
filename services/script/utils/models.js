@@ -9,8 +9,8 @@ import {
   getMainPrompt,
   getOutroPromptFull,
   validateScript,
-  validateOutro,
-  humanize
+  validateOutro
+  
 } from "./promptTemplates.js"; // ✅ matches actual export
 import {
   extractAndParseJson,
