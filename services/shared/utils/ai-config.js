@@ -1,5 +1,4 @@
 // utils/ai-config.js
-
 /**
  * Centralized configuration for OpenRouter models and routing.
  * This setup uses standard, low-cost pay-as-you-go models for reliability
@@ -9,27 +8,27 @@ export const aiConfig = {
   models: {
     // Using the standard, reliable, and very low-cost Gemini Flash model.
     google: {
-      name: "google/gemini-2.0-flash-001",
+      name: process.env.OPENROUTER_GOOGLE,
       apiKey: process.env.OPENROUTER_API_KEY_GOOGLE,
     },
     // The standard GPT-4o Mini is a fast and powerful fallback.
     chatgpt: {
-      name: "openai/gpt-4o-mini",
+      name: process.env.OPENROUTER_CHATGPT,
       apiKey: process.env.OPENROUTER_API_KEY_CHATGPT,
     },
     // Standard Deepseek for reliable JSON generation.
     deepseek: {
-      name: "deepseek/deepseek-chat",
+      name: process.env.OPENROUTER_DEEPSEEK",
       apiKey: process.env.OPENROUTER_API_KEY_DEEPSEEK,
     },
-    // Standard Grok for fast data processing.
-    grok: {
-      name: "anthropic/claude-sonnet-4",
+    
+    anthropic: {
+      name: process.env.OPENROUTER_ANTHROPIC,
       apiKey: process.env.OPENROUTER_API_KEY_GROK,
     },
     // Standard Llama 3 is a fast and cheap final fallback.
     meta: {
-      name: "meta-llama/llama-4-scout",
+      name: process.env.OPENROUTER_META,
       apiKey: process.env.OPENROUTER_API_KEY_META,
     },
   },
@@ -39,8 +38,8 @@ export const aiConfig = {
   intro: ["google", "chatgpt", "meta"],
   main: ["google", "chatgpt", "deepseek"],
   outro: ["google", "chatgpt", "meta"],
-  compose: ["deepseek", "grok", "google"],
-  podcastHelper: ["deepseek", "grok", "google"],
+  compose: ["deepseek", "anthropic", "google"],
+  podcastHelper: ["deepseek", "anthropic", "google"],
   rssRewrite: ["chatgpt", "google", "meta"], // ✅ NEW ROUTE
 },
 
