@@ -9,7 +9,7 @@ import { Router } from "express";
 import { info, error } from "#logger.js";
 import { getObjectAsText, putText } from "#shared/r2-client.js";
 import { fetchWithTimeout } from "../../shared/http-client.js";
-import { runRewritePipeline } from "../../index.js";
+import { runRewritePipeline } from "./index.js";
 
 
 const router = Router();
