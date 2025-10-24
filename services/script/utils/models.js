@@ -1,12 +1,18 @@
 // services/script/utils/models.js
-// Centralized model runners for intro / main / outro
+// Centralized model runners for intro / main / outro / composed
 // Uses shared ai-service.js for model fallback + vendor routing
 
 import { info, error } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import promptTemplates from "./promptTemplates.js";
+import {
+  extractAndParseJson,
+  getTitleDescriptionPrompt,
+  getSEOKeywordsPrompt,
+  getArtworkPrompt,
+} from "./podcastHelpers.js";
 
-// Destructure the helpers from the default export in promptTemplates.js
+// Destructure the helpers from promptTemplates.js
 const {
   getIntroPrompt,
   getMainPrompt,
@@ -17,15 +23,11 @@ const {
   validateOutro,
 } = promptTemplates;
 
-/**
- * Internal helper: call LLM for a given routeName using {system,user} prompts
- * @param {string} routeName - "intro" | "main" | "outro"
- * @param {object} promptPack - { system: string, user: string }
- * @returns {Promise<string>} cleaned model text
- */
+// ────────────────────────────────────────────────
+// Helper: call LLM using route name + {system,user}
+// ────────────────────────────────────────────────
 async function runLLM(routeName, promptPack = {}) {
   const { system = "", user = "" } = promptPack;
-
   const messages = [
     { role: "system", content: system },
     { role: "user", content: user },
@@ -34,35 +36,19 @@ async function runLLM(routeName, promptPack = {}) {
   info("script.llm.call", { routeName });
 
   const raw = await resilientRequest(routeName, messages);
-
-  if (!raw || typeof raw !== "string") {
-    throw new Error(`Empty or invalid LLM response for ${routeName}`);
-  }
-
+  if (!raw || typeof raw !== "string") throw new Error(`Empty LLM response for ${routeName}`);
   return raw.trim();
 }
 
-/**
- * Generate the INTRO segment
- * @param {object} params
- * @param {string} params.date          - e.g. "2025-10-24"
- * @param {object} [params.tone]        - optional style hints { vibe?: string }
- * @returns {Promise<string>} finalIntroText
- */
+// ────────────────────────────────────────────────
+// INTRO GENERATOR
+// ────────────────────────────────────────────────
 export async function generateIntro({ date, tone = {} } = {}) {
   try {
-    // build the prompts expected by the intro model
-    const { system, user } = getIntroPrompt({
-      date,
-      vibe: tone.vibe, // if undefined, promptTemplates applies its own default vibe
-    });
-
-    const rawIntro = await runLLM("intro", { system, user });
-
-    // post-process voice/pacing
-    let cleaned = humanize(rawIntro);
+    const { system, user } = getIntroPrompt({ date, vibe: tone.vibe });
+    const raw = await runLLM("intro", { system, user });
+    let cleaned = humanize(raw);
     cleaned = enforceTransitions(cleaned);
-
     return cleaned.trim();
   } catch (err) {
     error("script.intro.fail", { err: err.message });
@@ -70,29 +56,16 @@ export async function generateIntro({ date, tone = {} } = {}) {
   }
 }
 
-/**
- * Generate the MAIN/BODY segment
- * @param {object} params
- * @param {string} params.date              - same date stamp as intro
- * @param {Array<string>} params.newsItems  - array of article summaries / bullets
- * @param {object} [params.tone]            - optional style hints { vibe?: string }
- * @returns {Promise<string>} finalMainText
- */
+// ────────────────────────────────────────────────
+// MAIN BODY GENERATOR
+// ────────────────────────────────────────────────
 export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   try {
-    const { system, user } = getMainPrompt({
-      date,
-      newsItems,
-      vibe: tone.vibe,
-    });
-
-    const rawMain = await runLLM("main", { system, user });
-
-    // clean, sanity check length/phrasing, then smooth it
-    let cleaned = validateScript(rawMain);
+    const { system, user } = getMainPrompt({ date, newsItems, vibe: tone.vibe });
+    const raw = await runLLM("main", { system, user });
+    let cleaned = validateScript(raw);
     cleaned = humanize(cleaned);
     cleaned = enforceTransitions(cleaned);
-
     return cleaned.trim();
   } catch (err) {
     error("script.main.fail", { err: err.message });
@@ -100,16 +73,9 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   }
 }
 
-/**
- * Generate the OUTRO / CLOSING CTA
- * @param {object} params
- * @param {string} params.date                - date stamp
- * @param {string} [params.episodeTitle]      - human episode title for CTA context
- * @param {string} [params.siteUrl]           - canonical site URL / landing page
- * @param {string} [params.expectedCta]       - optional CTA override
- * @param {object} [params.tone]              - optional style hints { vibe?: string }
- * @returns {Promise<string>} finalOutroText
- */
+// ────────────────────────────────────────────────
+// OUTRO GENERATOR
+// ────────────────────────────────────────────────
 export async function generateOutro({
   date,
   episodeTitle,
@@ -118,24 +84,11 @@ export async function generateOutro({
   tone = {},
 } = {}) {
   try {
-    const { system, user } = getOutroPromptFull({
-      date,
-      vibe: tone.vibe,
-      siteUrl: siteUrl, // promptTemplates already has a default if this is undefined
-    });
-
-    const rawOutro = await runLLM("outro", { system, user });
-
-    // enforce CTA / cleanup, then humanize tone and flow link
-    let cleaned = validateOutro(rawOutro, {
-      expectedCta,
-      episodeTitle,
-      siteUrl,
-    });
-
+    const { system, user } = getOutroPromptFull({ date, vibe: tone.vibe, siteUrl });
+    const raw = await runLLM("outro", { system, user });
+    let cleaned = validateOutro(raw, { expectedCta, episodeTitle, siteUrl });
     cleaned = humanize(cleaned);
     cleaned = enforceTransitions(cleaned);
-
     return cleaned.trim();
   } catch (err) {
     error("script.outro.fail", { err: err.message });
@@ -143,9 +96,49 @@ export async function generateOutro({
   }
 }
 
-// default export for convenience if something imports the whole module
+// ────────────────────────────────────────────────
+// COMPOSED EPISODE GENERATOR (NEW)
+// ────────────────────────────────────────────────
+export async function generateComposedEpisode({
+  introText = "",
+  mainText = "",
+  outroText = "",
+  tone = {},
+} = {}) {
+  try {
+    info("script.compose.start");
+
+    const composedText = `${introText}\n\n${mainText}\n\n${outroText}`.trim();
+
+    // Generate metadata (title, description, SEO, artwork)
+    const titlePrompt = getTitleDescriptionPrompt(composedText);
+    const titleResponse = await resilientRequest("metadata", { prompt: titlePrompt });
+    const parsedMeta = extractAndParseJson(titleResponse);
+
+    const seoPrompt = getSEOKeywordsPrompt(parsedMeta?.description || composedText);
+    const seoResponse = await resilientRequest("metadata", { prompt: seoPrompt });
+
+    const artworkPrompt = getArtworkPrompt(parsedMeta?.description || composedText);
+    const artResponse = await resilientRequest("metadata", { prompt: artworkPrompt });
+
+    const metadata = {
+      title: parsedMeta?.title || "Untitled Episode",
+      description: parsedMeta?.description || "No description generated.",
+      seoKeywords: typeof seoResponse === "string" ? seoResponse.trim() : JSON.stringify(seoResponse),
+      artworkPrompt: typeof artResponse === "string" ? artResponse.trim() : JSON.stringify(artResponse),
+    };
+
+    info("script.compose.success", { title: metadata.title });
+    return { composedText, metadata };
+  } catch (err) {
+    error("script.compose.fail", { err: err.message });
+    throw err;
+  }
+}
+
 export default {
   generateIntro,
   generateMain,
   generateOutro,
+  generateComposedEpisode,
 };
