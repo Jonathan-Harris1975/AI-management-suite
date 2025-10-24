@@ -1,228 +1,88 @@
-// services/rss-feed-creator/index.js (new content based on reference-rewrite-pipeline.js with feed rotation logic)
-import fetch from "node-fetch";
-import Parser from "rss-parser";
-import { log } from "#logger.js"; 
-import { getObject, putJson } from "../shared/utils/r2-client.js"; 
-import { resolveModelRewriter } from "./utils/models.js"; 
-import { rebuildRss } from "./utils/feedGenerator.js"; 
-import { SOURCE_FEED_CUTOFF_HOURS, isRecent } from "./rewrite-pipeline.js"; // Import cutoff logic from rewrite-pipeline
+// ============================================================
+// 🧠 RSS Feed Creator — Simplified Index
+// ============================================================
+// Cleaned up to remove redundant bootstrap steps:
+// - Removed ensureR2Sources (handled in rss-bootstrap.js)
+// - Removed rotateFeeds (rotation handled dynamically at runtime)
+// Keeps only feed fetching and rewrite functionality
+// ============================================================
 
-// Hardcoded cleanup for rewritten articles: 60 days
-const REWRITTEN_CLEANUP_HOURS = 60 * 24;
-import { shortenUrl } from "./utils/shortio.js"; // Adjusted path for shortio
-import { URL } from "url"; // Import URL for URL constructor
+import { info, error } from "#logger.js";
+import { fetchFeedsXml } from "./utils/fetchFeeds.js";
+import { rewriteRSSFeeds } from "./rewrite-pipeline.js";
+import { getRotationOffset, updateRotationOffset } from "./utils/feedRotationManager.js";
 
-const parser = new Parser();
+const MAX_FEEDS_PER_RUN = Number(process.env.MAX_FEEDS_PER_RUN || 5);
+const ROTATION_STEP = 5; // User specified rotation by 5 each time
 
-// R2 object keys (match repo layout in production)
-const ITEMS_KEY = "items.json";
-const FEEDS_KEY = "feeds.txt";
-const URLS_KEY  = "urls.txt";
-const CURSOR_KEY = "cursor.json";
+/**
+ * Optional standalone task to fetch and rewrite up to MAX_FEEDS_PER_RUN feeds.
+ * Normally not needed during container bootstrap (rss-bootstrap.js covers R2 setup).
+ */
+export default async function bootstrapRssFeedCreator() {
+  try {
+    info("🧠 RSS Feed Creator — simplified bootstrap start");
 
-// Batch limits
-const FEEDS_PER_RUN = 5;    // rotate 5 feeds per run
-const URLS_PER_RUN  = 1;    // rotate 1 direct URL per run
-const MAX_ITEMS_PER_FEED = parseInt(process.env.MAX_ITEMS_PER_FEED || "3", 10);
+    // Load feed URLs from environment or static list if needed
+    const rawList = process.env.FEED_URLS || "";
+    // Use a simple rotation mechanism based on a persistent counter or timestamp
+    // For this example, let's assume a simple rotation by 5 feeds.
+    // In a real-world scenario, this would involve a database or persistent storage
+    // to keep track of the last processed index for each FEED_URLS list.
+    const allFeeds = rawList
+      .split(/[\n,]/)
+      .map(f => f.trim())
+      .filter(Boolean);
 
-// --- helpers ---------------------------------------------------------------
+    // Simple rotation: take the first N feeds, then the next N, etc.
+    // For demonstration, we'll use a fixed offset. In a real system, this offset
+    // would be stored and updated after each run.
+    const currentRotationOffset = await getRotationOffset();
+    const rotationOffset = currentRotationOffset % allFeeds.length; // Apply rotation offset
+    const rotatedFeeds = [
+      ...allFeeds.slice(rotationOffset),
+      ...allFeeds.slice(0, rotationOffset),
+    ];
 
-function parseList(text) {
-  if (!text) return [];
-  return text
-    .split(/\r?\n/)
-    .map(s => s.trim())
-    .filter(s => s && !s.startsWith("#"));
-}
+    const feeds = rotatedFeeds.slice(0, MAX_FEEDS_PER_RUN);
 
-function clampRewrite(s) {
-  if (!s) return "";
-  // strip obvious non-article junk (markdown headings, "Podcast", etc.)
-  s = s.replace(/^#+\s*/gm, "")
-       .replace(/\*\*[^*]+\*\*/g, "")
-       .replace(/(?:^|\n)(?:Podcast|Intro|Headline)[:\-]/gi, "")
-       .replace(/\n+/g, " ")
-       .trim();
-  // enforce 200–400 chars (prefer sentence end)
-  const min = 200, max = 400;
-  if (s.length <= max) return s;
-  let cut = s.slice(0, max);
-  const lastPunct = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("!"), cut.lastIndexOf("?"));
-  if (lastPunct >= min) {
-    return cut.slice(0, lastPunct + 1).trim();
-  }
-  return cut.trim() + "…";
-}
+    // Update rotation offset for the next run
+    const newRotationOffset = (currentRotationOffset + ROTATION_STEP) % allFeeds.length;
+    await updateRotationOffset(newRotationOffset);
 
-function guid() {
-  return "RSS-" + Math.random().toString(36).slice(2, 8);
-}
+    if (!feeds.length) {
+      info("⚠️ No feed URLs provided via FEED_URLS — nothing to rewrite.");
+      return;
+    }
 
-async function readJson(key, fallback) {
-  const raw = await getObject(key);
-  if (!raw) return fallback;
-  try { return JSON.parse(raw); }
-  catch { return fallback; }
-}
+    info(`🌐 Fetching up to ${feeds.length} feeds for rewrite...`);
+    const fetched = await fetchFeedsXml(feeds);
+    const okFeeds = fetched.filter(f => f.ok);
 
-function wrapIndex(start, count, arr) {
-  if (arr.length === 0) return [];
-  const out = [];
-  for (let i = 0; i < count && i < arr.length; i++) {
-    out.push(arr[(start + i) % arr.length]);
-  }
-  return out;
-}
+    info("✅ Fetch results", {
+      okCount: okFeeds.length,
+      failCount: fetched.length - okFeeds.length,
+    });
 
-// --- core ------------------------------------------------------------------
-
-export async function runRewritePipeline() {
-  log.info("🚀 Starting rewrite pipeline");
-
-  // 1) load sources from R2 + rotation cursor
-  const [feedsText, urlsText, cursor] = await Promise.all([
-    getObject(FEEDS_KEY),
-    getObject(URLS_KEY),
-    readJson(CURSOR_KEY, { feedIndex: 0, urlIndex: 0 })
-  ]);
-
-  const allFeeds = parseList(feedsText);
-  const allUrls  = parseList(urlsText);
-
-  log.info({ feeds: allFeeds.length, urls: allUrls.length }, "📥 Input lists loaded");
-
-  const selectedFeeds = wrapIndex(cursor.feedIndex || 0, FEEDS_PER_RUN, allFeeds);
-  const selectedUrls  = wrapIndex(cursor.urlIndex  || 0, URLS_PER_RUN,  allUrls);
-
-  log.info({ selectedFeeds, selectedUrls }, "🎯 Selected sources for this run");
-
-  // 2) start with the current items, filtering out old ones based on cutoff
-  const allItems = await readJson(ITEMS_KEY, []);
-  
-  // Filter out items older than REWRITTEN_CLEANUP_HOURS (60 days)
-  const cleanupTime = Date.now() - (REWRITTEN_CLEANUP_HOURS * 60 * 60 * 1000);
-  const items = allItems.filter(item => item.ts > cleanupTime);
-
-  log.info({ totalItems: allItems.length, keptItems: items.length, cleanupHours: REWRITTEN_CLEANUP_HOURS }, "🧹 Filtered old items from store");
-
-  // 3) process feed items
-  for (const feed of selectedFeeds) {
-    log.info({ feed }, "🔗 Fetching RSS feed");
-    try {
-      const xml = await fetch(feed).then(r => r.text());
-      const parsed = await parser.parseString(xml);
-      log.info({ feed, items: parsed.items?.length || 0 }, "✅ RSS feed parsed successfully");
-
-      const feedItems = parsed.items || [];
-      // 3.1) Filter for recent articles (based on SOURCE_FEED_CUTOFF_HOURS) and take a slice
-      const recentItems = feedItems.filter(it => isRecent(it.isoDate || it.pubDate || it.date, SOURCE_FEED_CUTOFF_HOURS));
-      const slice = recentItems.slice(0, MAX_ITEMS_PER_FEED);
-      
-      log.info({ feed, recentItems: recentItems.length, processedItems: slice.length }, "📰 Processing recent articles");
-
-      for (const it of slice) {
-        const link = it.link || it.guid || it.id;
-        const title = (it.title || "").trim();
-        
-        // Skip if link is missing or item is already in the current list
-        if (!link) {
-          log.warn({ feed, it }, "⚠️ Skipping item without link");
-          continue;
-        }
-        if (items.some(x => x.url === link)) {
-          log.info({ feed, link }, "⏭️ Item already exists, skipping rewrite");
-          continue;
-        }
-
-        await rewriteAndStore({ url: link, title }, items);
+    // Run rewrite pipeline for each successfully fetched feed
+    for (const { url, xml } of okFeeds) {
+      const suffix = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, "_");
+      const fileName = `feed-${suffix}-${Date.now()}.xml`;
+      try {
+        await rewriteRSSFeeds(xml, { fileName });
+        info(`✍️ Rewrote RSS feed: ${url}`);
+      } catch (err) {
+        error("💥 Rewrite failed for feed", { url, err: err.message });
       }
-    } catch (err) {
-      log.error({ feed, err }, "❌ Failed to fetch/parse RSS feed");
     }
+
+    info("✅ RSS Feed Creator — simplified bootstrap complete");
+  } catch (err) {
+    error("💥 RSS Feed Creator bootstrap error", { err: err.message });
   }
-
-  // 4) process direct URLs
-  for (const url of selectedUrls) {
-    await rewriteAndStore({ url, title: null }, items);
-  }
-
-  // 5) persist items + rebuild rss
-  await putJson(ITEMS_KEY, items);
-  log.info({ key: ITEMS_KEY, count: items.length }, "💾 items.json saved");
-
-  await rebuildRss(items);
-
-  // 6) advance rotation cursor
-  const next = {
-    feedIndex: (cursor.feedIndex + selectedFeeds.length) % (allFeeds.length || 1),
-    urlIndex:  (cursor.urlIndex  + selectedUrls.length)  % (allUrls.length  || 1),
-  };
-  await putJson(CURSOR_KEY, next);
-  log.info({ next }, "🔁 Rotation cursor updated");
-
-  log.info("🏁 Rewrite pipeline finished");
 }
 
-async function rewriteAndStore({ url, title }, items) {
-  // sanity check
-  try { new URL(url); } catch { log.warn({ url }, "⚠️ Invalid URL - skipped"); return; }
-
-  log.info({ url, title }, "✍️ Rewriting content");
-  let html = "";
-  try {
-    html = await fetch(url, { redirect: "follow" }).then(r => r.text());
-  } catch (err) {
-    log.error({ url, err }, "❌ Failed to fetch source page");
-  }
-
-  let rewritten = "";
-  try {
-    const raw = await resolveModelRewriter(url, html, title || "Untitled");
-    rewritten = clampRewrite(raw);
-    // ensure not empty
-    if (!rewritten || rewritten.length < 20) {
-      throw new Error("Empty/too short rewrite");
-    }
-  } catch (err) {
-    log.error({ url, err }, "❌ Rewrite failed");
-    return;
-  }
-
-  // Shorten URL (required for RSS link)
-  let shortUrl = url;
-  try {
-    log.info({ url }, "🔗 Creating Short.io link");
-    shortUrl = await createShortLink(url);
-    log.info({ shortUrl }, "✅ Short.io link created");
-  } catch (err) {
-    log.warn({ url, err }, "⚠️ Short.io failed, falling back to original URL");
-  }
-
-  // Add item (persistence is handled by filtering old items at the start)
-  const payload = {
-    guid: guid(),
-    url,
-    shortUrl,
-    title: title || "",
-    rewrite: rewritten,
-    ts: Date.now()
-  };
-
-  // The logic for 'adding' new items and 'not overwriting' is now:
-  // 1. Filter out old items from R2 store at the start of the pipeline.
-  // 2. Only process items that are recent (using isRecent) and not already in the filtered list.
-  // 3. Add the new item to the list.
-  items.push(payload);
-  log.info({ url }, "➕ Added new item");
-}
-
-// Allow manual execution via CLI (node services/rss-feed-creator/index.js)
+// ✅ Allow manual execution via CLI (node services/rss-feed-creator/index.js)
 if (process.argv[1] && process.argv[1].endsWith("index.js")) {
-  runRewritePipeline().catch((err) => {
-    log.error("💥 RSS Feed Creator pipeline error", { err: err.message });
-    process.exit(1);
-  });
+  bootstrapRssFeedCreator().catch(() => process.exit(1));
 }
-
-export default runRewritePipeline;
-
