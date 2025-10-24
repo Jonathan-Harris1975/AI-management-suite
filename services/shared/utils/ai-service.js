@@ -1,5 +1,5 @@
 // shared/utils/ai-service.js
-import aiConfig from "../ai-config.js";
+import aiConfig from "./ai-config.js";
 import { info, error } from "#logger.js";
 
 /**
