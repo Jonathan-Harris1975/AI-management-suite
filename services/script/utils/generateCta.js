@@ -1,4 +1,4 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
+
 export default function generateCta(book) {
   const safeTitle = book?.title?.replace(/[-]/g, ' ') ?? 'this topic';
 
