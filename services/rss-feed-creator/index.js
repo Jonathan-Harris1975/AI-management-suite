@@ -1,10 +1,10 @@
 // services/rss-feed-creator/index.js (new content based on reference-rewrite-pipeline.js with feed rotation logic)
 import fetch from "node-fetch";
 import Parser from "rss-parser";
-import { log } from "../../../logger.js"; // Adjusted path for logger
-import { getObject, putJson } from "../shared/utils/r2-client.js"; // Adjusted path for R2 client
-import { callOpenRouterModel } from "./utils/models.js"; // Assuming models.js contains the model call logic
-import { rebuildRss } from "./utils/feedGenerator.js"; // Assuming feedGenerator.js contains the rebuild logic
+import { log } from "#logger.js"; 
+import { getObject, putJson } from "../shared/utils/r2-client.js"; 
+import { callOpenRouterModel } from "./utils/models.js"; 
+import { rebuildRss } from "./utils/feedGenerator.js"; 
 import { SOURCE_FEED_CUTOFF_HOURS, isRecent } from "../rewrite-pipeline.js"; // Import cutoff logic from rewrite-pipeline
 
 // Hardcoded cleanup for rewritten articles: 60 days
