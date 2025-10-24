@@ -34,7 +34,7 @@ async function runLLM(routeName, promptPack = {}) {
 
   info("script.llm.call", { routeName });
 
-  const raw = await resilientRequest(routeName, messages);
+  const raw = await resilientRequest(routeName, { messages });
   if (!raw || typeof raw !== "string")
     throw new Error(`Empty LLM response for ${routeName}`);
   return raw.trim();
@@ -66,7 +66,7 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
     if (Array.isArray(newsItems)) {
       articles = newsItems.filter(Boolean);
     } else if (typeof newsItems === "object" && newsItems !== null) {
-      // If Make.com sends {title, summary}, flatten to readable string
+      // Flatten structured object into text
       const str = Object.values(newsItems).join(" - ");
       articles = [str];
     } else if (typeof newsItems === "string" && newsItems.trim()) {
@@ -110,6 +110,7 @@ export async function generateOutro({
       vibe: tone.vibe,
       siteUrl,
     });
+
     const raw = await runLLM("outro", { system, user });
     const validation = validateOutro(raw, expectedCta, episodeTitle, siteUrl);
 
@@ -141,10 +142,17 @@ export async function generateComposedEpisode({
 
     const composedText = `${introText}\n\n${mainText}\n\n${outroText}`.trim();
 
-    // Reuse the existing "compose" model route from ai-config.js
+    // Generate metadata (title, description, SEO, artwork)
     const titlePrompt = getTitleDescriptionPrompt(composedText);
     const titleResponse = await resilientRequest("compose", {
-      prompt: titlePrompt,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a helpful assistant that creates podcast metadata (title + description).",
+        },
+        { role: "user", content: titlePrompt },
+      ],
     });
     const parsedMeta = extractAndParseJson(titleResponse);
 
@@ -152,14 +160,28 @@ export async function generateComposedEpisode({
       parsedMeta?.description || composedText
     );
     const seoResponse = await resilientRequest("compose", {
-      prompt: seoPrompt,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are an SEO expert assisting in keyword generation for podcast episodes.",
+        },
+        { role: "user", content: seoPrompt },
+      ],
     });
 
     const artworkPrompt = getArtworkPrompt(
       parsedMeta?.description || composedText
     );
     const artResponse = await resilientRequest("compose", {
-      prompt: artworkPrompt,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are an AI prompt engineer. Generate a concise, vivid visual prompt for an episode cover image.",
+        },
+        { role: "user", content: artworkPrompt },
+      ],
     });
 
     const metadata = {
