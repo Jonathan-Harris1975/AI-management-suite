@@ -1,30 +1,89 @@
-import { resilientRequest } from '../../shared/utils/ai-service.js';
-import { RSS_PROMPTS } from './rss-prompts.js';
+// services/script/utils/models.js
+// Centralised model runners for intro / main / outro / compose
+// Uses shared ai-service.js to handle model fallback + vendor routing
 
-// Return a structured object so the pipeline can use title/body
-export async function rewriteTextLLM({
-  title,
-  snippet,
-  minLength = 250,
-  maxLength = 750,
-  tone = 'informative',
+import { info, error } from "#logger.js";
+import { callAI } from "../../shared/utils/ai-service.js";
+import {
+  buildIntroPrompt,
+  buildMainPrompt,
+  buildOutroPrompt,
+  buildComposePrompt,
+} from "./promptTemplates.js";
+import { applyPodcastStyleHints } from "./podcastHelper.js";
+
+// helper: run one LLM job with system/user prompts
+async function runLLM({ label, system, user }) {
+  try {
+    info("script.llm.call", { label });
+    const result = await callAI({
+      system,
+      prompt: user,
+      // ai-service.js already knows:
+      // - model priority / fallback chain
+      // - max tokens / temperature defaults
+      // - vendor auth
+    });
+
+    // callAI is expected to return either { text } or a plain string.
+    if (!result) return "";
+    if (typeof result === "string") return result.trim();
+    if (typeof result.text === "string") return result.text.trim();
+
+    // last ditch stringify
+    return JSON.stringify(result);
+  } catch (err) {
+    error("script.llm.fail", { label, err: err.message });
+    throw err;
+  }
+}
+
+// ─────────────────────────────────────────
+// INTRO GENERATOR
+// ─────────────────────────────────────────
+export async function generateIntro({ topic, date, tone = {} }) {
+  const { system, user } = buildIntroPrompt({ topic, date, tone });
+  const raw = await runLLM({ label: "intro", system, user });
+  // give it light style polish (host voice, pacing rules, etc.)
+  return applyPodcastStyleHints(raw, { section: "intro", topic, tone });
+}
+
+// ─────────────────────────────────────────
+// MAIN BODY GENERATOR
+// ─────────────────────────────────────────
+export async function generateMain({ topic, talkingPoints = [], tone = {} }) {
+  const { system, user } = buildMainPrompt({ topic, talkingPoints, tone });
+  const raw = await runLLM({ label: "main", system, user });
+  return applyPodcastStyleHints(raw, { section: "main", topic, tone });
+}
+
+// ─────────────────────────────────────────
+// OUTRO GENERATOR
+// ─────────────────────────────────────────
+export async function generateOutro({ topic, tone = {} }) {
+  const { system, user } = buildOutroPrompt({ topic, tone });
+  const raw = await runLLM({ label: "outro", system, user });
+  return applyPodcastStyleHints(raw, { section: "outro", topic, tone });
+}
+
+// ─────────────────────────────────────────
+// COMPOSER (FINAL EPISODE SCRIPT STITCH)
+// ─────────────────────────────────────────
+export async function generateComposedEpisode({
+  introText = "",
+  mainText = "",
+  outroText = "",
+  tone = {},
 }) {
-  const prompt = RSS_PROMPTS.newsletterQuality({ title, snippet, minLength, maxLength, tone });
-  const messages = [{ role: 'user', content: prompt }];
+  const { system, user } = buildComposePrompt({
+    introText,
+    mainText,
+    outroText,
+    tone,
+  });
 
-  const out = await resilientRequest('rssRewrite', messages);
-  const text = (out || '').trim();
-
-  // Heuristic: derive a reasonable short title; keep full content as body
-  const firstLine = text.split(/\n|\.|\!|\?/).find(Boolean) || title || 'Rewritten Article';
-  const safeTitle = firstLine.trim().slice(0, 120);
-
-  return { title: safeTitle, body: text };
-}
-
-export const runLLMRewrite = rewriteTextLLM;
-export const rewriteFeed = rewriteTextLLM;
-export function resolveModelRewriter() {
-  return rewriteTextLLM;
-}
-export default rewriteTextLLM;
+  // compose should produce final read-through script in broadcast order,
+  // single speaker voice, no TODO notes.
+  const raw = await runLLM({ label: "compose", system, user });
+  return applyPodcastStyleHints(raw, { section: "compose", tone });
+  }
