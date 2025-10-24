@@ -57,11 +57,30 @@ export async function generateIntro({ date, tone = {} } = {}) {
 }
 
 // ────────────────────────────────────────────────
-// MAIN BODY GENERATOR
+// MAIN BODY GENERATOR (with array normalization fix)
 // ────────────────────────────────────────────────
 export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   try {
-    const { system, user } = getMainPrompt({ date, newsItems, vibe: tone.vibe });
+    // Normalize: ensure newsItems is always an array
+    const normalizedItems =
+      Array.isArray(newsItems)
+        ? newsItems
+        : typeof newsItems === "string" && newsItems.trim() !== ""
+        ? [newsItems]
+        : [];
+
+    info("script.main.input", {
+      type: typeof newsItems,
+      isArray: Array.isArray(newsItems),
+      count: normalizedItems.length,
+    });
+
+    const { system, user } = getMainPrompt({
+      date,
+      newsItems: normalizedItems,
+      vibe: tone.vibe,
+    });
+
     const raw = await runLLM("main", { system, user });
     let cleaned = validateScript(raw);
     cleaned = humanize(cleaned);
@@ -97,7 +116,7 @@ export async function generateOutro({
 }
 
 // ────────────────────────────────────────────────
-// COMPOSED EPISODE GENERATOR (NEW)
+// COMPOSED EPISODE GENERATOR
 // ────────────────────────────────────────────────
 export async function generateComposedEpisode({
   introText = "",
@@ -124,8 +143,14 @@ export async function generateComposedEpisode({
     const metadata = {
       title: parsedMeta?.title || "Untitled Episode",
       description: parsedMeta?.description || "No description generated.",
-      seoKeywords: typeof seoResponse === "string" ? seoResponse.trim() : JSON.stringify(seoResponse),
-      artworkPrompt: typeof artResponse === "string" ? artResponse.trim() : JSON.stringify(artResponse),
+      seoKeywords:
+        typeof seoResponse === "string"
+          ? seoResponse.trim()
+          : JSON.stringify(seoResponse),
+      artworkPrompt:
+        typeof artResponse === "string"
+          ? artResponse.trim()
+          : JSON.stringify(artResponse),
     };
 
     info("script.compose.success", { title: metadata.title });
