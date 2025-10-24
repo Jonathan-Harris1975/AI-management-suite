@@ -56,4 +56,4 @@ const aiConfig = {
   },
 
 
-export default aiConfig;
+export default aiConfig
