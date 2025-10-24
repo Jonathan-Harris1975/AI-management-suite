@@ -110,7 +110,7 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
 }
 
 // ────────────────────────────────────────────────
-— OUTRO GENERATOR
+// — OUTRO GENERATOR
 // ────────────────────────────────────────────────
 export async function generateOutro({
   date,
