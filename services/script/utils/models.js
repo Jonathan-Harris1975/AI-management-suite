@@ -5,27 +5,29 @@
 import { info, error } from "#logger.js";
 import { callAI } from "../../shared/utils/ai-service.js";
 import {
-  buildIntroPrompt,
-  buildMainPrompt,
-  buildOutroPrompt,
-  buildComposePrompt,
+  getIntroPrompt,
+  getMainPrompt,
+  getOutroPromptFull,
+  validateScript,
+  validateOutro,
 } from "./promptTemplates.js";
 
 import {
   extractAndParseJson,
   getTitleDescriptionPrompt,
   getSEOKeywordsPrompt,
-  getArtworkPrompt
+  getArtworkPrompt,
 } from "./podcastHelpers.js";
 
-// helper: run one LLM job with system/user prompts
-async function runLLM({ label, system, user }) {
+// Helper: run one LLM job with system/user prompts
+async function runLLM({ label, prompt }) {
   try {
     info("script.llm.call", { label });
     const result = await callAI({
-      system,
-      prompt: user,
-      // ai-service.js handles model priority, temperature, and vendor routing
+      prompt,
+      // ai-service.js handles:
+      // - model priority / fallback chain
+      // - temperature defaults / vendor routing
     });
 
     if (!result) return "";
@@ -41,47 +43,63 @@ async function runLLM({ label, system, user }) {
 // ─────────────────────────────────────────
 // INTRO GENERATOR
 // ─────────────────────────────────────────
-export async function generateIntro({ topic, date, tone = {} }) {
-  const { system, user } = buildIntroPrompt({ topic, date, tone });
-  const raw = await runLLM({ label: "intro", system, user });
+export async function generateIntro({ weatherSummary, turingQuote }) {
+  const prompt = getIntroPrompt({ weatherSummary, turingQuote });
+  const raw = await runLLM({ label: "intro", prompt });
   return raw.trim();
 }
 
 // ─────────────────────────────────────────
 // MAIN BODY GENERATOR
 // ─────────────────────────────────────────
-export async function generateMain({ topic, talkingPoints = [], tone = {} }) {
-  const { system, user } = buildMainPrompt({ topic, talkingPoints, tone });
-  const raw = await runLLM({ label: "main", system, user });
+export async function generateMain({ articleTextArray = [], targetDuration = 60 }) {
+  const prompt = getMainPrompt(articleTextArray, targetDuration);
+  const raw = await runLLM({ label: "main", prompt });
+  const validated = validateScript(raw);
+  if (!validated.isValid) {
+    error("script.main.validation", { violations: validated.violations });
+  }
   return raw.trim();
 }
 
 // ─────────────────────────────────────────
 // OUTRO GENERATOR
 // ─────────────────────────────────────────
-export async function generateOutro({ topic, tone = {} }) {
-  const { system, user } = buildOutroPrompt({ topic, tone });
-  const raw = await runLLM({ label: "outro", system, user });
+export async function generateOutro({ expectedCta, expectedTitle, expectedUrl }) {
+  const prompt = await getOutroPromptFull();
+  const raw = await runLLM({ label: "outro", prompt });
+  const outroCheck = validateOutro(raw, expectedCta, expectedTitle, expectedUrl);
+  if (!outroCheck.isValid) {
+    error("script.outro.validation", { issues: outroCheck.issues });
+  }
   return raw.trim();
 }
 
 // ─────────────────────────────────────────
-// COMPOSER (FINAL EPISODE SCRIPT STITCH)
+// COMPOSER (FINAL EPISODE STITCH)
 // ─────────────────────────────────────────
 export async function generateComposedEpisode({
   introText = "",
   mainText = "",
   outroText = "",
-  tone = {},
 }) {
-  const { system, user } = buildComposePrompt({
-    introText,
-    mainText,
-    outroText,
-    tone,
-  });
+  const compositePrompt = `
+Combine the following podcast sections into one cohesive episode script.
+Maintain a single, consistent British Gen X voice (Jonathan Harris style),
+and ensure natural transitions between intro, main content, and outro.
 
-  const raw = await runLLM({ label: "compose", system, user });
+--- INTRO ---
+${introText}
+
+--- MAIN ---
+${mainText}
+
+--- OUTRO ---
+${outroText}
+
+Output one continuous narrative. No section labels, no meta-commentary.
+  `;
+  const raw = await runLLM({ label: "compose", prompt: compositePrompt });
   return raw.trim();
 }
 
