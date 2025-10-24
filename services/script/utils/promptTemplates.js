@@ -295,11 +295,11 @@ export function validateOutro(script, expectedCta, expectedTitle, expectedUrl) {
 }
 
 export default {
-  buildIntroPrompt,
-  buildMainPrompt,
-  buildOutroPrompt,
-  validateScript,
-  validateOutro,
+  getIntroPrompt,
+  getMainPrompt,
+  getOutroPromptFull,
   humanize,
-  enforceTransitions
+  enforceTransitions,
+  validateScript,
+  validateOutro
 };
