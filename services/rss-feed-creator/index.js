@@ -10,8 +10,7 @@
 import { info, error } from "#logger.js";
 import { fetchFeedsXml } from "./utils/fetchFeeds.js";
 import { rewriteRSSFeeds } from "./rewrite-pipeline.js";
-import { getRotationOffset, updateRotationOffset } from "./utils/feedRotationManager.js";
-
+import { rotateFeed, filterRecentItems } from "./utils/feedRotationManager.js";
 const MAX_FEEDS_PER_RUN = Number(process.env.MAX_FEEDS_PER_RUN || 5);
 const ROTATION_STEP = 5; // User specified rotation by 5 each time
 
