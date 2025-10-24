@@ -7,6 +7,9 @@
 // - No HTML, markdown, or emojis
 // ============================================================
 
+// ─────────────────────────────────────────────
+// SYSTEM PROMPT
+// ─────────────────────────────────────────────
 export const SYSTEM = `
 You are an experienced Gen-X technology journalist writing for an AI-focused audience.
 
@@ -45,6 +48,9 @@ Rules:
 CRITICAL: This must pass as human-written. No robotic patterns, no AI clichés, no corporate speak. Write like a real tech journalist with opinions and a pulse.
 `.trim();
 
+// ─────────────────────────────────────────────
+// USER PROMPT GENERATOR
+// ─────────────────────────────────────────────
 export function USER_ITEM({
   site = "AI News",
   title = "",
@@ -76,6 +82,9 @@ export function USER_ITEM({
     .join("\n");
 }
 
+// ─────────────────────────────────────────────
+// TEXT NORMALIZATION HELPERS
+// ─────────────────────────────────────────────
 export function normalizeModelText(result = "") {
   const text = String(result || "").replace(/[""'']/g, "'").trim();
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -98,7 +107,10 @@ export function clampSummaryToWindow(summary = "", min = 300, max = 1100) {
   return cutoff > min ? t.slice(0, cutoff + 1) : t.slice(0, max);
 }
 
-export const RSS_PROMPTS = {
+// ─────────────────────────────────────────────
+// EXPORT STRUCTURE
+// ─────────────────────────────────────────────
+const RSS_PROMPTS = {
   SYSTEM,
   USER_ITEM,
   normalizeModelText,
