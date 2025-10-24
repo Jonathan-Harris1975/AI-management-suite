@@ -5,7 +5,7 @@ import { log } from "#logger.js";
 import { getObject, putJson } from "../shared/utils/r2-client.js"; 
 import { callOpenRouterModel } from "./utils/models.js"; 
 import { rebuildRss } from "./utils/feedGenerator.js"; 
-import { SOURCE_FEED_CUTOFF_HOURS, isRecent } from "../rewrite-pipeline.js"; // Import cutoff logic from rewrite-pipeline
+import { SOURCE_FEED_CUTOFF_HOURS, isRecent } from "./rewrite-pipeline.js"; // Import cutoff logic from rewrite-pipeline
 
 // Hardcoded cleanup for rewritten articles: 60 days
 const REWRITTEN_CLEANUP_HOURS = 60 * 24;
