@@ -295,9 +295,9 @@ export function validateOutro(script, expectedCta, expectedTitle, expectedUrl) {
 }
 
 export default {
-  getIntroPrompt,
-  getMainPrompt,
-  getOutroPromptFull,
+  buildIntroPrompt,
+  buildMainPrompt,
+  buildOutroPrompt,
   validateScript,
   validateOutro,
   humanize,
