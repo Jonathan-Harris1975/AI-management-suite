@@ -54,6 +54,6 @@ const aiConfig = {
       temperature: 0.5,
     },
   },
-};
+
 
 export default aiConfig;
