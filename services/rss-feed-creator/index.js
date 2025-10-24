@@ -9,7 +9,7 @@ import { SOURCE_FEED_CUTOFF_HOURS, isRecent } from "./rewrite-pipeline.js"; // I
 
 // Hardcoded cleanup for rewritten articles: 60 days
 const REWRITTEN_CLEANUP_HOURS = 60 * 24;
-import { createShortLink } from "./utils/shortio.js"; // Adjusted path for shortio
+import { shortenUrl } from "./utils/shortio.js"; // Adjusted path for shortio
 import { URL } from "url"; // Import URL for URL constructor
 
 const parser = new Parser();
