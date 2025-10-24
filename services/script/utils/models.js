@@ -3,7 +3,7 @@
 // Uses shared ai-service.js to handle model fallback + vendor routing
 
 import { info, error } from "#logger.js";
-import { callAI } from "../../shared/utils/ai-service.js";
+import { resilientRequest } from "../../shared/utils/ai-service.js";
 import {
   getIntroPrompt,
   getMainPrompt,
@@ -23,7 +23,7 @@ import {
 async function runLLM({ label, prompt }) {
   try {
     info("script.llm.call", { label });
-    const result = await callAI({
+    const result = await resilientRequest({
       prompt,
       // ai-service.js handles:
       // - model priority / fallback chain
@@ -108,7 +108,7 @@ Output one continuous narrative. No section labels, no meta-commentary.
 // ─────────────────────────────────────────
 export async function generateTitleAndDescription({ transcript }) {
   const prompt = getTitleDescriptionPrompt(transcript);
-  const raw = await callAI({ prompt, temperature: 0.7 });
+  const raw = await resilientRequest({ prompt, temperature: 0.7 });
   const parsed = extractAndParseJson(raw);
   if (!parsed) {
     error("script.titledesc.parse.fail", { raw });
@@ -122,7 +122,7 @@ export async function generateTitleAndDescription({ transcript }) {
 // ─────────────────────────────────────────
 export async function generateSEOKeywords({ description }) {
   const prompt = getSEOKeywordsPrompt(description);
-  const raw = await callAI({ prompt, temperature: 0.5 });
+  const raw = await resilientRequest({ prompt, temperature: 0.5 });
   return raw.trim().replace(/\s+/g, " ");
 }
 
@@ -131,6 +131,6 @@ export async function generateSEOKeywords({ description }) {
 // ─────────────────────────────────────────
 export async function generateArtworkPrompt({ description }) {
   const prompt = getArtworkPrompt(description);
-  const raw = await callAI({ prompt, temperature: 0.5 });
+  const raw = await resilientRequest({ prompt, temperature: 0.5 });
   return raw.trim();
 }
