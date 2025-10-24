@@ -9,8 +9,13 @@ import {
   buildMainPrompt,
   buildOutroPrompt,
   buildComposePrompt,
-} from "./promptTemplates.js";
-import { applyPodcastStyleHints } from "./podcastHelpers.js";
+} from "./promptTemplates.js"; // ✅ matches actual export
+import {
+  extractAndParseJson,
+  getTitleDescriptionPrompt,
+  getSEOKeywordsPrompt,
+  getArtworkPrompt,
+} from "./podcastHelpers.js"; // ✅ matches actual export
 
 /**
  * Wrapper for resilientRequest with consistent logging and fallback handling.
@@ -50,9 +55,9 @@ export async function generateIntro({ topic, date, tone = {} }) {
     label: "intro",
     system,
     user,
-    routeKey: "openrouter", // same model group as RSS Feed Creator
+    routeKey: "openrouter",
   });
-  return applyPodcastStyleHints(raw, { section: "intro", topic, tone });
+  return raw;
 }
 
 // ──────────────────────────────────────────────
@@ -66,7 +71,7 @@ export async function generateMain({ topic, talkingPoints = [], tone = {} }) {
     user,
     routeKey: "openrouter",
   });
-  return applyPodcastStyleHints(raw, { section: "main", topic, tone });
+  return raw;
 }
 
 // ──────────────────────────────────────────────
@@ -80,7 +85,7 @@ export async function generateOutro({ topic, tone = {} }) {
     user,
     routeKey: "openrouter",
   });
-  return applyPodcastStyleHints(raw, { section: "outro", topic, tone });
+  return raw;
 }
 
 // ──────────────────────────────────────────────
@@ -105,7 +110,7 @@ export async function generateComposedEpisode({
     user,
     routeKey: "openrouter",
   });
-  return applyPodcastStyleHints(raw, { section: "compose", tone });
+  return raw;
 }
 
 export default {
