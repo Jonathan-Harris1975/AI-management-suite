@@ -1,42 +1,129 @@
 // services/script/routes/index.js
-// Mounts intro, main, outro, compose, and exposes /orchestrate via orchestrator util.
+// Exposes the podcast script generation endpoints:
+//   POST /script/intro
+//   POST /script/main
+//   POST /script/outro
+//   POST /script/compose
+//   POST /script/orchestrate
 
 import express from "express";
-import { info } from "#logger.js";
+import { info, error } from "#logger.js";
 
-// Child route modules — each exports an Express.Router()
-// with its own POST "/" handler (NOT /script/*).
-import intro from "./intro.js";
-import main from "./main.js";
-import outro from "./outro.js";
-import compose from "./compose.js";
+import {
+  generateIntro,
+  generateMain,
+  generateOutro,
+  generateComposedEpisode,
+} from "../utils/models.js";
 
-// Orchestrator utility (calls local endpoints via APP_URL)
 import { orchestrateScript } from "../utils/orchestrator.js";
 
 const router = express.Router();
 
-// Optional: quick health for the script service itself
-router.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "script", ts: new Date().toISOString() });
-});
-
-// Mount the 4 stage routers at their stage paths
-router.use("/intro", intro);
-router.use("/main", main);
-router.use("/outro", outro);
-router.use("/compose", compose);
-
-// Orchestrate the full flow
-router.post("/orchestrate", async (req, res) => {
-  const { sessionId, date, topic, tone, seedText } = req.body || {};
-  info("🎬 Script orchestration start", { sessionId });
+/**
+ * POST /script/intro
+ * body: { topic, date, tone? }
+ */
+router.post("/intro", async (req, res) => {
+  const { topic, date, tone = {} } = req.body || {};
+  info("script.intro.req", { topic, date });
 
   try {
-    const result = await orchestrateScript({ sessionId, date, topic, tone, seedText });
-    return res.json({ ok: true, ...result });
+    const text = await generateIntro({ topic, date, tone });
+    return res.status(200).json({ ok: true, text });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+    error("script.intro.fail", { err: err.message });
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * POST /script/main
+ * body: { topic, talkingPoints[], tone? }
+ */
+router.post("/main", async (req, res) => {
+  const { topic, talkingPoints = [], tone = {} } = req.body || {};
+  info("script.main.req", { topic, talkingPointsCount: talkingPoints.length });
+
+  try {
+    const text = await generateMain({ topic, talkingPoints, tone });
+    return res.status(200).json({ ok: true, text });
+  } catch (err) {
+    error("script.main.fail", { err: err.message });
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * POST /script/outro
+ * body: { topic, tone? }
+ */
+router.post("/outro", async (req, res) => {
+  const { topic, tone = {} } = req.body || {};
+  info("script.outro.req", { topic });
+
+  try {
+    const text = await generateOutro({ topic, tone });
+    return res.status(200).json({ ok: true, text });
+  } catch (err) {
+    error("script.outro.fail", { err: err.message });
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * POST /script/compose
+ * body: { introText, mainText, outroText, tone? }
+ * returns the stitched final script (host-ready)
+ */
+router.post("/compose", async (req, res) => {
+  const { introText = "", mainText = "", outroText = "", tone = {} } = req.body || {};
+  info("script.compose.req", {
+    introLen: introText.length,
+    mainLen: mainText.length,
+    outroLen: outroText.length,
+  });
+
+  try {
+    const text = await generateComposedEpisode({
+      introText,
+      mainText,
+      outroText,
+      tone,
+    });
+
+    return res.status(200).json({ ok: true, text });
+  } catch (err) {
+    error("script.compose.fail", { err: err.message });
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * POST /script/orchestrate
+ * body: { sessionId, topic?, date?, tone? }
+ *
+ * This calls intro → main → outro → compose in-process
+ * using the orchestrator. The orchestrator is responsible
+ * for any temp caching and assembly logic.
+ */
+router.post("/orchestrate", async (req, res) => {
+  const { sessionId, topic, date, tone = {} } = req.body || {};
+  info("script.orchestrate.req", { sessionId, topic, date });
+
+  try {
+    const result = await orchestrateScript({
+      sessionId,
+      topic,
+      date,
+      tone,
+    });
+
+    // result is expected to include { ok, finalScript, chunks?, meta? }
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err) {
+    error("script.orchestrate.fail", { sessionId, err: err.message });
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
