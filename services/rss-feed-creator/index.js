@@ -3,7 +3,7 @@ import fetch from "node-fetch";
 import Parser from "rss-parser";
 import { log } from "#logger.js"; 
 import { getObject, putJson } from "../shared/utils/r2-client.js"; 
-import { callOpenRouterModel } from "./utils/models.js"; 
+import { resolveModelRewriter } from "./utils/models.js"; 
 import { rebuildRss } from "./utils/feedGenerator.js"; 
 import { SOURCE_FEED_CUTOFF_HOURS, isRecent } from "./rewrite-pipeline.js"; // Import cutoff logic from rewrite-pipeline
 
@@ -177,7 +177,7 @@ async function rewriteAndStore({ url, title }, items) {
 
   let rewritten = "";
   try {
-    const raw = await callOpenRouterModel(url, html, title || "Untitled");
+    const raw = await resolveModelRewriter(url, html, title || "Untitled");
     rewritten = clampRewrite(raw);
     // ensure not empty
     if (!rewritten || rewritten.length < 20) {
