@@ -1,7 +1,12 @@
 // services/rss/utils/rssModel.js
 import { info, error } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-import { RSS_PROMPTS } from "./rssPrompt.js";
+import {RSS_PROMPTS = {
+  SYSTEM,
+  USER_ITEM,
+  normalizeModelText,
+  clampTitleTo12Words,
+  clampSummaryToWindow } } from "./rssPrompt.js";
 
 /**
  * Handles rewriting RSS items via AI.
