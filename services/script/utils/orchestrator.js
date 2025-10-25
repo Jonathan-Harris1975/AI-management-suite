@@ -28,7 +28,7 @@ async function saveToR2(bucket, key, text, contentType = "text/plain") {
 // ─────────────────────────────
 // Main orchestration entrypoint
 // ─────────────────────────────
-export async function orchestrateEpisode({ episodeId, date, newsItems = [], tone = {} }) {
+export async function orchestrateScript({ episodeId, date, newsItems = [], tone = {} }) {
   info("script.pipeline.start", { episodeId });
 
   if (!episodeId) throw new Error("episodeId is required");
@@ -103,4 +103,4 @@ export async function orchestrateEpisode({ episodeId, date, newsItems = [], tone
   };
 }
 
-export default { orchestrateEpisode };
+export default { orchestrateScript };
