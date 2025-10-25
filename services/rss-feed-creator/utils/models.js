@@ -1,44 +1,61 @@
-// services/rss/utils/rssModel.js
+// services/rss-feed-creator/utils/models.js
 import { info, error } from "#logger.js";
-import { resilientRequest } from "../../shared/utils/ai-service.js";
-import {RSS_PROMPTS = {
-  SYSTEM,
-  USER_ITEM,
-  normalizeModelText,
-  clampTitleTo12Words,
-  clampSummaryToWindow } } from "./rssPrompt.js";
+import { resilientRequest } from "../../../shared/utils/ai-service.js";
+import { RSS_PROMPTS } from "./rssPrompts.js"; // ✅ Correct import syntax
 
 /**
- * Handles rewriting RSS items via AI.
- * The prompt creation is handled in rssPrompt.js.
+ * Rewrites RSS feed entries into concise summaries using AI.
+ * Uses the prompt templates defined in rssPrompts.js.
  */
-export async function rewriteFeedItem(item) {
+export async function rewriteRssFeedItem(item) {
   try {
-    const messages = RSS_PROMPTS(item); // ✅ handled by rssPrompt
-    info("rss.model.call", { route: "rssRewrite", messagesCount: messages.length });
+    const { title, summary, link } = item;
 
-    // ✅ Ensure correct call signature
-    const rewritten = await resilientRequest("rssRewrite", { messages });
-    return rewritten?.trim() || "";
+    const systemPrompt = RSS_PROMPTS.system;
+    const userPrompt = RSS_PROMPTS.user(title, summary, link);
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ];
+
+    info("rss-feed-creator.model.call", {
+      route: "rssRewrite",
+      messagesCount: messages.length,
+    });
+
+    const result = await resilientRequest("rssRewrite", { messages });
+
+    if (!result || typeof result !== "string") {
+      throw new Error("Empty or invalid AI response");
+    }
+
+    return result.trim();
   } catch (err) {
-    error("rss.model.fail", { route: "rssRewrite", err: err.message });
+    error("rss-feed-creator.model.fail", {
+      route: "rssRewrite",
+      err: err.message,
+    });
     throw err;
   }
 }
 
 /**
- * Batch rewrite all feed items
+ * Rewrites all items in a feed.
  */
-export async function rewriteFeedItems(feedItems = []) {
+export async function rewriteRssFeedItems(feedItems = []) {
   const results = [];
 
   for (const item of feedItems) {
     try {
-      const rewritten = await rewriteFeedItem(item);
-      results.push({ ...item, rewritten });
+      const rewritten = await rewriteRssFeedItem(item);
+      results.push({
+        ...item,
+        rewritten,
+      });
     } catch (err) {
-      error("❌ Item rewrite failed", {
-        itemTitle: item?.title,
+      error("❌ RSS item rewrite failed", {
+        itemTitle: item?.title || "Untitled",
         err: err.message,
       });
     }
@@ -47,4 +64,4 @@ export async function rewriteFeedItems(feedItems = []) {
   return results;
 }
 
-export default { rewriteFeedItems };
+export default { rewriteRssFeedItems };
