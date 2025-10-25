@@ -1,6 +1,6 @@
 // services/script/utils/orchestrator.js
 import { info, error } from "#logger.js";
-import { putText } from "../../shared/r2-client.js";
+import { putText } from "#shared/r2-client.js";
 import {
   generateIntro,
   generateMain,
