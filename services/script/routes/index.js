@@ -1,108 +1,91 @@
 // services/script/routes/index.js
+
 import express from "express";
 import { info, error } from "#logger.js";
-
 import {
   generateIntro,
   generateMain,
   generateOutro,
   generateComposedEpisode,
 } from "../utils/models.js";
-
-import { orchestrateScript } from "../utils/orchestrator.js";
+import { orchestrateEpisode } from "../utils/orchestrator.js";
 
 const router = express.Router();
 
-// health (optional)
-router.get("/health", (_req, res) => {
+// ─────────────────────────────
+//  HEALTH CHECK
+// ─────────────────────────────
+router.get("/health", (req, res) => {
   res.json({ ok: true, service: "script" });
 });
 
-// POST /script/intro
+// ─────────────────────────────
+//  INTRO
+// ─────────────────────────────
 router.post("/intro", async (req, res) => {
   try {
-    const { date, tone } = req.body || {};
-    const text = await generateIntro({ date, tone });
-    return res.json({ ok: true, text });
+    info("script.intro.req", { date: req.body.date });
+    const result = await generateIntro(req.body);
+    res.json({ ok: true, text: result });
   } catch (err) {
-    error("script.route.intro.fail", { err: err.message });
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message });
+    error("script.intro.fail", { err: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// POST /script/main
+// ─────────────────────────────
+//  MAIN
+// ─────────────────────────────
 router.post("/main", async (req, res) => {
   try {
-    const { date, newsItems, tone } = req.body || {};
-    const text = await generateMain({ date, newsItems, tone });
-    return res.json({ ok: true, text });
+    info("script.main.req", { date: req.body.date });
+    const result = await generateMain(req.body);
+    res.json({ ok: true, text: result });
   } catch (err) {
-    error("script.route.main.fail", { err: err.message });
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message });
+    error("script.main.fail", { err: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// POST /script/outro
+// ─────────────────────────────
+//  OUTRO
+// ─────────────────────────────
 router.post("/outro", async (req, res) => {
   try {
-    const { date, episodeTitle, siteUrl, expectedCta, tone } = req.body || {};
-    const text = await generateOutro({
-      date,
-      episodeTitle,
-      siteUrl,
-      expectedCta,
-      tone,
-    });
-    return res.json({ ok: true, text });
+    info("script.outro.req", { date: req.body.date });
+    const result = await generateOutro(req.body);
+    res.json({ ok: true, text: result });
   } catch (err) {
-    error("script.route.outro.fail", { err: err.message });
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message });
+    error("script.outro.fail", { err: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// POST /script/compose
+// ─────────────────────────────
+//  COMPOSE
+// ─────────────────────────────
 router.post("/compose", async (req, res) => {
   try {
-    const { introText, mainText, outroText, tone } = req.body || {};
-    const combo = await generateComposedEpisode({
-      introText,
-      mainText,
-      outroText,
-      tone,
-    });
-    return res.json({ ok: true, ...combo });
+    info("script.compose.req", { date: req.body.date });
+    const result = await generateComposedEpisode(req.body);
+    res.json({ ok: true, ...result });
   } catch (err) {
-    error("script.route.compose.fail", { err: err.message });
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message });
+    error("script.compose.fail", { err: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// POST /script/orchestrate
+// ─────────────────────────────
+//  ORCHESTRATE (FULL PIPELINE)
+// ─────────────────────────────
 router.post("/orchestrate", async (req, res) => {
   try {
-    const { episodeId, date, newsItems, tone } = req.body || {};
-
-    const result = await orchestrateEpisode({
-      episodeId,
-      date,
-      newsItems,
-      tone,
-    });
-
-    return res.json(result);
+    info("script.orchestrate.req", { date: req.body.date });
+    const result = await orchestrateEpisode(req.body);
+    res.json(result);
   } catch (err) {
-    error("script.route.orchestrate.fail", { err: err.message });
-    return res
-      .status(500)
-      .json({ ok: false, error: err.message });
+    error("script.orchestrate.fail", { err: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
