@@ -1,7 +1,7 @@
 // services/rss-feed-creator/utils/models.js
 import { info, error } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-import { RSS_PROMPTS } from "./rssPrompts.js"; // ✅ Correct import
+import { RSS_PROMPTS } from "./rss-prompts.js"; // ✅ Correct import
 /**
  * Rewrites RSS feed entries into concise summaries using AI.
  * Uses the prompt templates defined in rssPrompts.js.
