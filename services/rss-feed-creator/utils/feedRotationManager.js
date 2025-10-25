@@ -1,6 +1,6 @@
 // services/rss-feed-creator/utils/feedRotationManager.js
 import { info, warn } from "#logger.js";
-import { getObjectAsText, putText } from "../../shared/utils/r2-client.js";
+import { getObjectAsText, putText } from "#shared/utils/r2-client.js";
 
 const BUCKET = process.env.R2_BUCKET_RSS_FEEDS || "rss-feeds";
 const ROTATION_KEY = "data/feed-rotation.json";
