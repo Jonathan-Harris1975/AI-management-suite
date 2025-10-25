@@ -1,6 +1,6 @@
 // services/rss/utils/rssModel.js
 import { info, error } from "#logger.js";
-import { resilientRequest } from "../../../shared/utils/ai-service.js";
+import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { buildRssMessages } from "./rssPrompt.js";
 
 /**
