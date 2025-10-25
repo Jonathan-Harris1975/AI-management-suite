@@ -9,7 +9,7 @@ import {
   generateComposedEpisode,
 } from "../utils/models.js";
 
-import { orchestrateEpisode } from "../utils/orchestrator.js";
+import { orchestrateScript } from "../utils/orchestrator.js";
 
 const router = express.Router();
 
