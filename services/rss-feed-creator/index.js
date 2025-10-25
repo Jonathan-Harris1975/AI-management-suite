@@ -9,7 +9,7 @@
 
 import { info, error } from "#logger.js";
 import { fetchFeedsXml } from "./utils/fetchFeeds.js";
-import { rewriteRSSFeeds } from "./rewrite-pipeline.js";
+import { runRewritePipeline } from "./rewrite-pipeline.js";
 import { rotateFeed, filterRecentItems } from "./utils/feedRotationManager.js";
 const MAX_FEEDS_PER_RUN = Number(process.env.MAX_FEEDS_PER_RUN || 5);
 const ROTATION_STEP = 5; // User specified rotation by 5 each time
@@ -68,7 +68,7 @@ export default async function bootstrapRssFeedCreator() {
       const suffix = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, "_");
       const fileName = `feed-${suffix}-${Date.now()}.xml`;
       try {
-        await rewriteRSSFeeds(xml, { fileName });
+        await runRewritePipeline(xml, { fileName });
         info(`✍️ Rewrote RSS feed: ${url}`);
       } catch (err) {
         error("💥 Rewrite failed for feed", { url, err: err.message });
