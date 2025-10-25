@@ -1,7 +1,7 @@
 // services/rss/utils/rssModel.js
 import { info, error } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-import { buildRssMessages } from "./rssPrompt.js";
+import { RSS_PROMPTS } from "./rssPrompt.js";
 
 /**
  * Handles rewriting RSS items via AI.
@@ -9,7 +9,7 @@ import { buildRssMessages } from "./rssPrompt.js";
  */
 export async function rewriteFeedItem(item) {
   try {
-    const messages = buildRssMessages(item); // ✅ handled by rssPrompt
+    const messages = RSS_PROMPTS(item); // ✅ handled by rssPrompt
     info("rss.model.call", { route: "rssRewrite", messagesCount: messages.length });
 
     // ✅ Ensure correct call signature
