@@ -7,7 +7,7 @@
 // ============================================================
 
 import { log } from "#logger.js";
-import { orchestrateScript } from "../script/utils/orchestrator.js";
+import { orchestrateEpisode } from "../script/utils/orchestrator.js";
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
 import { generatePodcastArtwork } from "../artwork/utils/artwork.js";
 
@@ -16,7 +16,7 @@ export async function runPodcastPipeline({ sessionId }) {
 
   try {
     // 1️⃣ Run the script pipeline (intro → main → outro → compose)
-    const script = await orchestrateScript(sessionId);
+    const script = await orchestrateEpisode;
     log.info(`🧩 Script pipeline completed for ${sessionId}`);
 
     // 2️⃣ Run TTS synthesis
