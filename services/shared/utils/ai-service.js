@@ -3,7 +3,7 @@
 // Handles OpenRouter routing, fallback logic, and consistent error safety.
 
 import { info, error } from "#logger.js";
-import { aiConfig } from "../ai-config.js";
+import { aiConfig } from "./ai-config.js";
 
 /**
  * Normalize an OpenRouter / OpenAI style response
