@@ -9,7 +9,7 @@
 //       That avoids the old "RSS_PROMPTS is not a function" / bad import issues.
 
 import { info, error } from "#logger.js";
-import { resilientRequest } from "../../shared/utils/ai-service.js";
+import { callLLMText({ route, prompt }) } from "../../shared/utils/ai-service.js";
 
 /**
  * Call the model(s) for RSS rewriting using the fallback chain
@@ -29,7 +29,7 @@ export async function resolveModelRewriter(messages = []) {
       messagesCount: Array.isArray(messages) ? messages.length : 0,
     });
 
-    const out = await resilientRequest("rssRewrite", messages);
+    const out = await callLLMText({ route, prompt })("rssRewrite", messages);
 
     // resilientRequest() returns model "content" as a string.
     // We do NOT parse here. Let rewrite-pipeline handle shape/validation.
