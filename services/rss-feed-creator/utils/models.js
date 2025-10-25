@@ -9,7 +9,7 @@
 //       That avoids the old "RSS_PROMPTS is not a function" / bad import issues.
 
 import { info, error } from "#logger.js";
-import { callLLMText({ route, prompt }) } from "../../shared/utils/ai-service.js";
+import { callLLMText({ route, prompt }) } from "../../shared/utils/ai-service.js"
 
 /**
  * Call the model(s) for RSS rewriting using the fallback chain
