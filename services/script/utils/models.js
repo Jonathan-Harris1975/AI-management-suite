@@ -1,4 +1,7 @@
 // services/script/utils/models.js
+// Centralised model runners for intro / main / outro / composed
+// Uses shared ai-service.js for model routing + OpenRouter configuration
+
 import { info, error } from "#logger.js";
 import { callLLMText } from "../../shared/utils/ai-service.js";
 import promptTemplates from "./promptTemplates.js";
@@ -8,6 +11,7 @@ import {
   getSEOKeywordsPrompt,
   getArtworkPrompt,
 } from "./podcastHelpers.js";
+import { getFeedArticles } from "./rssFetcher.js"; // ✅ new helper for FEED_URL support
 
 const {
   getIntroPrompt,
@@ -19,7 +23,9 @@ const {
   validateOutro,
 } = promptTemplates;
 
+// ─────────────────────────────
 // INTRO
+// ─────────────────────────────
 export async function generateIntro({ date, tone = {} } = {}) {
   try {
     info("script.intro.req", { date });
@@ -42,12 +48,15 @@ export async function generateIntro({ date, tone = {} } = {}) {
   }
 }
 
-// MAIN
+// ─────────────────────────────
+// MAIN — FEED_URL + fallback
+// ─────────────────────────────
 export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   try {
-    // normalise incoming newsItems (Make.com sometimes sends object or string)
     let articles = [];
-    if (Array.isArray(newsItems)) {
+
+    // Normalize input from payload
+    if (Array.isArray(newsItems) && newsItems.length > 0) {
       articles = newsItems
         .filter(v => !!v)
         .map(v => (typeof v === "string" ? v : JSON.stringify(v)));
@@ -56,6 +65,17 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
       articles = [flat];
     } else if (typeof newsItems === "string" && newsItems.trim()) {
       articles = [newsItems.trim()];
+    }
+
+    // If no articles provided, auto-fetch from FEED_URL
+    if (articles.length === 0) {
+      const feedUrl = process.env.FEED_URL;
+      if (!feedUrl) throw new Error("FEED_URL not set in environment");
+      const fetched = await getFeedArticles(feedUrl);
+      if (!Array.isArray(fetched) || fetched.length === 0)
+        throw new Error(`No recent feed articles found at ${feedUrl}`);
+      articles = fetched;
+      info("script.main.feedLoad", { feedUrl, count: articles.length });
     }
 
     info("script.main.req", { count: articles.length });
@@ -67,11 +87,9 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
 
     const raw = await callLLMText({ route: "main", prompt });
 
-    // QA check only (don't replace text with object)
+    // Validation check
     const qa = validateScript(raw);
-    if (!qa.isValid) {
-      error("script.main.validation", { violations: qa.violations });
-    }
+    if (!qa.isValid) error("script.main.validation", { violations: qa.violations });
 
     let outText = humanize(raw);
     outText = enforceTransitions(outText);
@@ -82,7 +100,9 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   }
 }
 
+// ─────────────────────────────
 // OUTRO
+// ─────────────────────────────
 export async function generateOutro({
   date,
   episodeTitle,
@@ -94,19 +114,16 @@ export async function generateOutro({
     info("script.outro.req", { date });
 
     const outroPrompt = await getOutroPromptFull(); // async
-
     const raw = await callLLMText({ route: "outro", prompt: outroPrompt });
 
-    // QA check only
+    // Validation
     const qa = validateOutro(
       raw,
       expectedCta || "",
       episodeTitle || "",
       siteUrl || ""
     );
-    if (!qa.isValid) {
-      error("script.outro.validation", { issues: qa.issues });
-    }
+    if (!qa.isValid) error("script.outro.validation", { issues: qa.issues });
 
     let outText = humanize(raw);
     outText = enforceTransitions(outText);
@@ -117,7 +134,9 @@ export async function generateOutro({
   }
 }
 
+// ─────────────────────────────
 // COMPOSE
+// ─────────────────────────────
 export async function generateComposedEpisode({
   introText = "",
   mainText = "",
@@ -126,29 +145,23 @@ export async function generateComposedEpisode({
   try {
     info("script.compose.start");
 
-    // 1. Stitch final script as one block
-    // The reference code treats compose as assembly, not "LLM rewrite the whole thing again".
-    // We'll keep it that way: intro + main + outro.
     const composedText = [introText, mainText, outroText]
       .map(s => s.trim())
       .filter(Boolean)
       .join("\n\n")
       .trim();
 
-    // 2. Generate metadata (title / desc / seo / artwork)
-    //    We call the "metadata" route in ai-config for these helper prompts.
+    // Title + Description
     const tdPrompt = getTitleDescriptionPrompt(composedText);
     const tdRaw = await callLLMText({ route: "metadata", prompt: tdPrompt });
     const parsedMeta = extractAndParseJson(tdRaw) || {};
 
-    const seoPrompt = getSEOKeywordsPrompt(
-      parsedMeta.description || composedText
-    );
+    // SEO
+    const seoPrompt = getSEOKeywordsPrompt(parsedMeta.description || composedText);
     const seoRaw = await callLLMText({ route: "metadata", prompt: seoPrompt });
 
-    const artPrompt = getArtworkPrompt(
-      parsedMeta.description || composedText
-    );
+    // Artwork
+    const artPrompt = getArtworkPrompt(parsedMeta.description || composedText);
     const artRaw = await callLLMText({ route: "metadata", prompt: artPrompt });
 
     const metadata = {
@@ -172,6 +185,9 @@ export async function generateComposedEpisode({
   }
 }
 
+// ─────────────────────────────
+// EXPORTS
+// ─────────────────────────────
 export default {
   generateIntro,
   generateMain,
