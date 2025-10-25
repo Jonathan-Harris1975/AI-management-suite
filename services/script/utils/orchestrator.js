@@ -1,105 +1,106 @@
 // services/script/utils/orchestrator.js
-// Central orchestration helper used by routes/script-orchestrate.js
-// Calls the existing /script/* endpoints in-process via HTTP so that
-// intro/main/outro can persist their own temp data exactly as they do today.
-
 import { info, error } from "#logger.js";
+import { putText } from "../../shared/r2-client.js";
+import {
+  generateIntro,
+  generateMain,
+  generateOutro,
+  generateComposedEpisode,
+} from "./models.js";
 
-/**
- * Resolve base URL for internal calls.
- * - APP_URL (preferred) e.g. https://your-app.run
- * - else http://127.0.0.1:PORT
- */
-function getBaseUrl() {
-  const envUrl = process.env.APP_URL && String(process.env.APP_URL).trim();
-  if (envUrl) return envUrl.replace(/\/$/, "");
-  const port = process.env.PORT || 3000;
-  return `http://127.0.0.1:${port}`;
+// ─────────────────────────────
+// Select R2 buckets from env
+// ─────────────────────────────
+const BUCKET_RAW_TEXT = process.env.R2_BUCKET_RAW_TEXT;
+const BUCKET_META = process.env.R2_META_BUCKET;
+
+// helper for consistent key paths
+function keyFor(episodeId, file) {
+  return `episodes/${episodeId}/${file}`;
 }
 
-async function postJson(url, payload) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload || {}),
+// save helper
+async function saveToR2(bucket, key, text, contentType = "text/plain") {
+  await putText(bucket, key, text ?? "", contentType);
+  return { bucket, key };
+}
+
+// ─────────────────────────────
+// Main orchestration entrypoint
+// ─────────────────────────────
+export async function orchestrateEpisode({ episodeId, date, newsItems = [], tone = {} }) {
+  info("script.pipeline.start", { episodeId });
+
+  if (!episodeId) throw new Error("episodeId is required");
+
+  // 1️⃣ Generate intro / main / outro
+  const introText = await generateIntro({ date, tone });
+  const mainText = await generateMain({ date, newsItems, tone });
+  const outroText = await generateOutro({
+    date,
+    episodeTitle: "",
+    siteUrl: process.env.APP_URL || "https://jonathan-harris.online",
+    expectedCta: "",
+    tone,
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${res.statusText}${text ? ` — ${text}` : ""}`);
-  }
-  return res.json().catch(() => ({}));
+
+  // 2️⃣ Upload chunk texts
+  const chunks = [];
+  const introLoc = await saveToR2(BUCKET_RAW_TEXT, keyFor(episodeId, "chunk-0-intro.txt"), introText);
+  chunks.push({ index: 0, label: "intro", ...introLoc });
+
+  const mainLoc = await saveToR2(BUCKET_RAW_TEXT, keyFor(episodeId, "chunk-1-main.txt"), mainText);
+  chunks.push({ index: 1, label: "main", ...mainLoc });
+
+  const outroLoc = await saveToR2(BUCKET_RAW_TEXT, keyFor(episodeId, "chunk-2-outro.txt"), outroText);
+  chunks.push({ index: 2, label: "outro", ...outroLoc });
+
+  // 3️⃣ Compose and get metadata
+  const { composedText, metadata } = await generateComposedEpisode({
+    introText,
+    mainText,
+    outroText,
+    tone,
+  });
+
+  // 4️⃣ Upload transcript
+  const transcriptLoc = await saveToR2(
+    BUCKET_RAW_TEXT,
+    keyFor(episodeId, "transcript.txt"),
+    composedText
+  );
+
+  // 5️⃣ Upload meta JSON
+  const fullMeta = {
+    episodeId,
+    date,
+    chunks,
+    transcript: transcriptLoc,
+    metadata,
+    createdAt: new Date().toISOString(),
+  };
+
+  const metaLoc = await saveToR2(
+    BUCKET_META,
+    keyFor(episodeId, "meta.json"),
+    JSON.stringify(fullMeta, null, 2),
+    "application/json"
+  );
+
+  info("script.pipeline.done", {
+    episodeId,
+    metaKey: metaLoc.key,
+    transcriptKey: transcriptLoc.key,
+  });
+
+  return {
+    ok: true,
+    episodeId,
+    chunks,
+    transcript: transcriptLoc,
+    meta: metaLoc,
+    metadata: fullMeta,
+  };
 }
 
-/**
- * Orchestrate the script pipeline by calling the already-mounted routes:
- *   POST /script/intro
- *   POST /script/main
- *   POST /script/outro
- *   POST /script/compose
- *
- * These routes are responsible for writing/reading temp storage. We only
- * pass the sessionId/topic/date forward and check responses.
- */
-export async function orchestrateScript({ sessionId, topic, date }) {
-  const started = Date.now();
-  const base = getBaseUrl();
-
-  if (!sessionId) throw new Error("sessionId is required");
-  info("script.start", { sessionId: { sessionId } });
-
-  // Normalize payload all stages accept
-  const payload = { sessionId, topic, date };
-
-  try {
-    // 1) Intro
-    info("script.intro.call", { sessionId });
-    await postJson(`${base}/script/intro`, payload).catch((e) => {
-      error("script.intro.fail", { sessionId, error: e.message });
-      throw new Error(`Failed intro (${e.message})`);
-    });
-
-    // 2) Main
-    info("script.main.call", { sessionId });
-    await postJson(`${base}/script/main`, payload).catch((e) => {
-      error("script.main.fail", { sessionId, error: e.message });
-      throw new Error(`Failed main (${e.message})`);
-    });
-
-    // 3) Outro
-    info("script.outro.call", { sessionId });
-    await postJson(`${base}/script/outro`, payload).catch((e) => {
-      error("script.outro.fail", { sessionId, error: e.message });
-      throw new Error(`Failed outro (${e.message})`);
-    });
-
-    // 4) Compose (reads temp created by the three steps)
-    info("script.compose.call", { sessionId });
-    const composeRes = await postJson(`${base}/script/compose`, payload).catch((e) => {
-      error("script.compose.fail", { sessionId, error: e.message });
-      throw new Error(`Failed compose (${e.message})`);
-    });
-
-    info("script.done", { sessionId, tookMs: Date.now() - started });
-    return { ok: true, ...composeRes };
-  } catch (e) {
-    error("script.fail", { sessionId: { sessionId }, error: e.message });
-    throw e;
-  }
-}
-
-/**
- * Optional Express handler (if your route chooses to use it).
- * Usage in routes/script-orchestrate.js:
- *   router.post("/script/orchestrate", orchestrateHandler);
- */
-export async function orchestrateHandler(req, res) {
-  try {
-    const { sessionId, topic, date } = req.body || {};
-    const result = await orchestrate({ sessionId, topic, date });
-    res.json(result);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-}
-
-export default { orchestrateScript };
+export default { orchestrateEpisode };
