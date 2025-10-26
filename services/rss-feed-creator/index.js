@@ -3,7 +3,7 @@ import Parser from "rss-parser";
 import { info, error } from "#logger.js";
 import { getObjectAsText, uploadBuffer } from "#shared/utils/r2-client.js";
 import { callLLMChat } from "../../shared/utils/ai-service.js";
-import RSS_PROMPTS from "./utils/rss-prompts.js";
+import { RSS_PROMPTS } from "./utils/rss-prompts.js";
 
 const parser = new Parser();
 
