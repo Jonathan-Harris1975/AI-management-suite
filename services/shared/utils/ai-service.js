@@ -1,5 +1,5 @@
 // shared/utils/ai-service.js
-import config from "../ai-config.js";
+import config from "./ai-config.js";
 import { info, error } from "#logger.js";
 
 // normalize OpenRouter response
