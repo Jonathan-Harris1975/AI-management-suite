@@ -4,7 +4,7 @@ import { callLLMText } from "../../shared/utils/ai-service.js";
 import promptTemplates from "./promptTemplates.js";
 
 import { getWeatherSummary } from "./weather.js";
-import { getTuringQuote } from "./turingQuote.js";
+import { getTuringQuote } from "./getTuringQuote.js";
 import getSponsor from "./getSponsor.js";
 import generateCta from "./generateCta.js";
 
