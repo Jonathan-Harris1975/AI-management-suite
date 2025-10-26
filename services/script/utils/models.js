@@ -1,6 +1,6 @@
 // services/script/utils/models.js
 import { info, error } from "#logger.js";
-import { callLLMText } from "../../shared/utils/ai-service.js";
+import { resilientRequest } from "../../shared/utils/ai-service.js";
 import promptTemplates from "./promptTemplates.js";
 
 import { getWeatherSummary } from "./weather.js";
@@ -76,7 +76,7 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
       targetDuration: tone.targetDuration || 60,
     });
 
-    const raw = await callLLMText({ routeName: "main", prompt });
+    const raw = await resilientRequest({ routeName: "main", prompt });
 
     const qa = validateScript(raw);
     if (!qa.isValid) {
