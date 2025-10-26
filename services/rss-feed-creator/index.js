@@ -1,88 +1,217 @@
-// ============================================================
-// 🧠 RSS Feed Creator — Simplified Index
-// ============================================================
-// Cleaned up to remove redundant bootstrap steps:
-// - Removed ensureR2Sources (handled in rss-bootstrap.js)
-// - Removed rotateFeeds (rotation handled dynamically at runtime)
-// Keeps only feed fetching and rewrite functionality
-// ============================================================
-
+// services/rss-feed-creator/index.js
+import Parser from "rss-parser";
 import { info, error } from "#logger.js";
-import { fetchFeedsXml } from "./utils/fetchFeeds.js";
-import { rewriteRSSFeeds } from "./rewrite-pipeline.js";
-import { getRotationOffset, updateRotationOffset } from "./utils/feedRotationManager.js";
+import { getObjectAsText, uploadBuffer } from "#shared/utils/r2-client.js";
+import { callLLMChat } from "../../shared/utils/ai-service.js";
+import RSS_PROMPTS from "./utils/rss-prompts.js";
 
-const MAX_FEEDS_PER_RUN = Number(process.env.MAX_FEEDS_PER_RUN || 5);
-const ROTATION_STEP = 5; // User specified rotation by 5 each time
+const parser = new Parser();
 
-/**
- * Optional standalone task to fetch and rewrite up to MAX_FEEDS_PER_RUN feeds.
- * Normally not needed during container bootstrap (rss-bootstrap.js covers R2 setup).
- */
-export default async function bootstrapRssFeedCreator() {
+// ─────────────────────────────────────────────
+// ⚙️ Load Feeds + URLs + Rotation from R2
+// ─────────────────────────────────────────────
+async function loadFeedSources() {
+  const bucket = process.env.R2_BUCKET_RSS_FEEDS || "rss-feeds";
+
+  const [feedsTxt, urlsTxt, rotationTxt] = await Promise.all([
+    getObjectAsText(bucket, "data/rss-feeds.txt"),
+    getObjectAsText(bucket, "data/url-feeds.txt"),
+    getObjectAsText(bucket, "data/feed-rotation.json"),
+  ]);
+
+  const allFeeds = (feedsTxt || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const siteUrls = (urlsTxt || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const rotationIndex = parseInt(rotationTxt || "0", 10);
+
+  if (!allFeeds.length) throw new Error("rss-feeds.txt is empty or missing.");
+  if (!siteUrls.length) throw new Error("url-feeds.txt is empty or missing.");
+
+  return { allFeeds, siteUrls, rotationIndex, bucket };
+}
+
+// ─────────────────────────────────────────────
+// 🔄 Select feeds + site per run
+// ─────────────────────────────────────────────
+function selectFeeds({ allFeeds, siteUrls, rotationIndex }) {
+  const MAX_FEEDS_PER_RUN = parseInt(process.env.MAX_FEEDS_PER_RUN || "5", 10);
+  const totalFeeds = allFeeds.length;
+  const start = rotationIndex % totalFeeds;
+
+  const selectedFeeds = [];
+  for (let i = 0; i < MAX_FEEDS_PER_RUN; i++) {
+    const idx = (start + i) % totalFeeds;
+    selectedFeeds.push(allFeeds[idx]);
+  }
+
+  const siteIndex = rotationIndex % siteUrls.length;
+  const selectedSite = siteUrls[siteIndex];
+
+  const nextRotationIndex = (rotationIndex + MAX_FEEDS_PER_RUN) % totalFeeds;
+
+  info("rss.rotation", {
+    selectedFeeds: selectedFeeds.length,
+    selectedSite,
+    nextRotationIndex,
+  });
+
+  return { selectedFeeds, selectedSite, nextRotationIndex };
+}
+
+// ─────────────────────────────────────────────
+// 📰 Fetch and Filter Feed Items
+// ─────────────────────────────────────────────
+async function fetchFeedItems(feedUrl) {
+  const MAX_ITEMS_PER_FEED = parseInt(process.env.MAX_ITEMS_PER_FEED || "6", 10);
+  const FEED_CUTOFF_HOURS = parseInt(process.env.FEED_CUTOFF_HOURS || "24", 10);
+  const cutoffDate = new Date(Date.now() - FEED_CUTOFF_HOURS * 60 * 60 * 1000);
+
   try {
-    info("🧠 RSS Feed Creator — simplified bootstrap start");
+    const feed = await parser.parseURL(feedUrl);
+    const filtered = (feed.items || [])
+      .filter((item) => {
+        const pubDate = new Date(item.pubDate || item.isoDate || Date.now());
+        return pubDate >= cutoffDate;
+      })
+      .slice(0, MAX_ITEMS_PER_FEED);
 
-    // Load feed URLs from environment or static list if needed
-    const rawList = process.env.FEED_URLS || "";
-    // Use a simple rotation mechanism based on a persistent counter or timestamp
-    // For this example, let's assume a simple rotation by 5 feeds.
-    // In a real-world scenario, this would involve a database or persistent storage
-    // to keep track of the last processed index for each FEED_URLS list.
-    const allFeeds = rawList
-      .split(/[\n,]/)
-      .map(f => f.trim())
-      .filter(Boolean);
-
-    // Simple rotation: take the first N feeds, then the next N, etc.
-    // For demonstration, we'll use a fixed offset. In a real system, this offset
-    // would be stored and updated after each run.
-    const currentRotationOffset = await getRotationOffset();
-    const rotationOffset = currentRotationOffset % allFeeds.length; // Apply rotation offset
-    const rotatedFeeds = [
-      ...allFeeds.slice(rotationOffset),
-      ...allFeeds.slice(0, rotationOffset),
-    ];
-
-    const feeds = rotatedFeeds.slice(0, MAX_FEEDS_PER_RUN);
-
-    // Update rotation offset for the next run
-    const newRotationOffset = (currentRotationOffset + ROTATION_STEP) % allFeeds.length;
-    await updateRotationOffset(newRotationOffset);
-
-    if (!feeds.length) {
-      info("⚠️ No feed URLs provided via FEED_URLS — nothing to rewrite.");
-      return;
-    }
-
-    info(`🌐 Fetching up to ${feeds.length} feeds for rewrite...`);
-    const fetched = await fetchFeedsXml(feeds);
-    const okFeeds = fetched.filter(f => f.ok);
-
-    info("✅ Fetch results", {
-      okCount: okFeeds.length,
-      failCount: fetched.length - okFeeds.length,
+    info("rss.feed.filtered", {
+      feedTitle: feed.title || "Unnamed Feed",
+      originalCount: feed.items?.length || 0,
+      kept: filtered.length,
     });
 
-    // Run rewrite pipeline for each successfully fetched feed
-    for (const { url, xml } of okFeeds) {
-      const suffix = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, "_");
-      const fileName = `feed-${suffix}-${Date.now()}.xml`;
-      try {
-        await rewriteRSSFeeds(xml, { fileName });
-        info(`✍️ Rewrote RSS feed: ${url}`);
-      } catch (err) {
-        error("💥 Rewrite failed for feed", { url, err: err.message });
-      }
-    }
-
-    info("✅ RSS Feed Creator — simplified bootstrap complete");
+    return filtered;
   } catch (err) {
-    error("💥 RSS Feed Creator bootstrap error", { err: err.message });
+    error("rss.feed.error", { feedUrl, err: err.message });
+    return [];
   }
 }
 
-// ✅ Allow manual execution via CLI (node services/rss-feed-creator/index.js)
-if (process.argv[1] && process.argv[1].endsWith("index.js")) {
-  bootstrapRssFeedCreator().catch(() => process.exit(1));
+// ─────────────────────────────────────────────
+// ✍️ Rewrite Item via LLM
+// ─────────────────────────────────────────────
+async function rewriteItem(item) {
+  const { SYSTEM, USER_ITEM, normalizeModelText, clampTitleTo12Words, clampSummaryToWindow } =
+    RSS_PROMPTS;
+
+  const userPrompt = USER_ITEM({
+    site: item.site || "",
+    title: item.title || "",
+    url: item.link || "",
+    text: item.contentSnippet || item.content || "",
+    published: item.pubDate || "",
+  });
+
+  const messages = [
+    { role: "system", content: SYSTEM },
+    { role: "user", content: userPrompt },
+  ];
+
+  const raw = await callLLMChat({ route: "rssRewrite", messages });
+  const { title, summary } = normalizeModelText(raw);
+
+  return {
+    title: clampTitleTo12Words(title),
+    summary: clampSummaryToWindow(summary),
+    link: item.link,
+    date: item.pubDate || item.isoDate || new Date().toISOString(),
+  };
 }
+
+// ─────────────────────────────────────────────
+// 🧠 Main Orchestrator
+// ─────────────────────────────────────────────
+export async function runRssRewriter() {
+  try {
+    info("rss.orchestrate.start");
+
+    const { allFeeds, siteUrls, rotationIndex, bucket } = await loadFeedSources();
+    const { selectedFeeds, selectedSite, nextRotationIndex } = selectFeeds({
+      allFeeds,
+      siteUrls,
+      rotationIndex,
+    });
+
+    const allItems = [];
+    for (const feedUrl of selectedFeeds) {
+      const items = await fetchFeedItems(feedUrl);
+      allItems.push(...items.map((i) => ({ ...i, site: selectedSite })));
+    }
+
+    const rewritten = [];
+    for (const item of allItems) {
+      try {
+        const r = await rewriteItem(item);
+        rewritten.push(r);
+      } catch (err) {
+        error("rss.item.fail", { title: item.title, err: err.message });
+      }
+    }
+
+    // 🗂️ Build RSS XML
+    const xml = buildRssXml(rewritten);
+
+    // ☁️ Upload new feed + rotation index to R2
+    await Promise.all([
+      uploadBuffer(bucket, "feed.xml", Buffer.from(xml, "utf8")),
+      uploadBuffer(bucket, "data/feed-rotation.json", Buffer.from(String(nextRotationIndex), "utf8")),
+    ]);
+
+    info("rss.orchestrate.done", {
+      itemCount: rewritten.length,
+      nextRotationIndex,
+    });
+
+    return { ok: true, items: rewritten.length, xmlLength: xml.length };
+  } catch (err) {
+    error("rss.orchestrate.fail", { err: err.message });
+    return { ok: false, error: err.message };
+  }
+}
+
+// ─────────────────────────────────────────────
+// 🧱 Helper: RSS XML Builder
+// ─────────────────────────────────────────────
+function buildRssXml(items = []) {
+  const channelTitle = "Turing’s Torch: AI Weekly (Rewritten Feed)";
+  const channelLink = "https://jonathan-harris.online";
+  const channelDesc = "AI news summaries rewritten in a Gen-X British tone.";
+
+  const entries = items
+    .map(
+      (item) => `
+    <item>
+      <title>${escapeXml(item.title)}</title>
+      <link>${item.link}</link>
+      <pubDate>${item.date}</pubDate>
+      <description>${escapeXml(item.summary)}</description>
+    </item>`
+    )
+    .join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+  <rss version="2.0">
+    <channel>
+      <title>${channelTitle}</title>
+      <link>${channelLink}</link>
+      <description>${channelDesc}</description>
+      ${entries}
+    </channel>
+  </rss>`;
+}
+
+function escapeXml(s = "") {
+  return s.replace(/[<>&'"]/g, (c) =>
+    ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[c])
+  );
+}
+
+export default runRssRewriter;
