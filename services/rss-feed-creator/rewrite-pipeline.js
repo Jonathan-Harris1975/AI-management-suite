@@ -1,7 +1,7 @@
 import { parseStringPromise, Builder } from "xml2js";
 import { info, error } from "#logger.js";
 import { putText } from "#shared/r2-client.js";
-import { resolveModelRewriter } from "./utils/models.js";
+import { rewriteRssFeedItems } from "./utils/models.js";
 import { shortenUrl } from "./utils/shortio.js";
 import {
   SYSTEM,
