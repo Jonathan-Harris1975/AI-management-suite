@@ -1,15 +1,7 @@
 // ============================================================
 // 🧠 RSS Feed Creator — Gen-X Tone, Long-Form Prompt
-// ------------------------------------------------------------
-// - Title ≤ 12 words, plain text only
-// - Summary 300–1100 characters (≈ 60–200 words)
-// - Human, skeptical, "Gen-X tech journalist" tone
-// - No HTML, markdown, or emojis
 // ============================================================
 
-// ─────────────────────────────────────────────
-// SYSTEM PROMPT
-// ─────────────────────────────────────────────
 export const SYSTEM = `
 You are an experienced Gen-X technology journalist writing for an AI-focused audience.
 
@@ -28,7 +20,7 @@ Tone & Style:
 Rules:
 1. Title: ≤ 12 words. Keep human and direct, no clickbait or punctuation gimmicks.
    - Sound like something a real journalist would write, not an algorithm.
-   
+
 2. Summary: 300–1100 characters (~60–200 words).
    - Use full sentences with natural rhythm and flow.
    - Cover: what happened, context, significance.
@@ -40,7 +32,7 @@ Rules:
    - Vary sentence length. Mix short punchy statements with longer explanatory ones.
    - Use contractions where natural (it's, don't, can't, won't).
    - Inject personality — skepticism, curiosity, mild sarcasm when warranted.
-   
+
 3. Output plain text only:
    Line 1 → rewritten title
    Line 2+ → rewritten summary
@@ -113,9 +105,10 @@ export function clampSummaryToWindow(summary = "", min = 300, max = 1100) {
 const RSS_PROMPTS = {
   SYSTEM,
   USER_ITEM,
+  user: USER_ITEM, // ✅ Legacy alias for backward compatibility
   normalizeModelText,
   clampTitleTo12Words,
   clampSummaryToWindow,
 };
 
-export { RSS_PROMPTS };
+export default RSS_PROMPTS;
