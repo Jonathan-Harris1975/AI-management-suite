@@ -118,4 +118,4 @@ const RSS_PROMPTS = {
   clampSummaryToWindow,
 };
 
-export default RSS_PROMPTS;
+export { RSS_PROMPTS };
