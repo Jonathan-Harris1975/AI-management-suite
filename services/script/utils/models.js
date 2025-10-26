@@ -1,7 +1,13 @@
 // services/script/utils/models.js
 import { info, error } from "#logger.js";
-import { resilientRequest } from "../../shared/utils/ai-service.js";
+import { callLLMText } from "../../shared/utils/ai-service.js";
 import promptTemplates from "./promptTemplates.js";
+
+import { getWeatherSummary } from "./weather.js";
+import { getTuringQuote } from "./turingQuote.js";
+import getSponsor from "./getSponsor.js";
+import generateCta from "./generateCta.js";
+
 import {
   extractAndParseJson,
   getTitleDescriptionPrompt,
@@ -19,31 +25,28 @@ const {
   validateOutro,
 } = promptTemplates;
 
-// ─────────────────────────────
-// INTRO
-// ─────────────────────────────
+// INTRO — now uses live weather + Turing quote
 export async function generateIntro({ date, tone = {} } = {}) {
   try {
     info("script.intro.req", { date });
 
+    // ✅ Get live data from utils
     const weatherSummary =
-      tone.weatherSummary || "grey skies over London with a hint of existential dread";
+      (await getWeatherSummary()) ||
+      tone.weatherSummary ||
+      "typical British drizzle over London";
+
     const turingQuote =
+      (await getTuringQuote()) ||
       tone.turingQuote ||
       "We can only see a short distance ahead, but we can see plenty there that needs to be done.";
 
     const prompt = getIntroPrompt({ weatherSummary, turingQuote });
 
-    // Your promptTemplates returns a string, not system/user
-    const messages = [
-      { role: "system", content: "You are a witty Gen-X podcast host creating the intro monologue." },
-      { role: "user", content: prompt },
-    ];
+    const raw = await callLLMText({ routeName: "intro", prompt });
 
-    const raw = await resilientRequest("intro", { messages });
     let outText = humanize(raw);
     outText = enforceTransitions(outText);
-
     return outText.trim();
   } catch (err) {
     error("script.intro.fail", { err: err.message });
@@ -51,29 +54,34 @@ export async function generateIntro({ date, tone = {} } = {}) {
   }
 }
 
-// ─────────────────────────────
-// MAIN
-// ─────────────────────────────
+// MAIN — unchanged
 export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   try {
     let articles = [];
-    if (Array.isArray(newsItems)) articles = newsItems.filter(Boolean);
-    else if (typeof newsItems === "string") articles = [newsItems.trim()];
-    else if (typeof newsItems === "object" && newsItems !== null)
-      articles = [Object.values(newsItems).join(" - ")];
+    if (Array.isArray(newsItems)) {
+      articles = newsItems
+        .filter((v) => !!v)
+        .map((v) => (typeof v === "string" ? v : JSON.stringify(v)));
+    } else if (typeof newsItems === "object" && newsItems !== null) {
+      const flat = Object.values(newsItems).join(" — ");
+      articles = [flat];
+    } else if (typeof newsItems === "string" && newsItems.trim()) {
+      articles = [newsItems.trim()];
+    }
 
     info("script.main.req", { count: articles.length });
 
-    const prompt = getMainPrompt({ articles, targetDuration: tone.targetDuration || 60 });
+    const prompt = getMainPrompt({
+      articles,
+      targetDuration: tone.targetDuration || 60,
+    });
 
-    const messages = [
-      { role: "system", content: "You are writing a continuous AI podcast monologue with seamless transitions." },
-      { role: "user", content: prompt },
-    ];
+    const raw = await callLLMText({ routeName: "main", prompt });
 
-    const raw = await resilientRequest("main", { messages });
     const qa = validateScript(raw);
-    if (!qa.isValid) error("script.main.validation", { violations: qa.violations });
+    if (!qa.isValid) {
+      error("script.main.validation", { violations: qa.violations });
+    }
 
     let outText = humanize(raw);
     outText = enforceTransitions(outText);
@@ -84,28 +92,23 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   }
 }
 
-// ─────────────────────────────
-// OUTRO
-// ─────────────────────────────
-export async function generateOutro({
-  date,
-  episodeTitle,
-  siteUrl,
-  expectedCta,
-  tone = {},
-} = {}) {
+// OUTRO — now pulls sponsor + CTA automatically
+export async function generateOutro({ date } = {}) {
   try {
     info("script.outro.req", { date });
-    const outroPrompt = await getOutroPromptFull();
 
-    const messages = [
-      { role: "system", content: "You are writing the outro monologue for the podcast 'Turing’s Torch'." },
-      { role: "user", content: outroPrompt },
-    ];
+    // ✅ Load sponsor and CTA dynamically
+    const sponsor = await getSponsor();
+    const cta = await generateCta(sponsor);
 
-    const raw = await resilientRequest("outro", { messages });
-    const qa = validateOutro(raw, expectedCta, episodeTitle, siteUrl);
-    if (!qa.isValid) error("script.outro.validation", { issues: qa.issues });
+    const outroPrompt = await getOutroPromptFull(sponsor, cta);
+
+    const raw = await callLLMText({ routeName: "outro", prompt: outroPrompt });
+
+    const qa = validateOutro(raw, cta, sponsor.title, sponsor.url);
+    if (!qa.isValid) {
+      error("script.outro.validation", { issues: qa.issues });
+    }
 
     let outText = humanize(raw);
     outText = enforceTransitions(outText);
@@ -116,9 +119,7 @@ export async function generateOutro({
   }
 }
 
-// ─────────────────────────────
-// COMPOSE
-// ─────────────────────────────
+// COMPOSE — unchanged
 export async function generateComposedEpisode({
   introText = "",
   mainText = "",
@@ -127,28 +128,37 @@ export async function generateComposedEpisode({
   try {
     info("script.compose.start");
 
-    const composedText = [introText, mainText, outroText].filter(Boolean).join("\n\n");
+    const composedText = [introText, mainText, outroText]
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
 
-    const titlePrompt = getTitleDescriptionPrompt(composedText);
-    const titleResponse = await resilientRequest("metadata", { prompt: titlePrompt });
-    const parsedMeta = extractAndParseJson(titleResponse);
+    const tdPrompt = getTitleDescriptionPrompt(composedText);
+    const tdRaw = await callLLMText({ routeName: "metadata", prompt: tdPrompt });
+    const parsedMeta = extractAndParseJson(tdRaw) || {};
 
-    const seoPrompt = getSEOKeywordsPrompt(parsedMeta?.description || composedText);
-    const seoResponse = await resilientRequest("metadata", { prompt: seoPrompt });
+    const seoPrompt = getSEOKeywordsPrompt(
+      parsedMeta.description || composedText
+    );
+    const seoRaw = await callLLMText({ routeName: "metadata", prompt: seoPrompt });
 
-    const artworkPrompt = getArtworkPrompt(parsedMeta?.description || composedText);
-    const artResponse = await resilientRequest("metadata", { prompt: artworkPrompt });
+    const artPrompt = getArtworkPrompt(
+      parsedMeta.description || composedText
+    );
+    const artRaw = await callLLMText({ routeName: "metadata", prompt: artPrompt });
 
     const metadata = {
-      title: parsedMeta?.title || "Untitled Episode",
-      description: parsedMeta?.description || "No description generated.",
+      title: parsedMeta.title || "Untitled Episode",
+      description: parsedMeta.description || "No description generated.",
       seoKeywords:
-        typeof seoResponse === "string" ? seoResponse.trim() : JSON.stringify(seoResponse),
+        typeof seoRaw === "string" ? seoRaw.trim() : JSON.stringify(seoRaw),
       artworkPrompt:
-        typeof artResponse === "string" ? artResponse.trim() : JSON.stringify(artResponse),
+        typeof artRaw === "string" ? artRaw.trim() : JSON.stringify(artRaw),
     };
 
     info("script.compose.done", { title: metadata.title });
+
     return { composedText, metadata };
   } catch (err) {
     error("script.compose.fail", { err: err.message });
