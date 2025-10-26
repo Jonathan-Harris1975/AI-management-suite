@@ -4,7 +4,7 @@ import path from 'path';
 
 let quotesCache = null;
 
-export default function getTuringQuote() {
+export default function getTuringQuote {
   if (!quotesCache) {
     const quotesPath = path.resolve('utils', 'quotes.txt');
     const raw = fs.readFileSync(quotesPath, 'utf-8');
