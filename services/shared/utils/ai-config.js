@@ -32,10 +32,17 @@ export const aiConfig = {
     intro: ["google", "chatgpt", "meta"],
     main: ["google", "chatgpt", "deepseek"],
     outro: ["google", "chatgpt", "meta"],
+
+    // 🧩 Compose step (used in orchestration)
     compose: ["deepseek", "anthropic", "google"],
+
+    // 🧠 Metadata route — required for title/description/SEO/artwork generation
+    metadata: ["google", "chatgpt", "deepseek"],
+
+    // 🧩 Podcast helper (meta info, tone, etc.)
     podcastHelper: ["deepseek", "anthropic", "google"],
 
-    // ✅ RSS rewriting route (this was missing before)
+    // ✅ RSS rewriting route
     rssRewrite: ["chatgpt", "google", "meta"],
   },
 
