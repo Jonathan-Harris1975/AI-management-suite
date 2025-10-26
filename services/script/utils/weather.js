@@ -1,4 +1,4 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
+
 // API/weather.js
 
 export default async function handler(request, response) {
