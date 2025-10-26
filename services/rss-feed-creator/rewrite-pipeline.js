@@ -127,7 +127,7 @@ export async function runRewritePipeline(feedXml) {
   for (const item of picked) {
     try {
       const messages = messagesForItem(siteTitle, item);
-      const raw = await resolveModelRewriter(messages);
+      const raw = await rewriteRssFeedItems(messages);
 
       let title = "";
       let summary = "";
