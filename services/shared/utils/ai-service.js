@@ -1,172 +1,86 @@
-// services/script/utils/models.js
+// shared/utils/ai-service.js
+import config from "./ai-config.js";
 import { info, error } from "#logger.js";
-import { resilientRequest } from "../../shared/utils/ai-service.js";
 
-import promptTemplates from "./promptTemplates.js";
-import { getWeatherSummary } from "./weather.js";
-import { getTuringQuote } from "./getTuringQuote.js";
-import getSponsor from "./getSponsor.js";
-import generateCta from "./generateCta.js";
-import {
-  extractAndParseJson,
-  getTitleDescriptionPrompt,
-  getSEOKeywordsPrompt,
-  getArtworkPrompt,
-} from "./podcastHelpers.js";
-
-const {
-  getIntroPrompt,
-  getMainPrompt,
-  getOutroPromptFull,
-  humanize,
-  enforceTransitions,
-  validateScript,
-  validateOutro,
-} = promptTemplates;
-
-// ─────────────────────────────────────────────
-// INTRO — Live weather + Turing quote
-// ─────────────────────────────────────────────
-export async function generateIntro({ date, tone = {} } = {}) {
-  try {
-    info("script.intro.req", { date });
-
-    const weatherSummary =
-      (await getWeatherSummary()) ||
-      tone.weatherSummary ||
-      "miserable grey drizzle over London";
-
-    const turingQuote =
-      (await getTuringQuote()) ||
-      tone.turingQuote ||
-      "We can only see a short distance ahead, but we can see plenty there that needs to be done.";
-
-    const prompt = getIntroPrompt({ weatherSummary, turingQuote });
-    const raw = await resilientRequest({ route: "intro", prompt });
-
-    let outText = humanize(raw);
-    outText = enforceTransitions(outText);
-    return outText.trim();
-  } catch (err) {
-    error("script.intro.fail", { err: err.message });
-    throw err;
+// normalize OpenRouter response
+async function readOpenRouterResponse(res) {
+  const data = await res.json().catch(() => ({}));
+  if (data.choices?.length) {
+    const choice = data.choices[0];
+    if (choice.message?.content) return choice.message.content.trim();
+    if (choice.text) return choice.text.trim();
   }
+  if (Array.isArray(data.content)) {
+    const firstText = data.content.find(b => b.type === "text");
+    if (firstText?.text) return firstText.text.trim();
+  }
+  return JSON.stringify(data);
 }
 
-// ─────────────────────────────────────────────
-// MAIN — Normalized newsItems
-// ─────────────────────────────────────────────
-export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
-  try {
-    let articles = [];
-    if (Array.isArray(newsItems)) {
-      articles = newsItems
-        .filter((v) => !!v)
-        .map((v) => (typeof v === "string" ? v : JSON.stringify(v)));
-    } else if (typeof newsItems === "object" && newsItems !== null) {
-      const flat = Object.values(newsItems).join(" — ");
-      articles = [flat];
-    } else if (typeof newsItems === "string" && newsItems.trim()) {
-      articles = [newsItems.trim()];
+async function callSingleModel({ modelKey, mode, messages, prompt, maxTokens, temperature }) {
+  const modelConfig = config.models[modelKey];
+  if (!modelConfig) throw new Error(`Unknown model alias: ${modelKey}`);
+
+  const url = "https://openrouter.ai/api/v1/chat/completions";
+
+  const body =
+    mode === "chat"
+      ? { model: modelConfig.name, messages, max_tokens: maxTokens, temperature }
+      : {
+          model: modelConfig.name,
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: maxTokens,
+          temperature,
+        };
+
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${modelConfig.apiKey || process.env.OPENROUTER_API_KEY || ""}`,
+    "HTTP-Referer": process.env.APP_URL || "https://ai-management-suite.on.shiper.app",
+    "X-Title": process.env.APP_TITLE || "AI Podcast Suite",
+  };
+
+  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+
+  if (!res.ok) {
+    const errTxt = await res.text();
+    throw new Error(`${res.status} ${res.statusText} — ${errTxt}`);
+  }
+
+  return readOpenRouterResponse(res);
+}
+
+export async function resilientRequest(routeName, payload = {}) {
+  const routeCfg = config.routeModels[routeName];
+  if (!routeCfg) throw new Error(`No model route defined for: ${routeName}`);
+
+  const { temperature, timeout } = config.commonParams;
+  const mode = payload.messages ? "chat" : "prompt";
+  const maxTokens = 1200;
+
+  let lastErr = null;
+
+  for (const modelKey of routeCfg) {
+    try {
+      info("ai.call", { routeName, model: modelKey });
+      const result = await callSingleModel({
+        modelKey,
+        mode,
+        messages: payload.messages,
+        prompt: payload.prompt,
+        maxTokens,
+        temperature,
+      });
+      if (result) return result.trim();
+    } catch (err) {
+      error("ai.call.fail", { routeName, model: modelKey, err: err.message });
+      lastErr = err;
     }
-
-    info("script.main.req", { count: articles.length });
-
-    const prompt = getMainPrompt({
-      articles,
-      targetDuration: tone.targetDuration || 60,
-    });
-
-    const raw = await resilientRequest({ route: "main", prompt });
-
-    const qa = validateScript(raw);
-    if (!qa.isValid) {
-      error("script.main.validation", { violations: qa.violations });
-    }
-
-    let outText = humanize(raw);
-    outText = enforceTransitions(outText);
-    return outText.trim();
-  } catch (err) {
-    error("script.main.fail", { err: err.message });
-    throw err;
   }
+
+  throw new Error(
+    `All models failed for route '${routeName}'. Last error: ${lastErr?.message || "unknown"}`
+  );
 }
 
-// ─────────────────────────────────────────────
-// OUTRO — Dynamic sponsor + CTA
-// ─────────────────────────────────────────────
-export async function generateOutro({ date } = {}) {
-  try {
-    info("script.outro.req", { date });
-
-    const sponsor = await getSponsor();
-    const cta = await generateCta(sponsor);
-
-    const outroPrompt = await getOutroPromptFull(sponsor, cta);
-    const raw = await resilientRequest({ route: "outro", prompt: outroPrompt });
-
-    const qa = validateOutro(raw, cta, sponsor.title, sponsor.url);
-    if (!qa.isValid) {
-      error("script.outro.validation", { issues: qa.issues });
-    }
-
-    let outText = humanize(raw);
-    outText = enforceTransitions(outText);
-    return outText.trim();
-  } catch (err) {
-    error("script.outro.fail", { err: err.message });
-    throw err;
-  }
-}
-
-// ─────────────────────────────────────────────
-// COMPOSE — Metadata generation
-// ─────────────────────────────────────────────
-export async function generateComposedEpisode({
-  introText = "",
-  mainText = "",
-  outroText = "",
-} = {}) {
-  try {
-    info("script.compose.start");
-
-    const composedText = [introText, mainText, outroText]
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .join("\n\n")
-      .trim();
-
-    const tdPrompt = getTitleDescriptionPrompt(composedText);
-    const tdRaw = await resilientRequest({ route: "metadata", prompt: tdPrompt });
-    const parsedMeta = extractAndParseJson(tdRaw) || {};
-
-    const seoPrompt = getSEOKeywordsPrompt(parsedMeta.description || composedText);
-    const seoRaw = await resilientRequest({ route: "metadata", prompt: seoPrompt });
-
-    const artPrompt = getArtworkPrompt(parsedMeta.description || composedText);
-    const artRaw = await resilientRequest({ route: "metadata", prompt: artPrompt });
-
-    const metadata = {
-      title: parsedMeta.title || "Untitled Episode",
-      description: parsedMeta.description || "No description generated.",
-      seoKeywords:
-        typeof seoRaw === "string" ? seoRaw.trim() : JSON.stringify(seoRaw),
-      artworkPrompt:
-        typeof artRaw === "string" ? artRaw.trim() : JSON.stringify(artRaw),
-    };
-
-    info("script.compose.done", { title: metadata.title });
-    return { composedText, metadata };
-  } catch (err) {
-    error("script.compose.fail", { err: err.message });
-    throw err;
-  }
-}
-
-export default {
-  generateIntro,
-  generateMain,
-  generateOutro,
-  generateComposedEpisode,
-};
+export default { resilientRequest };
