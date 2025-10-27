@@ -1,5 +1,9 @@
 // services/script/utils/models.js
 import { info, error } from "#logger.js";
+import fs from "fs/promises";
+import path from "path";
+import os from "os";
+
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import promptTemplates from "./promptTemplates.js";
 
@@ -25,42 +29,58 @@ const {
   validateOutro,
 } = promptTemplates;
 
-/* ────────────────────────────────────────────────
- * INTRO — uses live Weather API + Turing quote
- * ──────────────────────────────────────────────── */
+// ─────────────────────────────────────────────
+// 🧠 UTILITY: Save text to /tmp for chunking
+// ─────────────────────────────────────────────
+async function saveTempFile(filename, content) {
+  try {
+    const dir = path.join(os.tmpdir(), "script_segments");
+    await fs.mkdir(dir, { recursive: true });
+    const fullPath = path.join(dir, filename);
+    await fs.writeFile(fullPath, content, "utf8");
+    info("script.saveTempFile", { file: fullPath });
+    return fullPath;
+  } catch (err) {
+    error("script.saveTempFile.fail", { err: err.message });
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────
+// 🌤️ INTRO — uses live weather + Turing quote
+// ─────────────────────────────────────────────
 export async function generateIntro({ date, tone = {} } = {}) {
   try {
     info("script.intro.req", { date });
 
-    // ✅ Live weather summary (fallback to default if offline)
     const weatherSummary =
       (await getWeatherSummary()) ||
       tone.weatherSummary ||
-      "miserable grey drizzle over London";
+      "grey skies and mild drizzle over London";
 
-    // ✅ Random Alan Turing quote (cached from data file)
     const turingQuote =
       (await getTuringQuote()) ||
       tone.turingQuote ||
       "We can only see a short distance ahead, but we can see plenty there that needs to be done.";
 
     const prompt = getIntroPrompt({ weatherSummary, turingQuote });
-
-    // ✅ Corrected call — route name string
-    const raw = await resilientRequest("intro", prompt);
+    const raw = await resilientRequest({ routeName: "intro", prompt });
 
     let outText = humanize(raw);
     outText = enforceTransitions(outText);
-    return outText.trim();
+    const cleanText = outText.trim();
+
+    await saveTempFile("intro.txt", cleanText);
+    return cleanText;
   } catch (err) {
     error("script.intro.fail", { err: err.message });
     throw err;
   }
 }
 
-/* ────────────────────────────────────────────────
- * MAIN — handles RSS or Make.com article arrays
- * ──────────────────────────────────────────────── */
+// ─────────────────────────────────────────────
+// 📰 MAIN — merges articles + saves temp
+// ─────────────────────────────────────────────
 export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   try {
     let articles = [];
@@ -82,84 +102,94 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
       targetDuration: tone.targetDuration || 60,
     });
 
-    const raw = await resilientRequest("main", prompt);
-
+    const raw = await resilientRequest({ routeName: "main", prompt });
     const qa = validateScript(raw);
-    if (!qa.isValid) {
-      error("script.main.validation", { violations: qa.violations });
-    }
+    if (!qa.isValid) error("script.main.validation", { violations: qa.violations });
 
     let outText = humanize(raw);
     outText = enforceTransitions(outText);
-    return outText.trim();
+    const cleanText = outText.trim();
+
+    await saveTempFile("main.txt", cleanText);
+    return cleanText;
   } catch (err) {
     error("script.main.fail", { err: err.message });
     throw err;
   }
 }
 
-/* ────────────────────────────────────────────────
- * OUTRO — pulls sponsor + CTA dynamically
- * ──────────────────────────────────────────────── */
+// ─────────────────────────────────────────────
+// 📚 OUTRO — includes CTA + sponsor + saves temp
+// ─────────────────────────────────────────────
 export async function generateOutro({ date } = {}) {
   try {
     info("script.outro.req", { date });
 
     const sponsor = await getSponsor();
     const cta = await generateCta(sponsor);
-
     const outroPrompt = await getOutroPromptFull(sponsor, cta);
 
-    const raw = await resilientRequest("outro", outroPrompt);
+    const raw = await resilientRequest({ routeName: "outro", prompt: outroPrompt });
 
     const qa = validateOutro(raw, cta, sponsor.title, sponsor.url);
-    if (!qa.isValid) {
-      error("script.outro.validation", { issues: qa.issues });
-    }
+    if (!qa.isValid) error("script.outro.validation", { issues: qa.issues });
 
     let outText = humanize(raw);
     outText = enforceTransitions(outText);
-    return outText.trim();
+    const cleanText = outText.trim();
+
+    await saveTempFile("outro.txt", cleanText);
+    return cleanText;
   } catch (err) {
     error("script.outro.fail", { err: err.message });
     throw err;
   }
 }
 
-/* ────────────────────────────────────────────────
- * COMPOSE — merges intro + main + outro and
- * generates metadata via "metadata" route
- * ──────────────────────────────────────────────── */
+// ─────────────────────────────────────────────
+// 🧩 COMPOSE — reads from memory files if needed
+// ─────────────────────────────────────────────
 export async function generateComposedEpisode({
-  introText = "",
-  mainText = "",
-  outroText = "",
+  introText,
+  mainText,
+  outroText,
 } = {}) {
   try {
     info("script.compose.start");
 
-    const composedText = [introText, mainText, outroText]
+    // If intro/main/outro not provided, read saved temp files
+    const dir = path.join(os.tmpdir(), "script_segments");
+    const [intro, main, outro] = await Promise.all(
+      ["intro.txt", "main.txt", "outro.txt"].map(async (f) => {
+        const filePath = path.join(dir, f);
+        try {
+          const data = await fs.readFile(filePath, "utf8");
+          return data.trim();
+        } catch {
+          return "";
+        }
+      })
+    );
+
+    const composedText = [
+      introText || intro,
+      mainText || main,
+      outroText || outro,
+    ]
       .map((s) => s.trim())
       .filter(Boolean)
       .join("\n\n")
       .trim();
 
-    // 🧠 Title + Description
     const tdPrompt = getTitleDescriptionPrompt(composedText);
-    const tdRaw = await resilientRequest("metadata", tdPrompt);
+    const tdRaw = await resilientRequest({ routeName: "metadata", prompt: tdPrompt });
     const parsedMeta = extractAndParseJson(tdRaw) || {};
 
-    // 🧠 SEO Keywords
-    const seoPrompt = getSEOKeywordsPrompt(
-      parsedMeta.description || composedText
-    );
-    const seoRaw = await resilientRequest("metadata", seoPrompt);
+    const seoPrompt = getSEOKeywordsPrompt(parsedMeta.description || composedText);
+    const seoRaw = await resilientRequest({ routeName: "metadata", prompt: seoPrompt });
 
-    // 🧠 Artwork
-    const artPrompt = getArtworkPrompt(
-      parsedMeta.description || composedText
-    );
-    const artRaw = await resilientRequest("metadata", artPrompt);
+    const artPrompt = getArtworkPrompt(parsedMeta.description || composedText);
+    const artRaw = await resilientRequest({ routeName: "metadata", prompt: artPrompt });
 
     const metadata = {
       title: parsedMeta.title || "Untitled Episode",
