@@ -11,7 +11,7 @@ import {
   generateComposedEpisode,
 } from "./utils/models.js";
 
-// ✅ Import the weather handler for internal use
+// ✅ Import local weather handler (in this service)
 import weatherHandler from "./api/weather.js";
 
 const app = express();
@@ -26,12 +26,12 @@ app.get("/api/script/health", (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// 🌦️ WEATHER ENDPOINT (local service fetch target)
+// 🌦️ LOCAL WEATHER ENDPOINT (internal use)
 // ─────────────────────────────────────────────
 app.get("/api/weather", weatherHandler);
 
 // ─────────────────────────────────────────────
-// 🧠 PODCAST SCRIPT GENERATION ENDPOINTS
+// 🧠 PODCAST SCRIPT ENDPOINTS
 // ─────────────────────────────────────────────
 app.post("/script/intro", async (req, res) => {
   try {
