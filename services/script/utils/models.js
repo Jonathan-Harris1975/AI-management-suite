@@ -1,13 +1,12 @@
-// services/script/utils/models.js
-import { info, error } from "#logger.js";
 import fs from "fs/promises";
 import path from "path";
-import os from "os";
+import { info, error } from "#logger.js";
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-import promptTemplates from "./promptTemplates.js";
+import { uploadBuffer } from "../../shared/utils/r2-client.js"; // ✅ centralised R2 uploader
 
-import { getWeatherSummary } from "./getWeatherSummary.js";
+import promptTemplates from "./promptTemplates.js";
+import { getWeatherSummary } from "./weather.js";
 import { getTuringQuote } from "./getTuringQuote.js";
 import getSponsor from "./getSponsor.js";
 import generateCta from "./generateCta.js";
@@ -30,24 +29,81 @@ const {
 } = promptTemplates;
 
 // ─────────────────────────────────────────────
-// 🧠 UTILITY: Save text to /tmp for chunking
+// 🧩 Local save helper
 // ─────────────────────────────────────────────
-async function saveTempFile(filename, content) {
+async function saveLocalSegment(name, text) {
+  const dir = "/tmp/script_segments";
+  await fs.mkdir(dir, { recursive: true });
+  const filePath = path.join(dir, `${name}.txt`);
+  await fs.writeFile(filePath, text, "utf8");
+  info("script.saveTempFile", { file: filePath });
+  return filePath;
+}
+
+// ─────────────────────────────────────────────
+// 🧩 Persist segment text + chunks to R2
+// ─────────────────────────────────────────────
+async function persistSegmentToR2(name, text) {
   try {
-    const dir = path.join(os.tmpdir(), "script_segments");
-    await fs.mkdir(dir, { recursive: true });
-    const fullPath = path.join(dir, filename);
-    await fs.writeFile(fullPath, content, "utf8");
-    info("script.saveTempFile", { file: fullPath });
-    return fullPath;
+    // upload raw text version
+    const keyText = `scripts/${name}-${Date.now()}.txt`;
+    await uploadBuffer({
+      bucket: process.env.R2_BUCKET_RAW_TEXT,
+      key: keyText,
+      body: Buffer.from(text, "utf8"),
+    });
+
+    // chunk logic: split every ~4000 chars for TTS
+    const chunkSize = 4000;
+    const chunks = [];
+    for (let i = 0; i < text.length; i += chunkSize) {
+      chunks.push(text.slice(i, i + chunkSize));
+    }
+
+    for (let idx = 0; idx < chunks.length; idx++) {
+      const keyChunk = `chunks/${name}/${Date.now()}-${idx}.txt`;
+      await uploadBuffer({
+        bucket: process.env.R2_BUCKET_RAW,
+        key: keyChunk,
+        body: Buffer.from(chunks[idx], "utf8"),
+      });
+    }
+
+    info("script.persistSegmentToR2.success", { name, chunks: chunks.length });
   } catch (err) {
-    error("script.saveTempFile.fail", { err: err.message });
-    return null;
+    error("script.persistSegmentToR2.fail", { err: err.message });
   }
 }
 
 // ─────────────────────────────────────────────
-// 🌤️ INTRO — uses live weather + Turing quote
+// 🧩 Persist transcript + metadata to R2
+// ─────────────────────────────────────────────
+async function persistEpisodeToR2(transcriptText, metadata) {
+  try {
+    const ts = Date.now();
+
+    const transcriptKey = `transcripts/transcript-${ts}.txt`;
+    await uploadBuffer({
+      bucket: process.env.R2_BUCKET_PODCAST,
+      key: transcriptKey,
+      body: Buffer.from(transcriptText, "utf8"),
+    });
+
+    const metaKey = `metadata/metadata-${ts}.json`;
+    await uploadBuffer({
+      bucket: process.env.R2_META_BUCKET,
+      key: metaKey,
+      body: Buffer.from(JSON.stringify(metadata, null, 2), "utf8"),
+    });
+
+    info("script.persistEpisodeToR2.success", { transcriptKey, metaKey });
+  } catch (err) {
+    error("script.persistEpisodeToR2.fail", { err: err.message });
+  }
+}
+
+// ─────────────────────────────────────────────
+// INTRO — with weather + Turing quote
 // ─────────────────────────────────────────────
 export async function generateIntro({ date, tone = {} } = {}) {
   try {
@@ -56,7 +112,7 @@ export async function generateIntro({ date, tone = {} } = {}) {
     const weatherSummary =
       (await getWeatherSummary()) ||
       tone.weatherSummary ||
-      "grey skies and mild drizzle over London";
+      "typical British drizzle over London";
 
     const turingQuote =
       (await getTuringQuote()) ||
@@ -67,11 +123,12 @@ export async function generateIntro({ date, tone = {} } = {}) {
     const raw = await resilientRequest({ routeName: "intro", prompt });
 
     let outText = humanize(raw);
-    outText = enforceTransitions(outText);
-    const cleanText = outText.trim();
+    outText = enforceTransitions(outText).trim();
 
-    await saveTempFile("intro.txt", cleanText);
-    return cleanText;
+    await saveLocalSegment("intro", outText);
+    await persistSegmentToR2("intro", outText);
+
+    return outText;
   } catch (err) {
     error("script.intro.fail", { err: err.message });
     throw err;
@@ -79,24 +136,22 @@ export async function generateIntro({ date, tone = {} } = {}) {
 }
 
 // ─────────────────────────────────────────────
-// 📰 MAIN — merges articles + saves temp
+// MAIN — news body
 // ─────────────────────────────────────────────
 export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   try {
     let articles = [];
     if (Array.isArray(newsItems)) {
       articles = newsItems
-        .filter((v) => !!v)
+        .filter(Boolean)
         .map((v) => (typeof v === "string" ? v : JSON.stringify(v)));
     } else if (typeof newsItems === "object" && newsItems !== null) {
-      const flat = Object.values(newsItems).join(" — ");
-      articles = [flat];
+      articles = [Object.values(newsItems).join(" — ")];
     } else if (typeof newsItems === "string" && newsItems.trim()) {
       articles = [newsItems.trim()];
     }
 
     info("script.main.req", { count: articles.length });
-
     const prompt = getMainPrompt({
       articles,
       targetDuration: tone.targetDuration || 60,
@@ -107,11 +162,12 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
     if (!qa.isValid) error("script.main.validation", { violations: qa.violations });
 
     let outText = humanize(raw);
-    outText = enforceTransitions(outText);
-    const cleanText = outText.trim();
+    outText = enforceTransitions(outText).trim();
 
-    await saveTempFile("main.txt", cleanText);
-    return cleanText;
+    await saveLocalSegment("main", outText);
+    await persistSegmentToR2("main", outText);
+
+    return outText;
   } catch (err) {
     error("script.main.fail", { err: err.message });
     throw err;
@@ -119,7 +175,7 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
 }
 
 // ─────────────────────────────────────────────
-// 📚 OUTRO — includes CTA + sponsor + saves temp
+// OUTRO — sponsor + CTA
 // ─────────────────────────────────────────────
 export async function generateOutro({ date } = {}) {
   try {
@@ -130,16 +186,16 @@ export async function generateOutro({ date } = {}) {
     const outroPrompt = await getOutroPromptFull(sponsor, cta);
 
     const raw = await resilientRequest({ routeName: "outro", prompt: outroPrompt });
-
     const qa = validateOutro(raw, cta, sponsor.title, sponsor.url);
     if (!qa.isValid) error("script.outro.validation", { issues: qa.issues });
 
     let outText = humanize(raw);
-    outText = enforceTransitions(outText);
-    const cleanText = outText.trim();
+    outText = enforceTransitions(outText).trim();
 
-    await saveTempFile("outro.txt", cleanText);
-    return cleanText;
+    await saveLocalSegment("outro", outText);
+    await persistSegmentToR2("outro", outText);
+
+    return outText;
   } catch (err) {
     error("script.outro.fail", { err: err.message });
     throw err;
@@ -147,35 +203,17 @@ export async function generateOutro({ date } = {}) {
 }
 
 // ─────────────────────────────────────────────
-// 🧩 COMPOSE — reads from memory files if needed
+// COMPOSE — merge + metadata + upload
 // ─────────────────────────────────────────────
 export async function generateComposedEpisode({
-  introText,
-  mainText,
-  outroText,
+  introText = "",
+  mainText = "",
+  outroText = "",
 } = {}) {
   try {
     info("script.compose.start");
 
-    // If intro/main/outro not provided, read saved temp files
-    const dir = path.join(os.tmpdir(), "script_segments");
-    const [intro, main, outro] = await Promise.all(
-      ["intro.txt", "main.txt", "outro.txt"].map(async (f) => {
-        const filePath = path.join(dir, f);
-        try {
-          const data = await fs.readFile(filePath, "utf8");
-          return data.trim();
-        } catch {
-          return "";
-        }
-      })
-    );
-
-    const composedText = [
-      introText || intro,
-      mainText || main,
-      outroText || outro,
-    ]
+    const composedText = [introText, mainText, outroText]
       .map((s) => s.trim())
       .filter(Boolean)
       .join("\n\n")
@@ -194,13 +232,14 @@ export async function generateComposedEpisode({
     const metadata = {
       title: parsedMeta.title || "Untitled Episode",
       description: parsedMeta.description || "No description generated.",
-      seoKeywords:
-        typeof seoRaw === "string" ? seoRaw.trim() : JSON.stringify(seoRaw),
-      artworkPrompt:
-        typeof artRaw === "string" ? artRaw.trim() : JSON.stringify(artRaw),
+      seoKeywords: typeof seoRaw === "string" ? seoRaw.trim() : JSON.stringify(seoRaw),
+      artworkPrompt: typeof artRaw === "string" ? artRaw.trim() : JSON.stringify(artRaw),
     };
 
     info("script.compose.done", { title: metadata.title });
+
+    await persistEpisodeToR2(composedText, metadata);
+
     return { composedText, metadata };
   } catch (err) {
     error("script.compose.fail", { err: err.message });
