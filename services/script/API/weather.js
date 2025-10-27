@@ -1,38 +1,53 @@
-// API/weather.js
+  // services/script/api/weather.js
+import fetch from "node-fetch";
+import { info, error } from "#logger.js";
 
-export default async function handler(request, response) {
+export default async function handler(req, res) {
   const apiKey = process.env.RAPIDAPI_KEY;
-  const apiHost = process.env.RAPIDAPI_HOST;
+  const apiHost = process.env.RAPIDAPI_HOST || "weatherapi-com.p.rapidapi.com";
 
   if (!apiKey || !apiHost) {
-    return response.status(500).json({ error: "Server is not configured with API credentials." });
+    error("weather.api.missingCreds", { apiKey: !!apiKey, apiHost });
+    return res
+      .status(500)
+      .json({ error: "Server missing RAPIDAPI credentials." });
   }
 
-  // Force location to London, UK
-  const location = "London";
-
-  // Use today’s date in YYYY-MM-DD format
-  const today = new Date().toISOString().split("T")[0];
+  const location = "London, England";
 
   try {
-    const url = `https://${apiHost}/history.json?q=${encodeURIComponent(location)}&dt=${today}`;
+    const url = `https://${apiHost}/current.json?q=${encodeURIComponent(
+      location
+    )}`;
 
-    const weatherResponse = await fetch(url, {
+    info("weather.api.request", { url, apiHost });
+
+    const response = await fetch(url, {
       method: "GET",
       headers: {
-        "x-rapidapi-host": "weatherapi-com.p.rapidapi.com",
+        "x-rapidapi-host": apiHost,
         "x-rapidapi-key": apiKey,
       },
     });
 
-    if (!weatherResponse.ok) {
-      return response.status(weatherResponse.status).json({ error: "Weather API request failed" });
+    if (!response.ok) {
+      const text = await response.text();
+      error("weather.api.fail", { status: response.status, text });
+      return res
+        .status(response.status)
+        .json({ error: `Weather API failed`, text });
     }
 
-    const data = await weatherResponse.json();
-    return response.status(200).json(data);
+    const data = await response.json();
+    info("weather.api.success", {
+      location: data?.location?.name,
+      condition: data?.current?.condition?.text,
+      temp: data?.current?.temp_c,
+    });
 
-  } catch (error) {
-    return response.status(500).json({ error: "Weather API call failed", details: error.message });
+    return res.status(200).json(data);
+  } catch (err) {
+    error("weather.api.catch", { err: err.message });
+    return res.status(500).json({ error: err.message });
   }
-}
+                                 }
