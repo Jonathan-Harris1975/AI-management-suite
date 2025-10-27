@@ -13,6 +13,7 @@ import {
 
 // ✅ Correct import for your actual structure
 import weatherHandler from "./api/weather.js";
+app.get("/api/weather", weatherHandler);
 
 const app = express();
 app.use(cors());
