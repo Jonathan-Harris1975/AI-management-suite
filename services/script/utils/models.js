@@ -43,7 +43,7 @@ export async function generateIntro({ date, tone = {} } = {}) {
 
     const prompt = getIntroPrompt({ weatherSummary, turingQuote });
 
-    const raw = await callLLMText({ routeName: "intro", prompt });
+    const raw = await resilientRequest({ routeName: "intro", prompt });
 
     let outText = humanize(raw);
     outText = enforceTransitions(outText);
@@ -103,7 +103,7 @@ export async function generateOutro({ date } = {}) {
 
     const outroPrompt = await getOutroPromptFull(sponsor, cta);
 
-    const raw = await callLLMText({ routeName: "outro", prompt: outroPrompt });
+    const raw = await resilientRequest({ routeName: "outro", prompt: outroPrompt });
 
     const qa = validateOutro(raw, cta, sponsor.title, sponsor.url);
     if (!qa.isValid) {
@@ -135,18 +135,18 @@ export async function generateComposedEpisode({
       .trim();
 
     const tdPrompt = getTitleDescriptionPrompt(composedText);
-    const tdRaw = await callLLMText({ routeName: "metadata", prompt: tdPrompt });
+    const tdRaw = await resilientRequest({ routeName: "metadata", prompt: tdPrompt });
     const parsedMeta = extractAndParseJson(tdRaw) || {};
 
     const seoPrompt = getSEOKeywordsPrompt(
       parsedMeta.description || composedText
     );
-    const seoRaw = await callLLMText({ routeName: "metadata", prompt: seoPrompt });
+    const seoRaw = await resilientRequest({ routeName: "metadata", prompt: seoPrompt });
 
     const artPrompt = getArtworkPrompt(
       parsedMeta.description || composedText
     );
-    const artRaw = await callLLMText({ routeName: "metadata", prompt: artPrompt });
+    const artRaw = await resilientRequest({ routeName: "metadata", prompt: artPrompt });
 
     const metadata = {
       title: parsedMeta.title || "Untitled Episode",
