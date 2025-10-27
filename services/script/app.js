@@ -2,6 +2,8 @@
 import express from "express";
 import scriptRoutes from "./routes/index.js";
 import { info } from "#logger.js";
+import weatherRoute from "./routes/weatherRoute.js";
+app.use("/api", weatherRoute);
 
 const app = express();
 
