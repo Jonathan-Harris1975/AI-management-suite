@@ -11,9 +11,8 @@ import {
   generateComposedEpisode,
 } from "./utils/models.js";
 
-// ✅ Correct import for your actual structure
+// ✅ Import the weather handler for internal use
 import weatherHandler from "./api/weather.js";
-app.get("/api/weather", weatherHandler);
 
 const app = express();
 app.use(cors());
@@ -27,7 +26,7 @@ app.get("/api/script/health", (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// 🌦️ WEATHER ENDPOINT (from ./api/weather.js)
+// 🌦️ WEATHER ENDPOINT (local service fetch target)
 // ─────────────────────────────────────────────
 app.get("/api/weather", weatherHandler);
 
