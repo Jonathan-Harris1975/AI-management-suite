@@ -6,7 +6,7 @@ import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { uploadBuffer } from "../../shared/utils/r2-client.js"; // ✅ centralised R2 uploader
 
 import promptTemplates from "./promptTemplates.js";
-import { getWeatherSummary } from "./weather.js";
+import { getWeatherSummary } from "./getWeatherSummary.js";
 import { getTuringQuote } from "./getTuringQuote.js";
 import getSponsor from "./getSponsor.js";
 import generateCta from "./generateCta.js";
