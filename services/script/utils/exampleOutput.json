@@ -1,0 +1,11 @@
+{
+  "transcript": "Full plain text transcript...",
+  "ttsChunks": [
+    "Chunk 1...",
+    "Chunk 2..."
+  ],
+  "title": "AI and the Art of British Sarcasm",
+  "description": "This week’s Turing’s Torch takes you on a sarcastic romp through the AI headlines...",
+  "keywords": ["AI", "ethics", "machine learning", "London", "OpenAI"],
+  "artPrompt": "AI robot walking through rainy London, headphones on, neon reflections, satirical podcast poster"
+}
