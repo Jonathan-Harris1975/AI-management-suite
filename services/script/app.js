@@ -11,7 +11,7 @@ import {
   generateComposedEpisode,
 } from "./utils/models.js";
 
-// ✅ Import local weather handler (in this service)
+// ✅ Import local weather handler
 import weatherHandler from "./api/weather.js";
 
 const app = express();
