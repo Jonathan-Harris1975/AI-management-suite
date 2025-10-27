@@ -1,31 +1,77 @@
 // services/script/app.js
 import express from "express";
-import scriptRoutes from "./routes/index.js";
+import bodyParser from "body-parser";
+import cors from "cors";
 import { info } from "#logger.js";
-import weatherRoute from "./routes/weatherRoute.js";
-app.use("/api", weatherRoute);
+
+import {
+  generateIntro,
+  generateMain,
+  generateOutro,
+  generateComposedEpisode,
+} from "./utils/models.js";
+
+// ✅ Correct import for your actual structure
+import weatherHandler from "./api/weather.js";
 
 const app = express();
+app.use(cors());
+app.use(bodyParser.json({ limit: "10mb" }));
 
-// ─────────────────────────────
-// Core middleware
-// ─────────────────────────────
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
-
-// ─────────────────────────────
-// Mount routes
-// ─────────────────────────────
-app.use("/script", scriptRoutes);
-
-// Health route for internal checks
-app.get("/script/health", (_req, res) => {
-  res.json({ ok: true, service: "script" });
+// ─────────────────────────────────────────────
+// 🩺 HEALTH CHECK
+// ─────────────────────────────────────────────
+app.get("/api/script/health", (req, res) => {
+  res.json({ status: "ok", service: "script" });
 });
 
-// ─────────────────────────────
-// Startup log
-// ─────────────────────────────
-info("script.app.init", { mounted: "/script" });
+// ─────────────────────────────────────────────
+// 🌦️ WEATHER ENDPOINT (from ./api/weather.js)
+// ─────────────────────────────────────────────
+app.get("/api/weather", weatherHandler);
+
+// ─────────────────────────────────────────────
+// 🧠 PODCAST SCRIPT GENERATION ENDPOINTS
+// ─────────────────────────────────────────────
+app.post("/script/intro", async (req, res) => {
+  try {
+    const result = await generateIntro(req.body);
+    res.json({ success: true, text: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/script/main", async (req, res) => {
+  try {
+    const result = await generateMain(req.body);
+    res.json({ success: true, text: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/script/outro", async (req, res) => {
+  try {
+    const result = await generateOutro(req.body);
+    res.json({ success: true, text: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/script/compose", async (req, res) => {
+  try {
+    const result = await generateComposedEpisode(req.body);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// ✅ STARTUP LOG
+// ─────────────────────────────────────────────
+info("✅ Script service initialized with weather + Turing integration");
 
 export default app;
