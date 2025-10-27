@@ -1,12 +1,13 @@
 // services/script/utils/models.js
 import { info, error } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-
 import promptTemplates from "./promptTemplates.js";
-import { getWeatherSummary } from "./weather.js";
+
+import { getWeatherSummary } from "./getWeatherSummary.js";
 import { getTuringQuote } from "./getTuringQuote.js";
 import getSponsor from "./getSponsor.js";
 import generateCta from "./generateCta.js";
+
 import {
   extractAndParseJson,
   getTitleDescriptionPrompt,
@@ -24,25 +25,29 @@ const {
   validateOutro,
 } = promptTemplates;
 
-// ─────────────────────────────────────────────
-// INTRO — Live weather + Turing quote
-// ─────────────────────────────────────────────
+/* ────────────────────────────────────────────────
+ * INTRO — uses live Weather API + Turing quote
+ * ──────────────────────────────────────────────── */
 export async function generateIntro({ date, tone = {} } = {}) {
   try {
     info("script.intro.req", { date });
 
+    // ✅ Live weather summary (fallback to default if offline)
     const weatherSummary =
       (await getWeatherSummary()) ||
       tone.weatherSummary ||
       "miserable grey drizzle over London";
 
+    // ✅ Random Alan Turing quote (cached from data file)
     const turingQuote =
       (await getTuringQuote()) ||
       tone.turingQuote ||
       "We can only see a short distance ahead, but we can see plenty there that needs to be done.";
 
     const prompt = getIntroPrompt({ weatherSummary, turingQuote });
-    const raw = await resilientRequest({ route: "intro", prompt });
+
+    // ✅ Corrected call — route name string
+    const raw = await resilientRequest("intro", prompt);
 
     let outText = humanize(raw);
     outText = enforceTransitions(outText);
@@ -53,9 +58,9 @@ export async function generateIntro({ date, tone = {} } = {}) {
   }
 }
 
-// ─────────────────────────────────────────────
-// MAIN — Normalized newsItems
-// ─────────────────────────────────────────────
+/* ────────────────────────────────────────────────
+ * MAIN — handles RSS or Make.com article arrays
+ * ──────────────────────────────────────────────── */
 export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   try {
     let articles = [];
@@ -77,7 +82,7 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
       targetDuration: tone.targetDuration || 60,
     });
 
-    const raw = await resilientRequest({ route: "main", prompt });
+    const raw = await resilientRequest("main", prompt);
 
     const qa = validateScript(raw);
     if (!qa.isValid) {
@@ -93,9 +98,9 @@ export async function generateMain({ date, newsItems = [], tone = {} } = {}) {
   }
 }
 
-// ─────────────────────────────────────────────
-// OUTRO — Dynamic sponsor + CTA
-// ─────────────────────────────────────────────
+/* ────────────────────────────────────────────────
+ * OUTRO — pulls sponsor + CTA dynamically
+ * ──────────────────────────────────────────────── */
 export async function generateOutro({ date } = {}) {
   try {
     info("script.outro.req", { date });
@@ -104,7 +109,8 @@ export async function generateOutro({ date } = {}) {
     const cta = await generateCta(sponsor);
 
     const outroPrompt = await getOutroPromptFull(sponsor, cta);
-    const raw = await resilientRequest({ route: "outro", prompt: outroPrompt });
+
+    const raw = await resilientRequest("outro", outroPrompt);
 
     const qa = validateOutro(raw, cta, sponsor.title, sponsor.url);
     if (!qa.isValid) {
@@ -120,9 +126,10 @@ export async function generateOutro({ date } = {}) {
   }
 }
 
-// ─────────────────────────────────────────────
-// COMPOSE — Metadata generation
-// ─────────────────────────────────────────────
+/* ────────────────────────────────────────────────
+ * COMPOSE — merges intro + main + outro and
+ * generates metadata via "metadata" route
+ * ──────────────────────────────────────────────── */
 export async function generateComposedEpisode({
   introText = "",
   mainText = "",
@@ -137,15 +144,22 @@ export async function generateComposedEpisode({
       .join("\n\n")
       .trim();
 
+    // 🧠 Title + Description
     const tdPrompt = getTitleDescriptionPrompt(composedText);
-    const tdRaw = await resilientRequest({ route: "metadata", prompt: tdPrompt });
+    const tdRaw = await resilientRequest("metadata", tdPrompt);
     const parsedMeta = extractAndParseJson(tdRaw) || {};
 
-    const seoPrompt = getSEOKeywordsPrompt(parsedMeta.description || composedText);
-    const seoRaw = await resilientRequest({ route: "metadata", prompt: seoPrompt });
+    // 🧠 SEO Keywords
+    const seoPrompt = getSEOKeywordsPrompt(
+      parsedMeta.description || composedText
+    );
+    const seoRaw = await resilientRequest("metadata", seoPrompt);
 
-    const artPrompt = getArtworkPrompt(parsedMeta.description || composedText);
-    const artRaw = await resilientRequest({ route: "metadata", prompt: artPrompt });
+    // 🧠 Artwork
+    const artPrompt = getArtworkPrompt(
+      parsedMeta.description || composedText
+    );
+    const artRaw = await resilientRequest("metadata", artPrompt);
 
     const metadata = {
       title: parsedMeta.title || "Untitled Episode",
