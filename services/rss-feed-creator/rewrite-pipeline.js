@@ -1,40 +1,54 @@
-import { Router } from "express";
-import { endToEndRewrite } from "../rewrite-pipeline.js";
-
-const router = Router();
-
 /**
- * POST /rewrite
- *
- * Triggers:
- *  - fetch RSS sources
- *  - rewrite with AI (OpenRouter via resilientRequest)
- *  - shorten URLs
- *  - generate RSS XML
- *  - upload to R2
- *
- * Returns summary metadata. Does NOT require sessionId.
+ * rewrite-pipeline.js
+ * -------------------
+ * Full pipeline for the RSS Feed Creator.
+ * 1. Load source lists from R2
+ * 2. Fetch and parse the upstream feeds
+ * 3. Rewrite entries via AI (OpenRouter through resilientRequest)
+ * 4. Shorten URLs (Short.io)
+ * 5. Generate final RSS XML and upload to R2
  */
-router.post("/rewrite", async (req, res) => {
-  try {
-    const result = await endToEndRewrite();
 
-    return res.status(200).json({
-      ok: true,
-      message: "Feed fetched, rewritten, and published to R2.",
-      meta: {
-        itemsProcessed: result.itemsProcessed,
-        r2: result.r2Result,
-      },
-    });
-  } catch (err) {
-    console.error("rewrite.route.error", err);
-    return res.status(500).json({
-      ok: false,
-      error: "Failed to generate rewritten RSS feed",
-      details: err?.message || String(err),
+import { ensureFeedsLoaded } from "./startup/rss-init.js";
+import { fetchFeeds } from "./utils/fetchFeeds.js";
+import { rewriteRssFeedItems } from "./utils/models.js";
+import { shortenUrl } from "./utils/shortio.js";
+import { generateFeed } from "./utils/feedGenerator.js";
+
+export async function endToEndRewrite() {
+  // 1. Get configured feed sources / URLs from R2
+  const { urlFeeds } = await ensureFeedsLoaded();
+
+  // 2. Pull latest articles from those feeds
+  const fetchedArticles = await fetchFeeds(urlFeeds);
+  // fetchedArticles should look like:
+  // [{ title, summary, link, pubDate?, source? }, ...]
+
+  // 3. Rewrite each article using AI
+  const rewrittenArticles = await rewriteRssFeedItems(fetchedArticles);
+  // rewrittenArticles -> [{ ...original, rewritten }, ...]
+
+  // 4. Shorten links (non-blocking: fallback to original link if Short.io fails)
+  const withShortLinks = [];
+  for (const article of rewrittenArticles) {
+    let shortLink = null;
+    try {
+      shortLink = await shortenUrl(article.link);
+    } catch (_) {
+      // swallow shortener errors, continue
+    }
+    withShortLinks.push({
+      ...article,
+      shortLink: shortLink || article.link,
     });
   }
-});
 
-export default router;
+  // 5. Build the final RSS XML feed and upload it to R2
+  const r2Result = await generateFeed(withShortLinks);
+
+  return {
+    ok: true,
+    itemsProcessed: withShortLinks.length,
+    r2Result,
+  };
+}
