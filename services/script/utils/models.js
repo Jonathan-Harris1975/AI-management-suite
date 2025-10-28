@@ -2,17 +2,16 @@
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
-import fetchFeedArticles from "./fetchFeeds.js"; // ✅ CORRECT
+import fetchFeedArticles from "./fetchFeeds.js";
 import { putText, putJson } from "../../shared/utils/r2-client.js";
 import { cleanTranscript } from "./textHelpers.js";
 import chunkText from "./chunkText.js";
 import { generateEpisodeMeta } from "./podcastHelpers.js";
-import storeTempPart from "./sessionCache.js";
+import { getAllParts } from "./sessionCache.js";
 
 export async function generateIntro(sessionId) {
   const weatherSummary = "Overcast and drizzly â€” perfect AI podcast weather.";
   const turingQuote = "We can only see a short distance ahead, but we can see plenty there that needs to be done.";
-
   const prompt = getIntroPrompt({ weatherSummary, turingQuote });
   return await resilientRequest(prompt, { sessionId, section: "intro" });
 }
@@ -24,14 +23,17 @@ export async function generateMain(sessionId) {
 }
 
 export async function generateOutro(sessionId) {
-  const prompt = await getOutroPromptFull(); // async
+  const prompt = await getOutroPromptFull();
   return await resilientRequest(prompt, { sessionId, section: "outro" });
 }
 
 export async function generateComposedEpisode(sessionId) {
-  const { intro, main, outro } = await sessionCache.get(sessionId);
+  const { intro, main, outro } = await getAllParts(sessionId);
+  const fullTranscript = cleanTranscript(`${intro}
 
-  const fullTranscript = cleanTranscript(`${intro}\n\n${main}\n\n${outro}`);
+${main}
+
+${outro}`);
   const chunks = chunkText(fullTranscript);
 
   await putText(`transcript/${sessionId}.txt`, fullTranscript);
@@ -45,4 +47,4 @@ export async function generateComposedEpisode(sessionId) {
   await putJson(`meta/${sessionId}.json`, metadata);
 
   return { fullTranscript, chunks, metadata };
-    }
+}
