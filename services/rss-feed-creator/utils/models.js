@@ -1,25 +1,51 @@
-// services/rss-feed-creator/utils/models.js
+// ============================================================
+// 🧠 RSS Feed Creator — AI Rewrite Models
+// ============================================================
+//
+// - Calls OpenRouter via resilientRequest()
+// - Uses rss-prompts.js templates
+// - Handles null / missing fields gracefully
+// - Logs every AI call and failure cleanly
+// ============================================================
+
 import { info, error } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-import { RSS_PROMPTS } from "./rss-prompts.js" // ✅ Correct import
-/**
- * Rewrites RSS feed entries into concise summaries using AI.
- * Uses the prompt templates defined in rssPrompts.js.
- */
-export async function rewriteRssFeedItem(item) {
-  try {
-    const { title, summary, link } = item;
+import { RSS_PROMPTS } from "./rss-prompts.js"; // ✅ Correct import
 
-    const systemPrompt = RSS_PROMPTS.system;
-    const userPrompt = RSS_PROMPTS.user(title, summary, link);
+/**
+ * Rewrites a single RSS feed entry using AI.
+ * Safely builds the prompt and ensures valid message content.
+ */
+export async function rewriteRssFeedItem(item = {}) {
+  try {
+    // Defensive normalization
+    const title = item?.title?.trim() || "Untitled article";
+    const summary = item?.summary?.trim() || "No summary provided.";
+    const link = item?.link?.trim() || "";
+
+    // Skip if completely empty
+    if (!title && !summary) {
+      throw new Error("Invalid feed item — missing title and summary");
+    }
+
+    // Build prompts safely
+    const systemPrompt =
+      RSS_PROMPTS?.system ||
+      "You are an AI summarizer that rewrites RSS feed articles into short, human-readable summaries.";
+
+    const userPrompt =
+      typeof RSS_PROMPTS?.user === "function"
+        ? RSS_PROMPTS.user(title, summary, link)
+        : `Summarize the article titled "${title}" in one concise paragraph.\n\n${summary}`;
 
     const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
+      { role: "system", content: String(systemPrompt) },
+      { role: "user", content: String(userPrompt) },
     ];
 
     info("rss-feed-creator.model.call", {
       route: "rssRewrite",
+      title: title.slice(0, 80),
       messagesCount: messages.length,
     });
 
@@ -33,32 +59,43 @@ export async function rewriteRssFeedItem(item) {
   } catch (err) {
     error("rss-feed-creator.model.fail", {
       route: "rssRewrite",
+      itemTitle: item?.title || "Untitled",
       err: err.message,
     });
-    throw err;
+
+    // Return a visible placeholder rather than throwing — keeps pipeline alive
+    return `⚠️ Rewrite failed: ${err.message}`;
   }
 }
 
 /**
  * Rewrites all items in a feed.
+ * Continues gracefully even if individual items fail.
  */
 export async function rewriteRssFeedItems(feedItems = []) {
   const results = [];
 
   for (const item of feedItems) {
+    // Skip empty items
+    if (!item || (!item.title && !item.summary)) continue;
+
     try {
       const rewritten = await rewriteRssFeedItem(item);
-      results.push({
-        ...item,
-        rewritten,
-      });
+      results.push({ ...item, rewritten });
     } catch (err) {
       error("❌ RSS item rewrite failed", {
         itemTitle: item?.title || "Untitled",
         err: err.message,
       });
+      // Still push original item so feed remains complete
+      results.push({ ...item, rewritten: `⚠️ Rewrite failed: ${err.message}` });
     }
   }
+
+  info("rss-feed-creator.model.batch.complete", {
+    totalItems: feedItems.length,
+    rewrittenItems: results.length,
+  });
 
   return results;
 }
