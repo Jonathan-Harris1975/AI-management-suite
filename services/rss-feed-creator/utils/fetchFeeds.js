@@ -37,7 +37,7 @@ function readLocalList(filename) {
  * Fetch and parse all feeds listed in data/url-feeds.txt and data/rss-feeds.txt.
  */
 export async function fetchFeeds() {
-  const urlFeeds = readLocalList("url-feeds.txt");
+  const urlFeeds = readLocalList("feeds.txt");
   const rssFeeds = readLocalList("rss-feeds.txt");
   const allFeeds = [...new Set([...urlFeeds, ...rssFeeds])];
 
