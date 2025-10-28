@@ -28,7 +28,7 @@ function calculateArticleScore(item) {
   return score;
 }
 
-export default async function fetchFeeds(feedUrl, targetDuration = 60) {
+export default async function fetchFeedArticles(feedUrl, targetDuration = 60) {
   try {
     console.log(`📡 Fetching RSS feed from: ${feedUrl}`);
     const feed = await parser.parseURL(feedUrl);
