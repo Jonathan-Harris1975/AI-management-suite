@@ -1,5 +1,5 @@
 // Builds RSS XML + JSON metadata from feeds.txt + urls.txt in R2
-import { r2GetText, r2Put, r2GetPublicBase, getBucketName } from "./r2Client.js";
+import { r2GetText, r2Put, r2GetPublicBase, getBucketName } from "#shared/utils/r2-client.js";
 
 function jlog(message, meta = undefined) {
   const line = { time: new Date().toISOString(), message };
