@@ -1,128 +1,79 @@
- // ============================================================
-// 🧠 RSS Feed Creator — Rotating Feed Fetcher (Fixed)
 // ============================================================
-// - Rotates 5 RSS + 1 URL per run via feedRotationManager.js
-// - Enforces MAX_ITEMS_PER_FEED & FEED_CUTOFF_HOURS
-// - Falls back to static slice if rotation manager fails
+// 🧠 RSS Feed Creator — Append + Self-Clean Feed Generator
+// ============================================================
+// - Fetches + rewrites new feed items
+// - Appends to existing RSS XML feed stored in R2
+// - Deduplicates + trims to 60 days (configurable)
 // ============================================================
 
-import fs from "fs";
-import path from "path";
-import Parser from "rss-parser";
 import { info, error } from "#logger.js";
-import { getObjectAsText } from "../../shared/utils/r2-client.js";
-import { loadNextFeedBatch } from "./feedRotationManager.js";
+import { getObjectAsText, putText, putJson, R2_BUCKETS } from "../../shared/utils/r2-client.js";
+import { rewriteRssFeedItems } from "./models.js";
+import { fetchFeeds } from "./fetchFeeds.js";
+import { buildRssXml, parseExistingRssXml } from "./rssBuilder.js";
 
-const parser = new Parser();
+const FEED_KEY = "feeds/ai-digest.xml";
+const META_KEY = "feeds/ai-digest-meta.json";
+const FEED_CUTOFF_DAYS = Number(process.env.FEED_CUTOFF_DAYS) || 60;
+const MAX_TOTAL_ITEMS = Number(process.env.MAX_TOTAL_ITEMS) || 500;
 
-// ─────────────────────────────────────────────
-// ENV CONFIG
-// ─────────────────────────────────────────────
-const MAX_ITEMS_PER_FEED = Number(process.env.MAX_ITEMS_PER_FEED) || 10;
-const FEED_CUTOFF_HOURS = Number(process.env.FEED_CUTOFF_HOURS) || 1440; // 60 days
-const FEED_CUTOFF_MS = FEED_CUTOFF_HOURS * 60 * 60 * 1000;
-const MAX_RSS_FEEDS_PER_RUN = Number(process.env.MAX_RSS_FEEDS_PER_RUN) || 5;
-const MAX_URL_FEEDS_PER_RUN = Number(process.env.MAX_URL_FEEDS_PER_RUN) || 1;
-
-// ─────────────────────────────────────────────
-// Helpers (define early to avoid reference errors)
-// ─────────────────────────────────────────────
-function parseUrlList(text) {
-  return text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("#"));
-}
-
-async function readLocalOrR2File(filename, bucket = "rss-feeds") {
-  const localPath = path.resolve("services/rss-feed-creator/data", filename);
-  if (fs.existsSync(localPath)) {
-    return fs.readFileSync(localPath, "utf-8");
-  }
+export async function generateFeed() {
   try {
-    return await getObjectAsText(bucket, `data/${filename}`);
-  } catch (err) {
-    error("rss.readLocalOrR2File.fail", { filename, err: err.message });
-    return "";
-  }
-}
+    // 1️⃣ Fetch and rewrite new items
+    const newItems = await fetchFeeds();
+    const rewritten = await rewriteRssFeedItems(newItems);
 
-// ─────────────────────────────────────────────
-// MAIN FETCH FUNCTION
-// ─────────────────────────────────────────────
-export async function fetchFeeds() {
-  let rssFeeds = [];
-  let urlFeeds = [];
+    info("rss.feedGenerator.newItems", { count: rewritten.length });
 
-  // Attempt rotation-based feed selection
-  try {
-    const batch = await loadNextFeedBatch();
-    rssFeeds = batch.rssFeeds || [];
-    urlFeeds = batch.urlFeeds || [];
-
-    info("rss.fetchFeeds.rotation.enabled", {
-      rssFeeds: rssFeeds.length,
-      urlFeeds: urlFeeds.length,
-    });
-  } catch (err) {
-    error("rss.fetchFeeds.rotation.fail", { error: err.message });
-
-    // ✅ Fallback to static selection (helpers now defined above)
-    const rssFeedsText = await readLocalOrR2File("rss-feeds.txt");
-    const urlFeedsText = await readLocalOrR2File("url-feeds.txt");
-    rssFeeds = parseUrlList(rssFeedsText).slice(0, MAX_RSS_FEEDS_PER_RUN);
-    urlFeeds = parseUrlList(urlFeedsText).slice(0, MAX_URL_FEEDS_PER_RUN);
-
-    info("rss.fetchFeeds.fallback.static", {
-      rssFeeds: rssFeeds.length,
-      urlFeeds: urlFeeds.length,
-    });
-  }
-
-  if (rssFeeds.length === 0 && urlFeeds.length === 0) {
-    throw new Error("No feeds available");
-  }
-
-  const selectedFeeds = [...rssFeeds, ...urlFeeds];
-  const cutoffDate = Date.now() - FEED_CUTOFF_MS;
-  const articles = [];
-
-  info("rss.fetchFeeds.start", {
-    totalFeeds: selectedFeeds.length,
-    MAX_ITEMS_PER_FEED,
-    FEED_CUTOFF_HOURS,
-  });
-
-  for (const feedUrl of selectedFeeds) {
+    // 2️⃣ Try loading existing feed XML from R2
+    let existingItems = [];
     try {
-      const parsed = await parser.parseURL(feedUrl);
-      const freshItems = (parsed.items || [])
-        .filter((it) => {
-          const date = new Date(it.pubDate || it.isoDate || 0).getTime();
-          return !isNaN(date) && date >= cutoffDate;
-        })
-        .slice(0, MAX_ITEMS_PER_FEED);
-
-      for (const item of freshItems) {
-        articles.push({
-          title: item.title,
-          summary: item.contentSnippet || item.content || "",
-          link: item.link,
-          pubDate: item.pubDate,
-          source: feedUrl,
-        });
-      }
-
-      info("rss.fetchFeeds.success", {
-        feedUrl,
-        fetched: parsed.items?.length || 0,
-        kept: freshItems.length,
-      });
-    } catch (err) {
-      error("rss.fetchFeeds.fail", { feedUrl, err: err.message });
+      const xml = await getObjectAsText(R2_BUCKETS.RSS_FEEDS, FEED_KEY);
+      existingItems = parseExistingRssXml(xml);
+      info("rss.feedGenerator.loadedExisting", { existing: existingItems.length });
+    } catch {
+      info("rss.feedGenerator.noExistingFeed", { FEED_KEY });
     }
-  }
 
-  info("📥 Fetch complete", { total: articles.length });
-  return articles;
-}     
+    // 3️⃣ Merge and deduplicate by link
+    const allItemsMap = new Map();
+    for (const item of [...rewritten, ...existingItems]) {
+      if (!item.link) continue;
+      if (!allItemsMap.has(item.link)) allItemsMap.set(item.link, item);
+    }
+    let mergedItems = Array.from(allItemsMap.values());
+
+    // 4️⃣ Filter by date (rolling window)
+    const cutoff = Date.now() - FEED_CUTOFF_DAYS * 24 * 60 * 60 * 1000;
+    mergedItems = mergedItems.filter((i) => {
+      const d = new Date(i.pubDate || 0).getTime();
+      return !isNaN(d) && d >= cutoff;
+    });
+
+    // 5️⃣ Limit total feed size
+    mergedItems = mergedItems
+      .sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate))
+      .slice(0, MAX_TOTAL_ITEMS);
+
+    // 6️⃣ Rebuild feed XML + save to R2
+    const finalXml = buildRssXml(mergedItems);
+    await putText(R2_BUCKETS.RSS_FEEDS, FEED_KEY, finalXml, "application/xml");
+
+    // 7️⃣ Update metadata
+    const meta = {
+      totalItems: mergedItems.length,
+      newItems: rewritten.length,
+      updatedAt: new Date().toISOString(),
+      cutoffDays: FEED_CUTOFF_DAYS,
+      bucket: R2_BUCKETS.RSS_FEEDS,
+    };
+    await putJson(R2_BUCKETS.META, META_KEY, meta);
+
+    info("rss.feedGenerator.append.success", meta);
+
+    return { feedKey: FEED_KEY, metaKey: META_KEY, ...meta };
+  } catch (err) {
+    error("rss.feedGenerator.append.fail", { error: err.message });
+    throw err;
+  }
+       }
