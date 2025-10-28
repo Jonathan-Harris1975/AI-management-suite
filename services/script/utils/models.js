@@ -2,7 +2,7 @@
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
-import { fetchFeedArticles } from "./fetchFeeds.js";
+import fetchFeedArticles from "./fetchFeeds.js"; // ✅ CORRECT
 import { putText, putJson } from "../../shared/utils/r2-client.js";
 import { cleanTranscript } from "./textHelpers.js";
 import chunkText from "./chunkText.js";
