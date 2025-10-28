@@ -5,7 +5,7 @@ import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTempl
 import { fetchFeedArticles } from "./fetchFeeds.js";
 import { putText, putJson } from "../../shared/utils/r2-client.js";
 import { cleanText } from "./textHelpers.js";
-import { chunkText } from "./chunkText.js";
+import chunkText from "./chunkText.js";
 import { generateEpisodeMeta } from "./podcastHelpers.js";
 import sessionCache from "./sessionCache.js";
 
