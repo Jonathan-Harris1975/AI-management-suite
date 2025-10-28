@@ -1,6 +1,6 @@
 // services/script/utils/rewrite-pipeline.js
 
-import { RSS_PROMPTS } from "./rss-prompts.js";
+import { RSS_PROMPTS } from "../rss-prompts.js";
 import { stripHtml } from "../../shared/utils/html.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 
