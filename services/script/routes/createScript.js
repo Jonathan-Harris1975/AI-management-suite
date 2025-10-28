@@ -1,31 +1,20 @@
 // services/script/routes/createScript.js
 
-import express from "express";
-import { v4 as uuidv4 } from "uuid";
-import { generateIntro, generateMain, generateOutro } from "../utils/models.js";
-import { storeTempPart } from "../utils/sessionCache.js";
+import express from 'express';
+import crypto from 'crypto';
+import { runFullScriptPipeline } from '../utils/orchestrator.js';
 
 const router = express.Router();
 
-router.post("/create-script", async (req, res) => {
-  const tone = req.body.tone || "neutral";
-  const sessionId = uuidv4();
+router.post('/create-script', async (req, res) => {
+  const sessionId = req.body?.sessionId || crypto.randomUUID();
 
   try {
-    const [intro, main, outro] = await Promise.all([
-      generateIntro(sessionId, tone),
-      generateMain(sessionId, tone),
-      generateOutro(sessionId, tone),
-    ]);
-
-    storeTempPart(sessionId, "intro", intro);
-    storeTempPart(sessionId, "main", main);
-    storeTempPart(sessionId, "outro", outro);
-
-    res.status(200).json({ status: "started", sessionId });
+    const result = await runFullScriptPipeline(sessionId);
+    res.status(200).json({ success: true, sessionId, ...result });
   } catch (err) {
-    console.error("Script creation failed:", err);
-    res.status(500).json({ error: "Script generation failed" });
+    console.error('❌ Pipeline failed', err);
+    res.status(500).json({ error: 'Script generation failed', details: err.message });
   }
 });
 
