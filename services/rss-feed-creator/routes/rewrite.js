@@ -5,8 +5,15 @@ const router = Router();
 
 /**
  * POST /rewrite
- * Rewrites/summarises latest AI/tech news feeds and saves to R2.
- * No sessionId required.
+ *
+ * Triggers:
+ *  - fetch RSS sources
+ *  - rewrite with AI (OpenRouter via resilientRequest)
+ *  - shorten URLs
+ *  - generate RSS XML
+ *  - upload to R2
+ *
+ * Returns summary metadata. Does NOT require sessionId.
  */
 router.post("/rewrite", async (req, res) => {
   try {
@@ -14,9 +21,9 @@ router.post("/rewrite", async (req, res) => {
 
     return res.status(200).json({
       ok: true,
-      message: "RSS content ingested, rewritten, and saved.",
+      message: "Feed fetched, rewritten, and published to R2.",
       meta: {
-        itemsProcessed: result.count,
+        itemsProcessed: result.itemsProcessed,
         r2: result.r2Result,
       },
     });
@@ -24,7 +31,7 @@ router.post("/rewrite", async (req, res) => {
     console.error("rewrite.route.error", err);
     return res.status(500).json({
       ok: false,
-      error: "Failed to rewrite and persist RSS content",
+      error: "Failed to generate rewritten RSS feed",
       details: err?.message || String(err),
     });
   }
