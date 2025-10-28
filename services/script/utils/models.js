@@ -10,7 +10,7 @@ import { generateEpisodeMeta } from "./podcastHelpers.js";
 import sessionCache from "./sessionCache.js";
 
 export async function generateIntro(sessionId) {
-  const weatherSummary = "Overcast and drizzly â€” perfect AI podcast weather.";
+  const weatherSummary = "Overcast and drizzly Ã¢â‚¬â€ perfect AI podcast weather.";
   const turingQuote = "We can only see a short distance ahead, but we can see plenty there that needs to be done.";
 
   const prompt = getIntroPrompt({ weatherSummary, turingQuote });
@@ -45,4 +45,4 @@ export async function generateComposedEpisode(sessionId) {
   await putJson(`meta/${sessionId}.json`, metadata);
 
   return { fullTranscript, chunks, metadata };
-    }
+}
