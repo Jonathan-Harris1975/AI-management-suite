@@ -1,43 +1,91 @@
-// services/rss-feed-creator/routes/rewrite.js
+// ==========================================================
+// 🧠 RSS Feed Rewriter — AI Podcast Suite
+// ----------------------------------------------------------
+// Fetches next feed from rotation in R2, downloads raw XML,
+// rewrites each item using LLM model, and uploads feed.xml.
+// ==========================================================
 
-import express from "express";
-import { rewriteFeedItems } from "../utils/rewriteFeedItems.js";
-import { getObjectAsJson } from "../../shared/utils/r2-client.js";
+import { Router } from "express";
+import { info, error } from "#logger.js";
+import { getObjectAsText, putText } from "#shared/r2-client.js";
+import { fetchWithTimeout } from "../../shared/http-client.js";
+import { runRewritePipeline } from "../rewrite-pipeline.js";
 
-const router = express.Router();
+const router = Router();
+const RSS_FEED_BUCKET = process.env.R2_BUCKET_RSS_FEEDS || "";
+const ROTATION_FILE = "data/feed-rotation.json";
+const RSS_LIST_FILE = "data/rss-feeds.txt";
 
-router.post("/rss-rewrite", async (req, res) => {
-  const { sessionId } = req.body;
-
-  if (!sessionId) {
-    console.warn("⚠️ Missing sessionId in request body.");
-    return res.status(400).json({ error: "Missing sessionId." });
-  }
-
+// ==========================================================
+// Utility: Load next RSS feed from rotation
+// ==========================================================
+async function loadNextFeed() {
   try {
-    console.log("🔍 Loading feed data from R2 for session:", sessionId);
+    info("⚙️ No feedXml provided — fetching next RSS feed from R2 rotation...");
+    info("🪣 Using R2 bucket:", RSS_FEED_BUCKET);
 
-    const key = `rss/${sessionId}.json`;
-    const rawFeed = await getObjectAsJson(key);
+    const feedsTxt = await getObjectAsText(RSS_FEED_BUCKET, RSS_LIST_FILE);
+    if (!feedsTxt) throw new Error("rss-feeds.txt missing or empty.");
+    const feeds = feedsTxt.split(/\r?\n/).filter(Boolean);
 
-    if (!rawFeed || !rawFeed.articles) {
-      console.warn("🚫 No articles found in R2 under key:", key);
-      return res.status(404).json({ error: "No feed data found for this session." });
+    // rotation index
+    let rotation = 0;
+    try {
+      const rotationJson = await getObjectAsText(RSS_FEED_BUCKET, ROTATION_FILE);
+      if (rotationJson) rotation = JSON.parse(rotationJson).index || 0;
+    } catch {
+      rotation = 0;
     }
 
-    console.log(`🧩 Rewriting ${rawFeed.articles.length} feed items via AI model...`);
+    // pick feed & advance
+    const feedUrl = feeds[rotation % feeds.length];
+    const next = (rotation + 1) % feeds.length;
+    await putText(
+      RSS_FEED_BUCKET,
+      ROTATION_FILE,
+      JSON.stringify({ index: next }),
+      "application/json"
+    );
 
-    const rewrittenItems = await rewriteFeedItems(rawFeed.articles, sessionId);
+    info(`📡 Using feed [${rotation + 1}/${feeds.length}]: ${feedUrl}`);
+    return feedUrl;
+  } catch (err) {
+    error("💥 Failed to load feed rotation", { err: err.message });
+    throw err;
+  }
+}
 
-    return res.json({
-      status: "success",
-      count: rewrittenItems.length,
-      articles: rewrittenItems
+// ==========================================================
+// Route: POST /rewrite
+// ==========================================================
+router.post("/rewrite", async (req, res) => {
+  try {
+    let feedXml = req.body?.feedXml;
+    let feedUrl = req.body?.feedUrl;
+
+    if (!feedXml) {
+      // get next feed URL from R2 rotation
+      feedUrl = feedUrl || (await loadNextFeed());
+      info("🌐 Downloading RSS feed from remote URL...");
+      const response = await fetchWithTimeout(feedUrl, { timeout: 15000 });
+      if (!response.ok) {
+        throw new Error(`Failed to download ${feedUrl}: HTTP ${response.status}`);
+      }
+      feedXml = await response.text();
+    }
+
+    info("📰 RSS rewrite requested");
+    const result = await runRewritePipeline(feedXml);
+
+    res.json({
+      success: true,
+      rewritten: result.count,
+      publicUrl: result.publicUrl,
     });
-  } catch (error) {
-    console.error("❌ Error in rss-rewrite route:", error);
-    return res.status(500).json({ error: "Failed to rewrite RSS feed items." });
+  } catch (err) {
+    error("💥 RSS rewrite failed", { message: err.message, stack: err.stack });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-export { router as rssRewrite };
+export default router;
