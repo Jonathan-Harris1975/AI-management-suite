@@ -1,7 +1,7 @@
 import fetch from "node-fetch";
 import { info, error } from "#logger.js";
 
-export async function fetchFeedsXml(urls = []) {
+export async function fetchFeeds(urls = []) {
   const out = [];
   for (const url of urls) {
     try {
