@@ -1,86 +1,79 @@
-/**
- * fetchFeeds.js
- * -----------------
- * Loads RSS feed URLs from either local data/ folder or from R2.
- * Returns a combined list of feed items ready for rewriting.
- */
+// ============================================================
+// 🧠 RSS Feed Creator — Append + Self-Clean (Single R2 Bucket)
+// ============================================================
+// - Fetches and rewrites new items
+// - Loads existing feed from R2
+// - Appends new rewritten items, deduplicates, self-cleans
+// - Saves single merged feed XML back to same R2 bucket
+// ============================================================
 
-import fs from "fs";
-import path from "path";
-import Parser from "rss-parser";
 import { info, error } from "#logger.js";
-import { getObjectAsText } from "../../shared/utils/r2-client.js";
+import { getObjectAsText, putText, R2_BUCKETS } from "../../shared/utils/r2-client.js";
+import { rewriteRssFeedItems } from "./models.js";
+import { fetchFeeds } from "./fetchFeeds.js";
+import { buildRssXml, parseExistingRssXml } from "./rssBuilder.js";
 
-const parser = new Parser();
+const FEED_KEY = "feeds/ai-digest.xml";
+const FEED_CUTOFF_DAYS = Number(process.env.FEED_CUTOFF_DAYS) || 60;
+const MAX_TOTAL_ITEMS = Number(process.env.MAX_TOTAL_ITEMS) || 500;
 
-// Helper: read a local file if available
-async function readLocalOrR2File(filename, bucket = "rss-feeds") {
-  const localPath = path.resolve("services/rss-feed-creator/data", filename);
-
-  // Try local file first
-  if (fs.existsSync(localPath)) {
-    const data = fs.readFileSync(localPath, "utf-8");
-    return data;
-  }
-
-  // Fall back to Cloudflare R2
-  try {
-    const r2Path = `data/${filename}`;
-    const text = await getObjectAsText(bucket, r2Path);
-    if (text && text.length > 0) {
-      info("rss.fetchFeeds.fromR2.success", { filename, bucket });
-      return text;
-    }
-  } catch (err) {
-    error("rss.fetchFeeds.fromR2.fail", { filename, bucket, error: err.message });
-  }
-
-  return "";
-}
-
-// Parse list of URLs from a text block
-function parseUrlList(text) {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#"));
-}
-
-// Main function
 export async function generateFeed() {
-  const rssFeedsText = await readLocalOrR2File("rss-feeds.txt");
-  const urlFeedsText = await readLocalOrR2File("url-feeds.txt");
+  try {
+    // 1️⃣ Fetch and rewrite new feed items
+    const newItems = await fetchFeeds();
+    const rewritten = await rewriteRssFeedItems(newItems);
 
-  const rssFeeds = parseUrlList(rssFeedsText);
-  const urlFeeds = parseUrlList(urlFeedsText);
-  const allFeeds = [...new Set([...rssFeeds, ...urlFeeds])];
+    info("rss.feedGenerator.newItems", { count: rewritten.length });
 
-  if (allFeeds.length === 0) {
-    throw new Error("No feeds available");
-  }
-
-  info("rss.fetchFeeds.start", { totalFeeds: allFeeds.length });
-
-  const articles = [];
-
-  for (const feedUrl of allFeeds) {
+    // 2️⃣ Try to load existing feed from R2
+    let existingItems = [];
     try {
-      const parsed = await parser.parseURL(feedUrl);
-      for (const item of parsed.items) {
-        articles.push({
-          title: item.title,
-          summary: item.contentSnippet || item.content || "",
-          link: item.link,
-          pubDate: item.pubDate,
-          source: feedUrl,
-        });
-      }
-      info("rss.fetchFeeds.success", { feedUrl, items: parsed.items.length });
-    } catch (err) {
-      error("rss.fetchFeeds.fail", { feedUrl, err: err.message });
+      const xml = await getObjectAsText(R2_BUCKETS.RSS_FEEDS, FEED_KEY);
+      existingItems = parseExistingRssXml(xml);
+      info("rss.feedGenerator.loadedExisting", { existing: existingItems.length });
+    } catch {
+      info("rss.feedGenerator.noExistingFeed", { FEED_KEY });
     }
-  }
 
-  info("📥 Fetch complete", { total: articles.length });
-  return articles;
-}
+    // 3️⃣ Merge and deduplicate by link
+    const allItemsMap = new Map();
+    for (const item of [...rewritten, ...existingItems]) {
+      if (!item.link) continue;
+      if (!allItemsMap.has(item.link)) allItemsMap.set(item.link, item);
+    }
+    let mergedItems = Array.from(allItemsMap.values());
+
+    // 4️⃣ Filter by rolling date window
+    const cutoff = Date.now() - FEED_CUTOFF_DAYS * 24 * 60 * 60 * 1000;
+    mergedItems = mergedItems.filter((i) => {
+      const d = new Date(i.pubDate || 0).getTime();
+      return !isNaN(d) && d >= cutoff;
+    });
+
+    // 5️⃣ Sort and trim to max total items
+    mergedItems = mergedItems
+      .sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate))
+      .slice(0, MAX_TOTAL_ITEMS);
+
+    // 6️⃣ Rebuild and save merged feed back to R2
+    const finalXml = buildRssXml(mergedItems);
+    await putText(R2_BUCKETS.RSS_FEEDS, FEED_KEY, finalXml, "application/xml");
+
+    info("rss.feedGenerator.save.success", {
+      feedKey: FEED_KEY,
+      totalItems: mergedItems.length,
+      newItems: rewritten.length,
+      cutoffDays: FEED_CUTOFF_DAYS,
+    });
+
+    return {
+      feedKey: FEED_KEY,
+      totalItems: mergedItems.length,
+      newItems: rewritten.length,
+      cutoffDays: FEED_CUTOFF_DAYS,
+    };
+  } catch (err) {
+    error("rss.feedGenerator.save.fail", { error: err.message });
+    throw err;
+  }
+                         }
