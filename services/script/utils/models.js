@@ -3,7 +3,7 @@
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
 import { fetchFeedArticles } from "./fetchFeeds.js";
-import { putText, putJson } from "#shared/utils/r2-client.js";
+import { putText, putJson } from "../../shared/utils/r2-client.js";
 import { cleanText } from "./textCleaner.js";
 import { chunkText } from "./chunker.js";
 import { generateEpisodeMeta } from "./podcastHelpers.js";
