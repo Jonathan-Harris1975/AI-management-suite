@@ -1,42 +1,111 @@
-// services/rss-feed-creator/utils/feedRotation.js
-import { info } from "#logger.js";
+// ============================================================
+// 🧭 Feed Rotation Manager
+// ============================================================
+// Rotates through rss-feeds.txt and url-feeds.txt on each endpoint call
+// Persists rotation index in R2 (feed-rotation.json)
+// ============================================================
 
-/**
- * Select the next batch of RSS feeds and one site URL to process.
- * Pulls from feed list and rotation state.
- */
-export function loadFeedRotation({
-  allFeeds = [],
-  siteFeeds = [],
-  rotationIndex = 0,
-  maxFeeds = parseInt(process.env.MAX_FEEDS_PER_RUN || "5", 10),
-} = {}) {
-  if (!Array.isArray(allFeeds) || allFeeds.length === 0) {
-    throw new Error("No feeds available");
+import fs from "fs";
+import path from "path";
+import { info, error } from "#logger.js";
+import { getObjectAsText, putJson } from "../../shared/utils/r2-client.js";
+
+const R2_BUCKET = process.env.R2_BUCKET_RSS_FEEDS || "rss-feeds";
+
+const ROTATION_FILE = "data/feed-rotation.json";
+const RSS_FILE = "rss-feeds.txt";
+const URL_FILE = "url-feeds.txt";
+
+const MAX_RSS_FEEDS_PER_RUN = Number(process.env.MAX_RSS_FEEDS_PER_RUN) || 5;
+const MAX_URL_FEEDS_PER_RUN = Number(process.env.MAX_URL_FEEDS_PER_RUN) || 1;
+
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+function parseList(text = "") {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("#"));
+}
+
+async function readFileOrR2(filename) {
+  const localPath = path.resolve("services/rss-feed-creator/data", filename);
+  if (fs.existsSync(localPath)) {
+    return fs.readFileSync(localPath, "utf-8");
+  }
+  try {
+    return await getObjectAsText(R2_BUCKET, `data/${filename}`);
+  } catch (err) {
+    error("feedRotation.readFile.fail", { filename, err: err.message });
+    return "";
+  }
+}
+
+// ─────────────────────────────────────────────
+// Load and Save Rotation State
+// ─────────────────────────────────────────────
+async function loadRotationState() {
+  try {
+    const text = await getObjectAsText(R2_BUCKET, ROTATION_FILE);
+    return JSON.parse(text);
+  } catch {
+    return { rssIndex: 0, urlIndex: 0 };
+  }
+}
+
+async function saveRotationState(state) {
+  await putJson(R2_BUCKET, ROTATION_FILE, state);
+  info("feedRotation.saved", state);
+}
+
+// ─────────────────────────────────────────────
+// Main Rotation Logic
+// ─────────────────────────────────────────────
+export async function loadNextFeedBatch() {
+  // Load lists
+  const rssText = await readFileOrR2(RSS_FILE);
+  const urlText = await readFileOrR2(URL_FILE);
+  const rssList = parseList(rssText);
+  const urlList = parseList(urlText);
+
+  if (rssList.length === 0 && urlList.length === 0) {
+    throw new Error("No feeds found in either file");
   }
 
-  const totalFeeds = allFeeds.length;
-  const start = rotationIndex % totalFeeds;
-  const selected = [];
+  // Load rotation state
+  const rotation = await loadRotationState();
+  const rssIndex = rotation.rssIndex || 0;
+  const urlIndex = rotation.urlIndex || 0;
 
-  for (let i = 0; i < maxFeeds; i++) {
-    const idx = (start + i) % totalFeeds;
-    selected.push(allFeeds[idx]);
+  // Compute slices with wraparound
+  const nextRss = [];
+  for (let i = 0; i < MAX_RSS_FEEDS_PER_RUN; i++) {
+    nextRss.push(rssList[(rssIndex + i) % rssList.length]);
   }
 
-  const siteIndex = rotationIndex % (siteFeeds.length || 1);
-  const selectedSite = siteFeeds[siteIndex] || "https://jonathan-harris.online";
+  const nextUrl = [];
+  for (let i = 0; i < MAX_URL_FEEDS_PER_RUN; i++) {
+    nextUrl.push(urlList[(urlIndex + i) % urlList.length]);
+  }
 
-  info("rss.rotation", {
-    selectedFeeds: selected.length,
-    selectedSite,
-    rotationIndex,
-    nextIndex: (rotationIndex + maxFeeds) % totalFeeds,
+  // Update rotation indexes
+  const newState = {
+    rssIndex: (rssIndex + MAX_RSS_FEEDS_PER_RUN) % rssList.length,
+    urlIndex: (urlIndex + MAX_URL_FEEDS_PER_RUN) % urlList.length,
+  };
+
+  await saveRotationState(newState);
+
+  info("feedRotation.nextBatch", {
+    rssIndex,
+    urlIndex,
+    nextRssCount: nextRss.length,
+    nextUrlCount: nextUrl.length,
   });
 
   return {
-    selectedFeeds: selected,
-    selectedSite,
-    nextRotationIndex: (rotationIndex + maxFeeds) % totalFeeds,
+    rssFeeds: nextRss,
+    urlFeeds: nextUrl,
   };
 }
