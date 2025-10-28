@@ -1,32 +1,44 @@
+/**
+ * RSS Feed Rewriter Pipeline
+ * --------------------------
+ * Fetches live feeds, rewrites them using AI prompt rules,
+ * and regenerates the final feed for storage in R2.
+ *
+ * This module is fully self-contained and does not use sessionId.
+ */
+
 import { ensureFeedsLoaded } from "./startup/rss-init.js";
-import { rewriteArticlesWithAI } from "./rewriteFeedItems.js";
-import { saveRewrittenFeedToR2 } from "./saveRewrittenFeed.js";
+import { fetchFeeds } from "./utils/fetchFeeds.js";
+import { generateFeed } from "./utils/feedGenerator.js";
 import * as prompts from "./utils/rss-prompts.js";
 
 /**
- * endToEndRewrite()
- * 1. Make sure feeds exist in R2
- * 2. Pull latest feed items
- * 3. Rewrite with AI using tone rules
- * 4. Save rewritten output to R2
- *
- * NOTE: This pipeline is independent from podcast session logic.
+ * Pull feeds, rewrite with AI, and save to R2
  */
 export async function endToEndRewrite() {
+  // 1️⃣ Ensure feed sources are ready (R2 cache or bootstrap)
   const { feeds, urlFeeds } = await ensureFeedsLoaded();
 
-  const rewritten = await rewriteArticlesWithAI({
-    feeds,
-    urlFeeds,
-    systemPrompt: prompts.systemPrompt,
-    itemPrompt: prompts.itemPrompt,
-  });
+  // 2️⃣ Fetch the articles from URLs
+  const articles = await fetchFeeds(urlFeeds);
 
-  const r2Result = await saveRewrittenFeedToR2(rewritten);
+  // 3️⃣ Rewrite titles + summaries using your AI prompt style
+  const rewritten = [];
+  for (const item of articles) {
+    const content = `${item.title}\n\n${item.summary || ""}`;
+    const rewrittenText = await prompts.rewriteWithAI(content);
+    rewritten.push({
+      ...item,
+      rewritten: rewrittenText,
+    });
+  }
+
+  // 4️⃣ Regenerate an updated RSS feed and save it to R2
+  const r2Result = await generateFeed(rewritten);
 
   return {
     ok: true,
-    count: rewritten?.items?.length || 0,
+    count: rewritten.length,
     r2Result,
   };
 }
