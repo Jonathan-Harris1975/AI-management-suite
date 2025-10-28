@@ -1,8 +1,7 @@
-import { ensureFeedsLoaded } from "./rss-init.js";
+import { ensureFeedsLoaded } from "./startup/rss-init.js";
 import { rewriteArticlesWithAI } from "./rewriteFeedItems.js";
 import { saveRewrittenFeedToR2 } from "./saveRewrittenFeed.js";
-// FIXED: proper relative path (was /app/services/rss-prompts.js)
-import * as prompts from "./rss-prompts.js";
+import * as prompts from "./utils/rss-prompts.js";
 
 /**
  * endToEndRewrite()
