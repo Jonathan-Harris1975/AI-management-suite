@@ -1,9 +1,9 @@
+ // ============================================================
+// 🧠 RSS Feed Creator — Rotating Feed Fetcher (Fixed)
 // ============================================================
-// 🧠 RSS Feed Creator — Rotating Feed Fetcher
-// ============================================================
-// - Automatically rotates 5 RSS + 1 URL feed per run
-// - Enforces MAX_ITEMS_PER_FEED and FEED_CUTOFF_HOURS
-// - Falls back to static slice if rotation manager unavailable
+// - Rotates 5 RSS + 1 URL per run via feedRotationManager.js
+// - Enforces MAX_ITEMS_PER_FEED & FEED_CUTOFF_HOURS
+// - Falls back to static slice if rotation manager fails
 // ============================================================
 
 import fs from "fs";
@@ -21,13 +21,11 @@ const parser = new Parser();
 const MAX_ITEMS_PER_FEED = Number(process.env.MAX_ITEMS_PER_FEED) || 10;
 const FEED_CUTOFF_HOURS = Number(process.env.FEED_CUTOFF_HOURS) || 1440; // 60 days
 const FEED_CUTOFF_MS = FEED_CUTOFF_HOURS * 60 * 60 * 1000;
-
-// fallback values in case rotation fails
 const MAX_RSS_FEEDS_PER_RUN = Number(process.env.MAX_RSS_FEEDS_PER_RUN) || 5;
 const MAX_URL_FEEDS_PER_RUN = Number(process.env.MAX_URL_FEEDS_PER_RUN) || 1;
 
 // ─────────────────────────────────────────────
-// Utility Functions
+// Helpers (define early to avoid reference errors)
 // ─────────────────────────────────────────────
 function parseUrlList(text) {
   return text
@@ -69,7 +67,7 @@ export async function fetchFeeds() {
   } catch (err) {
     error("rss.fetchFeeds.rotation.fail", { error: err.message });
 
-    // Fallback to static selection
+    // ✅ Fallback to static selection (helpers now defined above)
     const rssFeedsText = await readLocalOrR2File("rss-feeds.txt");
     const urlFeedsText = await readLocalOrR2File("url-feeds.txt");
     rssFeeds = parseUrlList(rssFeedsText).slice(0, MAX_RSS_FEEDS_PER_RUN);
@@ -98,7 +96,6 @@ export async function fetchFeeds() {
   for (const feedUrl of selectedFeeds) {
     try {
       const parsed = await parser.parseURL(feedUrl);
-
       const freshItems = (parsed.items || [])
         .filter((it) => {
           const date = new Date(it.pubDate || it.isoDate || 0).getTime();
@@ -128,4 +125,4 @@ export async function fetchFeeds() {
 
   info("📥 Fetch complete", { total: articles.length });
   return articles;
-      }
+}     
