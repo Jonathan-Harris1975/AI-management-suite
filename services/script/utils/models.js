@@ -1,6 +1,6 @@
 // services/script/utils/models.js
 
-import { resilientRequest } from "../../../shared/utils/ai-service.js";
+import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { buildPrompt } from "./promptTemplates.js";
 import { fetchFeedArticles } from "./fetchFeeds.js";
 
