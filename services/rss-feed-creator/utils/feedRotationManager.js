@@ -5,7 +5,7 @@ import { info } from "#logger.js";
  * Select the next batch of RSS feeds and one site URL to process.
  * Pulls from feed list and rotation state.
  */
-export function selectFeedsForRun({
+export function loadFeedRotation({
   allFeeds = [],
   siteFeeds = [],
   rotationIndex = 0,
