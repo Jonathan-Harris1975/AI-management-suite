@@ -2,7 +2,7 @@
 
 import express from "express";
 import { v4 as uuidv4 } from "uuid";
-import { generateIntro, generateMain, generateOutro } from "../utils/generator.js";
+import { generateIntro, generateMain, generateOutro } from "../utils/models.js";
 import { storeTempPart } from "../utils/sessionCache.js";
 
 const router = express.Router();
