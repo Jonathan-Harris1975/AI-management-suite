@@ -2,63 +2,81 @@
  * feedGenerator.js
  * -----------------
  * Builds an RSS XML feed from fetched or rewritten articles and saves it to R2.
- * This module is fully independent from the Podcast Suite.
+ * This module is independent from the podcast pipeline.
  */
 
 import { uploadToR2 } from "../../shared/utils/r2-client.js";
 import { loadFeedRotation } from "./feedRotationManager.js";
-import { FeedItem } from "./models.js";
+
+/**
+ * Escape text so it's valid inside XML.
+ */
+function esc(txt = "") {
+  return String(txt)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
 
 /**
  * Generate and upload an RSS feed to the R2 bucket.
- * @param {Array<Object>} items - Array of feed items with title/link/etc.
- * @param {string} publicBase - Public base URL for feed links.
+ *
+ * @param {Array<Object>} items - Array of feed items in the shape coming out of rewriteRssFeedItems():
+ *   {
+ *     title: string
+ *     summary?: string
+ *     link: string
+ *     rewritten: string   // AI rewritten content
+ *     shortLink?: string  // optional from Short.io
+ *     pubDate?: string
+ *     source?: string
+ *   }
+ *
+ * @param {string} publicBase - Base URL to fall back on if a link is missing.
  */
-export async function generateFeed(items = [], publicBase = "https://jonathan-harris.online") {
+export async function generateFeed(
+  items = [],
+  publicBase = "https://jonathan-harris.online"
+) {
   const now = new Date().toUTCString();
 
+  // feedRotation can be used to version feeds or rotate filenames
   const { feedIndex } = await loadFeedRotation();
-  const f = feedIndex || "feed";
-  const u = publicBase;
+  const rotationId = feedIndex || "feed";
 
-  // 🧩 Define a neutral default description
-  const defaultDesc = "Auto-generated summary from curated AI news sources.";
+  // Build <item> blocks for RSS
+  const xmlItems = items
+    .map((it, i) => {
+      const title = it.title || `Untitled #${i + 1}`;
+      const link = it.shortLink || it.link || publicBase;
+      const guid = `${link || rotationId}#${i + 1}`;
+      const pubDate = it.pubDate || new Date().toUTCString();
 
-  const esc = (txt = "") =>
-    txt.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      // Prefer the AI rewritten summary. Fall back to provided summary.
+      const description =
+        it.rewritten ||
+        it.summary ||
+        "Auto-generated summary from curated AI news sources.";
 
-  // Normalize all items into FeedItem objects
-  const normalized = items.map((it, i) =>
-    new FeedItem({
-      title: it.title || `Untitled #${i + 1}`,
-      link: it.link || u,
-      guid: `${u || f}#${i + 1}`,
-      pubDate: it.pubDate || new Date().toUTCString(),
-      source: it.source || null,
+      return [
+        "<item>",
+        `<title>${esc(title)}</title>`,
+        `<link>${esc(link)}</link>`,
+        `<guid>${esc(guid)}</guid>`,
+        `<description>${esc(description)}</description>`,
+        `<pubDate>${esc(pubDate)}</pubDate>`,
+        it.source ? `<source>${esc(it.source)}</source>` : "",
+        "</item>",
+      ].join("");
     })
-  );
+    .join("");
 
-  const channelTitle = process.env.RSS_FEED_TITLE || "AI Feed Generator";
+  const channelTitle =
+    process.env.RSS_FEED_TITLE || "AI Curated News Feed";
   const channelLink = publicBase;
   const channelDesc =
     process.env.RSS_FEED_DESCRIPTION ||
     "Automatically generated AI news feed from curated RSS sources.";
-
-  const xmlItems = normalized
-    .map(
-      (it) =>
-        [
-          "<item>",
-          `<title>${esc(it.title)}</title>`,
-          `<link>${esc(it.link)}</link>`,
-          `<guid>${esc(it.guid)}</guid>`,
-          `<description>${esc(defaultDesc)}</description>`,
-          `<pubDate>${esc(it.pubDate)}</pubDate>`,
-          it.source ? `<source>${esc(it.source)}</source>` : "",
-          "</item>",
-        ].join("")
-    )
-    .join("");
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -71,13 +89,13 @@ export async function generateFeed(items = [], publicBase = "https://jonathan-ha
   </channel>
 </rss>`;
 
-  // ✅ Upload feed XML to the R2 bucket
+  // Persist final feed XML into R2
   const key = `feeds/feed-${Date.now()}.xml`;
   await uploadToR2("rss-feeds", key, xml);
 
   return {
     ok: true,
     savedTo: key,
-    items: normalized.length,
+    items: items.length,
   };
 }
