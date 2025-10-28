@@ -4,7 +4,7 @@ import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
 import { fetchFeedArticles } from "./fetchFeeds.js";
 import { putText, putJson } from "../../shared/utils/r2-client.js";
-import { cleanText } from "./textCleaner.js";
+import { cleanText } from "./textHelpers.js";
 import { chunkText } from "./chunker.js";
 import { generateEpisodeMeta } from "./podcastHelpers.js";
 import sessionCache from "./sessionCache.js";
@@ -31,7 +31,7 @@ export async function generateOutro(sessionId) {
 export async function generateComposedEpisode(sessionId) {
   const { intro, main, outro } = await sessionCache.get(sessionId);
 
-  const fullTranscript = cleanText(`${intro}\n\n${main}\n\n${outro}`);
+  const fullTranscript = cleanTranscript(`${intro}\n\n${main}\n\n${outro}`);
   const chunks = chunkText(fullTranscript);
 
   await putText(`transcript/${sessionId}.txt`, fullTranscript);
