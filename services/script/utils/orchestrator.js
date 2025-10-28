@@ -1,15 +1,17 @@
-// services/script/utils/orchestrator.js
+import { generateIntro, generateMain, generateOutro } from "./models.js";
+import * as sessionCache from "./sessionCache.js";
+import { generateComposedEpisode } from "./models.js";
 
-import { generateIntro, generateMain, generateOutro, generateComposedEpisode } from './models.js';
-import sessionCache from './sessionCache.js';
-
-export async function runFullScriptPipeline(sessionId) {
+export async function orchestrateEpisode(sessionId) {
   const intro = await generateIntro(sessionId);
   const main = await generateMain(sessionId);
   const outro = await generateOutro(sessionId);
 
-  await sessionCache.set(sessionId, { intro, main, outro });
+  // Store each part individually
+  await sessionCache.storeTempPart(sessionId, "intro", intro);
+  await sessionCache.storeTempPart(sessionId, "main", main);
+  await sessionCache.storeTempPart(sessionId, "outro", outro);
 
-  const composed = await generateComposedEpisode(sessionId);
-  return { composed };
+  const result = await generateComposedEpisode(sessionId);
+  return result;
 }
