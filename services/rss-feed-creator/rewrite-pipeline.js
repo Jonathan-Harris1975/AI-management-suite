@@ -1,51 +1,33 @@
-// services/script/utils/rewrite-pipeline.js
+import { ensureFeedsLoaded } from "./rss-init.js";
+import { rewriteArticlesWithAI } from "./rewriteFeedItems.js";
+import { saveRewrittenFeedToR2 } from "./saveRewrittenFeed.js";
+// FIXED: proper relative path (was /app/services/rss-prompts.js)
+import * as prompts from "./rss-prompts.js";
 
-import { RSS_PROMPTS } from "../rss-prompts.js";
-import { stripHtml } from "../../shared/utils/html.js";
-import { resilientRequest } from "../../shared/utils/ai-service.js";
+/**
+ * endToEndRewrite()
+ * 1. Make sure feeds exist in R2
+ * 2. Pull latest feed items
+ * 3. Rewrite with AI using tone rules
+ * 4. Save rewritten output to R2
+ *
+ * NOTE: This pipeline is independent from podcast session logic.
+ */
+export async function endToEndRewrite() {
+  const { feeds, urlFeeds } = await ensureFeedsLoaded();
 
-export async function rewriteFeedItems(siteTitle, items, sessionId = "rss") {
-  const messagesList = items
-    .map(item => messagesForItem(siteTitle, item))
-    .filter(Boolean); // Remove nulls
+  const rewritten = await rewriteArticlesWithAI({
+    feeds,
+    urlFeeds,
+    systemPrompt: prompts.systemPrompt,
+    itemPrompt: prompts.itemPrompt,
+  });
 
-  console.log(`🧩 Rewriting ${messagesList.length} feed items via AI model...`);
+  const r2Result = await saveRewrittenFeedToR2(rewritten);
 
-  const rewrittenItems = await Promise.all(
-    messagesList.map((messages, index) =>
-      resilientRequest(messages, {
-        sessionId: `${sessionId}-item${index + 1}`,
-        section: "rssRewrite",
-        model: "chatgpt"
-      })
-    )
-  );
-
-  return rewrittenItems;
-}
-
-function messagesForItem(siteTitle, item) {
-  const title = stripHtml(item.title || "").trim();
-  const summary =
-    stripHtml(item.content) ||
-    stripHtml(item.contentSnippet) ||
-    "";
-
-  if (!title || !summary) {
-    console.warn("⚠️ Skipping feed item due to missing title or content.");
-    return null;
-  }
-
-  return [
-    { role: "system", content: SYSTEM },
-    {
-      role: "user",
-      content: USER_ITEM({
-        site: siteTitle,
-        title,
-        summary,
-        url: item.link || "https://example.com",
-      }),
-    },
-  ];
+  return {
+    ok: true,
+    count: rewritten?.items?.length || 0,
+    r2Result,
+  };
 }
