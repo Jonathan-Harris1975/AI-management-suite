@@ -16,7 +16,18 @@ export async function generateFeed() {
   try {
     // 1️⃣ Fetch fresh (<24h) items
     const newItems = await fetchFeeds();
+    
+    // Validate fetched items
+    if (!Array.isArray(newItems)) {
+      throw new Error("fetchFeeds did not return an array");
+    }
+
     const rewritten = await rewriteRssFeedItems(newItems);
+    
+    // Validate rewritten items
+    if (!Array.isArray(rewritten)) {
+      throw new Error("rewriteRssFeedItems did not return an array");
+    }
 
     info("rss.feedGenerator.newItems", { count: rewritten.length });
 
@@ -25,29 +36,66 @@ export async function generateFeed() {
     try {
       const xml = await getObjectAsText(R2_BUCKETS.RSS_FEEDS, FEED_KEY);
       existingItems = parseExistingRssXml(xml);
-      info("rss.feedGenerator.loadedExisting", { existing: existingItems.length });
-    } catch {
-      info("rss.feedGenerator.noExistingFeed", { FEED_KEY });
+      
+      // Validate parsed items
+      if (!Array.isArray(existingItems)) {
+        error("rss.feedGenerator.invalidParsedData", { 
+          type: typeof existingItems 
+        });
+        existingItems = [];
+      }
+      
+      info("rss.feedGenerator.loadedExisting", { 
+        existing: existingItems.length 
+      });
+    } catch (err) {
+      info("rss.feedGenerator.noExistingFeed", { 
+        FEED_KEY,
+        reason: err.message 
+      });
     }
 
-    // 3️⃣ Merge and deduplicate
+    // 3️⃣ Merge and deduplicate by link
     const allItemsMap = new Map();
     for (const item of [...rewritten, ...existingItems]) {
-      if (!item.link) continue;
-      if (!allItemsMap.has(item.link)) allItemsMap.set(item.link, item);
+      // Skip items without required fields
+      if (!item?.link || typeof item.link !== 'string') continue;
+      
+      // Prioritize newer items (rewritten comes first)
+      if (!allItemsMap.has(item.link)) {
+        allItemsMap.set(item.link, item);
+      }
     }
     let mergedItems = Array.from(allItemsMap.values());
 
-    // 4️⃣ Retain only 60 days of history
-    const cutoff = Date.now() - FEED_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-    mergedItems = mergedItems.filter((i) => {
-      const d = new Date(i.pubDate || 0).getTime();
-      return !isNaN(d) && d >= cutoff;
+    // 4️⃣ Retain only items within retention period
+    const cutoffMs = Date.now() - FEED_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    mergedItems = mergedItems.filter((item) => {
+      if (!item.pubDate) return false;
+      
+      const itemDate = new Date(item.pubDate).getTime();
+      
+      // Filter out invalid dates and items older than cutoff
+      return !isNaN(itemDate) && itemDate >= cutoffMs;
     });
 
-    // 5️⃣ Sort & limit feed size
+    info("rss.feedGenerator.afterRetention", { 
+      items: mergedItems.length,
+      cutoffDate: new Date(cutoffMs).toISOString()
+    });
+
+    // 5️⃣ Sort by date (newest first) and limit feed size
     mergedItems = mergedItems
-      .sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate))
+      .sort((a, b) => {
+        const dateA = new Date(a.pubDate || 0).getTime();
+        const dateB = new Date(b.pubDate || 0).getTime();
+        
+        // Handle invalid dates by pushing them to the end
+        if (isNaN(dateA)) return 1;
+        if (isNaN(dateB)) return -1;
+        
+        return dateB - dateA; // Newest first
+      })
       .slice(0, MAX_TOTAL_ITEMS);
 
     // 6️⃣ Build & upload updated feed
@@ -59,6 +107,7 @@ export async function generateFeed() {
       totalItems: mergedItems.length,
       newItems: rewritten.length,
       retentionDays: FEED_RETENTION_DAYS,
+      maxItems: MAX_TOTAL_ITEMS,
     });
 
     return {
@@ -68,7 +117,10 @@ export async function generateFeed() {
       retentionDays: FEED_RETENTION_DAYS,
     };
   } catch (err) {
-    error("rss.feedGenerator.save.fail", { error: err.message });
+    error("rss.feedGenerator.save.fail", { 
+      error: err.message,
+      stack: err.stack 
+    });
     throw err;
   }
-                           
+}
