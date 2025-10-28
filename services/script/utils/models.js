@@ -7,7 +7,7 @@ import { putText, putJson } from "../../shared/utils/r2-client.js";
 import { cleanTranscript } from "./textHelpers.js";
 import chunkText from "./chunkText.js";
 import { generateEpisodeMeta } from "./podcastHelpers.js";
-import sessionCache from "./sessionCache.js";
+import storeTempPart from "./sessionCache.js";
 
 export async function generateIntro(sessionId) {
   const weatherSummary = "Overcast and drizzly â€” perfect AI podcast weather.";
