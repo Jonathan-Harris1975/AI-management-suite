@@ -1,80 +1,86 @@
 /**
- * feedGenerator.js
+ * fetchFeeds.js
  * -----------------
- * Builds an RSS XML feed from rewritten articles and saves it to R2.
- * This module is independent of the podcast pipeline.
+ * Loads RSS feed URLs from either local data/ folder or from R2.
+ * Returns a combined list of feed items ready for rewriting.
  */
 
-import { uploadFileToR2 } from "../../shared/utils/r2-client.js";
-import { loadFeedRotation } from "./feedRotationManager.js";
+import fs from "fs";
+import path from "path";
+import Parser from "rss-parser";
+import { info, error } from "#logger.js";
+import { getObjectAsText } from "../../shared/utils/r2-client.js";
 
-function esc(txt = "") {
-  return String(txt)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+const parser = new Parser();
+
+// Helper: read a local file if available
+async function readLocalOrR2File(filename, bucket = "rss-feeds") {
+  const localPath = path.resolve("services/rss-feed-creator/data", filename);
+
+  // Try local file first
+  if (fs.existsSync(localPath)) {
+    const data = fs.readFileSync(localPath, "utf-8");
+    return data;
+  }
+
+  // Fall back to Cloudflare R2
+  try {
+    const r2Path = `data/${filename}`;
+    const text = await getObjectAsText(bucket, r2Path);
+    if (text && text.length > 0) {
+      info("rss.fetchFeeds.fromR2.success", { filename, bucket });
+      return text;
+    }
+  } catch (err) {
+    error("rss.fetchFeeds.fromR2.fail", { filename, bucket, error: err.message });
+  }
+
+  return "";
 }
 
-/**
- * Generate and upload an RSS feed to the R2 bucket.
- */
-export async function generateFeed(
-  items = [],
-  publicBase = "https://jonathan-harris.online"
-) {
-  const now = new Date().toUTCString();
-  const { feedIndex } = await loadFeedRotation();
-  const rotationId = feedIndex || "feed";
+// Parse list of URLs from a text block
+function parseUrlList(text) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
+}
 
-  const xmlItems = items
-    .map((it, i) => {
-      const title = it.title || `Untitled #${i + 1}`;
-      const link = it.shortLink || it.link || publicBase;
-      const guid = `${link || rotationId}#${i + 1}`;
-      const pubDate = it.pubDate || new Date().toUTCString();
-      const description =
-        it.rewritten ||
-        it.summary ||
-        "Auto-generated summary from curated AI news sources.";
+// Main function
+export async function fetchFeeds() {
+  const rssFeedsText = await readLocalOrR2File("rss-feeds.txt");
+  const urlFeedsText = await readLocalOrR2File("url-feeds.txt");
 
-      return [
-        "<item>",
-        `<title>${esc(title)}</title>`,
-        `<link>${esc(link)}</link>`,
-        `<guid>${esc(guid)}</guid>`,
-        `<description>${esc(description)}</description>`,
-        `<pubDate>${esc(pubDate)}</pubDate>`,
-        it.source ? `<source>${esc(it.source)}</source>` : "",
-        "</item>",
-      ].join("");
-    })
-    .join("");
+  const rssFeeds = parseUrlList(rssFeedsText);
+  const urlFeeds = parseUrlList(urlFeedsText);
+  const allFeeds = [...new Set([...rssFeeds, ...urlFeeds])];
 
-  const channelTitle =
-    process.env.RSS_FEED_TITLE || "AI Curated News Feed";
-  const channelLink = publicBase;
-  const channelDesc =
-    process.env.RSS_FEED_DESCRIPTION ||
-    "Automatically generated AI news feed from curated RSS sources.";
+  if (allFeeds.length === 0) {
+    throw new Error("No feeds available");
+  }
 
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-  <channel>
-    <title>${esc(channelTitle)}</title>
-    <link>${esc(channelLink)}</link>
-    <description>${esc(channelDesc)}</description>
-    <lastBuildDate>${esc(now)}</lastBuildDate>
-    ${xmlItems}
-  </channel>
-</rss>`;
+  info("rss.fetchFeeds.start", { totalFeeds: allFeeds.length });
 
-  // ✅ Correct R2 save call
-  const key = `feeds/feed-${Date.now()}.xml`;
-  await uploadFileToR2(process.env.R2_BUCKET_RSS_FEEDS, key, xml, "application/rss+xml");
+  const articles = [];
 
-  return {
-    ok: true,
-    savedTo: key,
-    items: items.length,
-  };
+  for (const feedUrl of allFeeds) {
+    try {
+      const parsed = await parser.parseURL(feedUrl);
+      for (const item of parsed.items) {
+        articles.push({
+          title: item.title,
+          summary: item.contentSnippet || item.content || "",
+          link: item.link,
+          pubDate: item.pubDate,
+          source: feedUrl,
+        });
+      }
+      info("rss.fetchFeeds.success", { feedUrl, items: parsed.items.length });
+    } catch (err) {
+      error("rss.fetchFeeds.fail", { feedUrl, err: err.message });
+    }
+  }
+
+  info("📥 Fetch complete", { total: articles.length });
+  return articles;
 }
