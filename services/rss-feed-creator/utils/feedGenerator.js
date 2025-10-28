@@ -47,7 +47,7 @@ function parseUrlList(text) {
 }
 
 // Main function
-export async function fetchFeeds() {
+export async function generateFeed() {
   const rssFeedsText = await readLocalOrR2File("rss-feeds.txt");
   const urlFeedsText = await readLocalOrR2File("url-feeds.txt");
 
