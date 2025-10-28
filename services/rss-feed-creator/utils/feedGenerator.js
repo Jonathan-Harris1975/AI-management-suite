@@ -27,7 +27,7 @@ export async function generateAndUploadFeed() {
   const feeds = (feedsTxt || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   const urls  = (urlsTxt  || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
-  jlog("🟡 rss:process", { feeds: feeds.length, urls: urls.length });
+  jlog("ðŸŸ¡ rss:process", { feeds: feeds.length, urls: urls.length });
 
   const now = new Date().toISOString();
   const items = [];
@@ -40,17 +40,19 @@ export async function generateAndUploadFeed() {
       title: `Item ${i+1}`,
       link: u || f,
       guid: `${u || f}#${i+1}`,
-      pubDate: now,
+      pubDate: new Date().toUTCString(),
       source: f || null
     });
   }
 
-  const channelTitle = "AI Podcast Suite Feed";
+  const channelTitle = process.env.RSS_FEED_TITLE || "AI Podcast Suite Feed";
   const channelLink  = publicBase;
-  const channelDesc  = "Auto-generated feed from feeds.txt + urls.txt";
+  const channelDesc = process.env.RSS_FEED_DESCRIPTION || "Auto-generated feed from feeds.txt + urls.txt";
 
   const xmlItems = items.map(it => [
+  const defaultDesc = "Auto-generated summary from Turing's Torch.";
     "<item>",
+    `<description>${esc(defaultDesc)}</description>`,
     `<title>${esc(it.title)}</title>`,
     `<link>${esc(it.link)}</link>`,
     `<guid>${esc(it.guid)}</guid>`,
@@ -83,4 +85,3 @@ export async function generateAndUploadFeed() {
   await r2Put(bucket, FILE_CURSOR, Buffer.from(JSON.stringify(cursor, null, 2), "utf-8"), "application/json; charset=utf-8");
 
   return { items: items.length, wrote: [FILE_XML, FILE_JSON, FILE_CURSOR] };
-}
