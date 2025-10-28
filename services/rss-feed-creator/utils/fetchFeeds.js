@@ -38,7 +38,7 @@ function readLocalList(filename) {
  */
 export async function fetchFeeds() {
   const urlFeeds = readLocalList("feeds.txt");
-  const rssFeeds = readLocalList("rss-feeds.txt");
+  const rssFeeds = readLocalList("urls.txt");
   const allFeeds = [...new Set([...urlFeeds, ...rssFeeds])];
 
   if (allFeeds.length === 0) {
