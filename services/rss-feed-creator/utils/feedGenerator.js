@@ -8,7 +8,7 @@ import { rewriteRssFeedItems } from "./models.js";
 import { fetchFeeds } from "./fetchFeeds.js";
 import { buildRssXml, parseExistingRssXml } from "./rssBuilder.js";
 
-const FEED_KEY = "feeds/ai-digest.xml";
+const FEED_KEY = "feeds/feed.xml";
 const FEED_RETENTION_DAYS = Number(process.env.FEED_RETENTION_DAYS) || 60;
 const MAX_TOTAL_ITEMS = Number(process.env.MAX_TOTAL_ITEMS) || 500;
 
