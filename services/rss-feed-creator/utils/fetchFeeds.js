@@ -8,7 +8,7 @@ import path from "path";
 import Parser from "rss-parser";
 import { info, error } from "#logger.js";
 import { getObjectAsText, R2_BUCKETS } from "../../shared/utils/r2-client.js";
-import { loadFeedRotation, saveFeedRotation } from "./feedRotationManager.js";
+import { loadFeedRotation,loadRotationState,saveFeedRotation } from "./feedRotationManager.js";
 
 // ─────────────────────────────────────────────
 // Internal helper: read from ./data first, else R2
