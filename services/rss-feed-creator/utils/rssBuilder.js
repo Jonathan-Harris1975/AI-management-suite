@@ -58,7 +58,7 @@ export function buildNewsletterRSS(channel, items = []) {
  * Save newsletter RSS to R2
  */
 export async function saveNewsletterRSS(xml) {
-  await putText(process.env.R2_BUCKET_RSS_FEEDS, "newsletter.xml", xml, "application/rss+xml");
+  await putText(process.env.R2_BUCKET_RSS_FEEDS, "feed.xml", xml, "application/rss+xml");
   info("rss.newsletter.saved", { bytes: xml.length });
   return { key: "newsletter.xml", bytes: xml.length };
 }
