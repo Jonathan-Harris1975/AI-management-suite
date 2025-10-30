@@ -1,52 +1,46 @@
-// services/rss-feed-creator/utils/fetchFeeds.js
 // ============================================================
-// 🧠 RSS Feed Fetcher — Local + R2 failover, rotation & cut-off
+// 📰 Fetch Feeds Utility
+// ============================================================
+// Loads RSS and URL feed lists, rotates through them using
+// the feedRotationManager, and returns the selected feed set.
 // ============================================================
 
-import fs from "fs/promises";
+import fs from "fs";
 import path from "path";
 import Parser from "rss-parser";
 import { info, error } from "#logger.js";
-import { getObjectAsText, R2_BUCKETS } from "../../shared/utils/r2-client.js";
-import { loadRotationState,saveFeedRotation } from "./feedRotationManager.js";
+import { getObjectAsText } from "../../shared/utils/r2-client.js";
+import { loadRotationState, saveFeedRotation } from "./feedRotationManager.js";
+
+const parser = new Parser();
+const R2_BUCKET = process.env.R2_BUCKET_RSS_FEEDS || "rss-feeds";
+
+const MAX_RSS_FEEDS_PER_RUN = Number(process.env.MAX_RSS_FEEDS_PER_RUN) || 5;
+const MAX_URL_FEEDS_PER_RUN = Number(process.env.MAX_URL_FEEDS_PER_RUN) || 1;
 
 // ─────────────────────────────────────────────
-// Internal helper: read from ./data first, else R2
+// Helpers
 // ─────────────────────────────────────────────
 async function readLocalOrR2File(filename) {
-  try {
-    const localPath = path.resolve("data", filename);
-    const local = await fs.readFile(localPath, "utf8");
-    info("rss.fetchFeeds.local.success", { file: localPath });
-    return local;
-  } catch {
-    info("rss.fetchFeeds.local.miss", { file: filename });
+  const localPath = path.resolve("services/rss-feed-creator/data", filename);
+
+  // 1️⃣ Try local file first
+  if (fs.existsSync(localPath)) {
+    info("rss.fetchFeeds.local.hit", { file: filename });
+    return fs.readFileSync(localPath, "utf-8");
   }
 
+  // 2️⃣ Fallback to R2
   try {
-    const text = await getObjectAsText(R2_BUCKETS.RSS_FEEDS, `data/${filename}`);
-    info("rss.fetchFeeds.r2.success", { bucket: R2_BUCKETS.RSS_FEEDS, key: filename });
+    const text = await getObjectAsText(R2_BUCKET, `data/${filename}`);
+    info("rss.fetchFeeds.r2.success", { bucket: R2_BUCKET, key: filename });
     return text;
   } catch (err) {
-    error("rss.fetchFeeds.r2.fail", { filename, err: err.message });
-    throw new Error(`Cannot load ${filename} from local or R2`);
+    error("rss.fetchFeeds.read.fail", { filename, err: err.message });
+    return "";
   }
 }
 
-// ─────────────────────────────────────────────
-// ENV CONFIG (extended)
-// ─────────────────────────────────────────────
-const MAX_ITEMS_PER_FEED = Number(process.env.MAX_ITEMS_PER_FEED) || 10;
-const MAX_RSS_FEEDS_PER_RUN = Number(process.env.MAX_RSS_FEEDS_PER_RUN) || 5;
-const MAX_URL_FEEDS_PER_RUN = Number(process.env.MAX_URL_FEEDS_PER_RUN) || 1;
-const FEED_CUTOFF_HOURS = Number(process.env.FEED_CUTOFF_HOURS) || 24; // 24 h only recent
-const FEED_CUTOFF_MS = FEED_CUTOFF_HOURS * 60 * 60 * 1000;
-
-const parser = new Parser();
-
-// ─────────────────────────────────────────────
-// Utility: split and clean list
-// ─────────────────────────────────────────────
 function parseUrlList(raw = "") {
   return raw
     .split(/\r?\n/)
@@ -66,7 +60,7 @@ export async function fetchFeeds() {
   const urlFeedsAll = parseUrlList(urlFeedsText);
 
   // Determine rotation positions
-  const { rssIndex, urlIndex } = await loadFeedRotation();
+  const { rssIndex, urlIndex } = await loadRotationState();
 
   const rssFeeds = rssFeedsAll.slice(rssIndex, rssIndex + MAX_RSS_FEEDS_PER_RUN);
   const urlFeeds = urlFeedsAll.slice(urlIndex, urlIndex + MAX_URL_FEEDS_PER_RUN);
@@ -76,57 +70,17 @@ export async function fetchFeeds() {
   }
 
   // Save next rotation index
-  await saveFeedRotation(
-    rssFeedsAll.length,
-    urlFeedsAll.length,
-    rssIndex + MAX_RSS_FEEDS_PER_RUN,
-    urlIndex + MAX_URL_FEEDS_PER_RUN
-  );
+  await saveFeedRotation({
+    rssIndex: (rssIndex + MAX_RSS_FEEDS_PER_RUN) % rssFeedsAll.length,
+    urlIndex: (urlIndex + MAX_URL_FEEDS_PER_RUN) % urlFeedsAll.length,
+  });
 
   const selectedFeeds = [...rssFeeds, ...urlFeeds];
   info("rss.fetchFeeds.rotation.enabled", {
     rssFeeds: rssFeeds.length,
     urlFeeds: urlFeeds.length,
+    selected: selectedFeeds.length,
   });
 
-  const cutoffDate = Date.now() - FEED_CUTOFF_MS;
-  const articles = [];
-
-  // ───────────────────────────────
-  // Fetch and filter feeds
-  // ───────────────────────────────
-  for (const feedUrl of selectedFeeds) {
-    try {
-      const parsed = await parser.parseURL(feedUrl);
-      const freshItems = (parsed.items || [])
-        .filter((it) => {
-          const date = new Date(it.pubDate || it.isoDate || 0).getTime();
-          return !isNaN(date) && date >= cutoffDate;
-        })
-        .slice(0, MAX_ITEMS_PER_FEED);
-
-      for (const item of freshItems) {
-        articles.push({
-          title: item.title,
-          summary: item.contentSnippet || item.content || "",
-          link: item.link,
-          pubDate: item.pubDate,
-          source: feedUrl,
-        });
-      }
-
-      info("rss.fetchFeeds.success", {
-        feedUrl,
-        fetched: parsed.items?.length || 0,
-        kept: freshItems.length,
-      });
-    } catch (err) {
-      error("rss.fetchFeeds.fail", { feedUrl, err: err.message });
+  return selectedFeeds;
     }
-  }
-
-  info("📥 Fetch complete", { total: articles.length });
-  return articles;
-}
-
-export default fetchFeeds;
