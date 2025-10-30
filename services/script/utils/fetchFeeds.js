@@ -1,12 +1,15 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
-// utils/fetchFeeds.js
+// services/script/utils/fetchFeeds.js
 import Parser from "rss-parser";
-import durationRotator from './durationRotator.js';
-import DurationCalculator from './durationCalculator.js'; // Ensure this is imported
+import fetch from "node-fetch";
+import durationRotator from "./durationRotator.js";
+import DurationCalculator from "./durationCalculator.js";
+import { info, error } from "#logger.js";
 
 const parser = new Parser();
 
-// Helper method to score article quality (moved outside the main function for clarity)
+// ─────────────────────────────────────────────────────────────
+// 🧠 Score article quality
+// ─────────────────────────────────────────────────────────────
 function calculateArticleScore(item) {
   let score = 0;
   if (item.title) {
@@ -15,8 +18,7 @@ function calculateArticleScore(item) {
     else if (titleLength >= 10) score += 1;
   }
   if (item.contentSnippet && item.contentSnippet.length > 100) score += 2;
-  
-  // --- FIX #2: Use the correct date field for scoring ---
+
   const dateValue = item.pubDate || item.isoDate || item.published;
   if (dateValue) {
     const pubDate = new Date(dateValue);
@@ -28,65 +30,51 @@ function calculateArticleScore(item) {
   return score;
 }
 
+// ─────────────────────────────────────────────────────────────
+// 🧩 Robust RSS / Atom / JSON Feed Parser
+// ─────────────────────────────────────────────────────────────
 export default async function fetchFeedArticles(feedUrl, targetDuration = 60) {
   try {
-    console.log(`📡 Fetching RSS feed from: ${feedUrl}`);
-    const feed = await parser.parseURL(feedUrl);
-    
-    const optimalArticleCount = DurationCalculator.calculateOptimalArticleCount(targetDuration);
-    console.log(`🎯 Target duration: ${targetDuration}min, aiming for ~${optimalArticleCount} articles.`);
-    
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    
-    const filteredItems = feed.items.filter(item => {
-      // --- FIX #1: Check for 'published' and 'updated' fields ---
-      const dateValue = item.pubDate || item.isoDate || item.published || item.updated;
-      
-      if (!dateValue) {
-        console.warn(`⚠️ Article "${item.title}" has no date field. Skipping.`);
-        return false;
+    info(`📡 Fetching RSS feed from: ${feedUrl}`);
+    const res = await fetch(feedUrl);
+    const text = await res.text();
+    let feed;
+
+    // Try normal RSS parse
+    try {
+      feed = await parser.parseString(text);
+    } catch {
+      // Fallback for Atom / malformed feeds
+      if (text.includes("<feed")) {
+        const matchTitles = [...text.matchAll(/<title>(.*?)<\/title>/g)].map(m => m[1]);
+        const matchLinks = [...text.matchAll(/<link[^>]*href="([^"]+)"/g)].map(m => m[1]);
+        feed = {
+          title: matchTitles[0] || "Untitled Feed",
+          items: matchTitles.slice(1).map((t, i) => ({
+            title: t,
+            link: matchLinks[i + 1] || "",
+            contentSnippet: "",
+          })),
+        };
+      } else if (text.trim().startsWith("{")) {
+        // JSON Feed fallback
+        const json = JSON.parse(text);
+        feed = json?.items ? json : { title: "Invalid Feed", items: [] };
+      } else {
+        throw new Error("Feed not recognized as RSS, Atom, or JSON");
       }
-      
-      const pubDate = new Date(dateValue);
-      
-      // Check if the date is valid before comparing
-      if (isNaN(pubDate.getTime())) {
-        console.warn(`⚠️ Article "${item.title}" has an invalid date: "${dateValue}". Skipping.`);
-        return false;
-      }
-      
-      return pubDate >= sevenDaysAgo && pubDate <= now;
-    }).filter(item => item.title && item.title.length > 10); // Basic quality filter
-    
-    if (filteredItems.length === 0) {
-      console.warn('🚫 No articles found within the last 7 days after filtering.');
-      return [];
     }
-    console.log(`🔍 Found ${filteredItems.length} recent articles.`);
-    
-    const prioritizedItems = filteredItems
-      .map(item => ({
-        ...item,
-        score: calculateArticleScore(item)
-      }))
-      .sort((a, b) => b.score - a.score);
-      
-    const selectedItems = prioritizedItems
-      .slice(0, Math.min(optimalArticleCount, prioritizedItems.length))
-      .map(item => ({
-        title: item.title || 'Untitled',
-        summary: item.contentSnippet?.slice(0, 250) || '',
-        link: item.link,
-        pubDate: item.pubDate || item.isoDate || item.published || item.updated || '',
-        score: item.score
-      }));
-    
-    console.log(`✅ Selected ${selectedItems.length} articles for the podcast.`);
-    return selectedItems;
-    
-  } catch (error) {
-    console.error('❌ Error fetching or parsing RSS feed:', error);
-    return []; // Return an empty array on error to prevent crashes
+
+    // Score + sort + limit
+    const scoredItems = (feed.items || [])
+      .map(item => ({ ...item, score: calculateArticleScore(item) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+
+    info(`✅ Parsed ${scoredItems.length} items from feed.`);
+    return scoredItems;
+  } catch (err) {
+    error(`❌ Error fetching or parsing RSS feed: ${err.message}`);
+    return [];
   }
 }
