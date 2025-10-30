@@ -44,3 +44,27 @@ export function buildRssXml(channel, items = []) {
   // ✅ Close channel and rss properly
   return doc.end({ prettyPrint: true });
       }
+
+
+import { XMLParser } from "fast-xml-parser";
+
+/**
+ * Parses an existing RSS XML string into a JavaScript object.
+ * Keeps attributes and nested tags for feed regeneration.
+ */
+export function parseExistingRssXml(xmlContent) {
+  try {
+    const parser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: "",
+      allowBooleanAttributes: true,
+      preserveOrder: false
+    });
+    return parser.parse(xmlContent);
+  } catch (err) {
+    console.error("[rssBuilder] Failed to parse existing RSS XML:", err);
+    return null;
+  }
+}
+
+export { buildRssXml, parseExistingRssXml };
