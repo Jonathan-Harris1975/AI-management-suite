@@ -1,94 +1,52 @@
-import { create } from 'xmlbuilder2';
-import { XMLParser } from "fast-xml-parser";
+// /services/rss-feed-creator/utils/rssBuilder.js
+
+import { XMLBuilder, XMLParser } from "fast-xml-parser";
 
 /**
- * Safely escape text content for XML
+ * Builds an RSS XML string from feed items and metadata.
+ * @param {Object} options
+ * @param {Array} options.items - Array of feed items to include.
+ * @param {Object} options.meta - Feed metadata (title, link, description, etc.)
+ * @returns {string} XML feed string
  */
-function safe(text) {
-  if (!text) return '';
-  return String(text);
-}
+export function buildRssXml({ items = [], meta = {} }) {
+  const builder = new XMLBuilder({
+    ignoreAttributes: false,
+    attributeNamePrefix: "",
+    suppressBooleanAttributes: false,
+    format: true,
+    indentBy: "  ",
+  });
 
-/**
- * Format date to RFC 822 (RSS 2.0 standard)
- */
-function rfc822(date) {
-  return new Date(date).toUTCString();
-}
-
-/**
- * 🧠 Build a valid RSS 2.0 feed (W3C-compliant)
- * @param {object} channel - feed metadata
- * @param {Array<object>} items - array of feed items
- * @returns {string} RSS XML
- */
-export function buildRssXml(channel, items = []) {
-  const doc = create({ version: "1.0", encoding: "UTF-8" })
-    .ele("rss", {
+  const rssObject = {
+    rss: {
       version: "2.0",
-      "xmlns:atom": "http://www.w3.org/2005/Atom",
-    });
+      channel: {
+        title: meta.title || "AI Podcast Feed",
+        link: meta.link || "https://jonathan-harris.online",
+        description:
+          meta.description ||
+          "Latest AI insights, rewritten news, and podcast updates by Jonathan Harris.",
+        language: meta.language || "en-gb",
+        pubDate: new Date().toUTCString(),
+        lastBuildDate: new Date().toUTCString(),
+        item: items.map((item) => ({
+          title: item.title || "Untitled",
+          link: item.link || "",
+          description: item.description || "",
+          pubDate: item.pubDate || new Date().toUTCString(),
+          guid: item.guid || item.link || "",
+        })),
+      },
+    },
+  };
 
-  const ch = doc.ele("channel");
-
-  // Required channel elements
-  ch.ele("title").txt(safe(channel.title)).up();
-  ch.ele("link").txt(safe(channel.link)).up();
-  ch.ele("description").txt(safe(channel.description)).up();
-
-  // Optional but recommended channel elements
-  if (channel.language) {
-    ch.ele("language").txt(safe(channel.language)).up();
-  }
-  ch.ele("lastBuildDate").txt(rfc822(new Date())).up();
-
-  // Atom self-reference link
-  if (channel.selfURL) {
-    ch.ele("atom:link", {
-      href: channel.selfURL,
-      rel: "self",
-      type: "application/rss+xml",
-    }).up();
-  }
-
-  // Add feed items
-  for (const issue of items) {
-    const item = ch.ele("item");
-    
-    // Title is required for item
-    item.ele("title").txt(safe(issue.title)).up();
-    
-    // Link (recommended)
-    if (issue.link) {
-      item.ele("link").txt(safe(issue.link)).up();
-    }
-    
-    // GUID - should have isPermaLink only if it's actually a URL
-    const guidValue = issue.guid || issue.link || issue.id || safe(issue.title);
-    const isPermaLink = issue.link && (issue.guid === issue.link || !issue.guid);
-    item.ele("guid", { isPermaLink: isPermaLink ? "true" : "false" })
-      .txt(safe(guidValue))
-      .up();
-    
-    // PubDate (recommended)
-    if (issue.pubDate) {
-      item.ele("pubDate").txt(rfc822(issue.pubDate)).up();
-    }
-    
-    // Description - use txt() instead of dat() for proper escaping
-    if (issue.description) {
-      item.ele("description").txt(safe(issue.description)).up();
-    }
-    
-    item.up();
-  }
-
-  return doc.end({ prettyPrint: true });
+  return builder.build(rssObject);
 }
 
 /**
- * Parses an existing RSS XML string into a JavaScript object.
- * Keeps attributes and nested tags for feed regeneration.
+ * Parses an existing RSS XML string into a simplified structure
+ * returning a normalized array of existing feed items.
  */
 export function parseExistingRssXml(xmlContent) {
   try {
@@ -96,11 +54,24 @@ export function parseExistingRssXml(xmlContent) {
       ignoreAttributes: false,
       attributeNamePrefix: "",
       allowBooleanAttributes: true,
-      preserveOrder: false
+      preserveOrder: false,
     });
-    return parser.parse(xmlContent);
+    const parsed = parser.parse(xmlContent);
+
+    // Validate typical structure: rss > channel > item
+    if (parsed?.rss?.channel?.item) {
+      const items = Array.isArray(parsed.rss.channel.item)
+        ? parsed.rss.channel.item
+        : [parsed.rss.channel.item];
+      return { items, channel: parsed.rss.channel };
+    }
+
+    console.warn("[rssBuilder] Parsed existing RSS but no valid channel/item nodes found.");
+    return { items: [], channel: null };
   } catch (err) {
     console.error("[rssBuilder] Failed to parse existing RSS XML:", err);
-    return null;
+    return { items: [], channel: null };
   }
 }
+
+export { buildRssXml, parseExistingRssXml };
