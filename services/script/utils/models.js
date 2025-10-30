@@ -60,11 +60,9 @@ ${outro}`);
   const chunks = chunkText(fullTranscript);
 
   // your R2 client already knows which bucket
-  await putText(`transcript/${sessionId}.txt`, fullTranscript);
-  await Promise.all(
-    chunks.map((chunk, i) =>
-      putText(`raw-text/${sessionId}/chunk_${i + 1}.txt`, chunk)
-    )
+  // ✅ FIXED — pass bucket and key separately to R2 client
+await putText("transcript", `${sessionId}.txt`, fullTranscript);
+putText("raw-text", `${sessionId}/chunk_${i + 1}.txt`, chunk);
   );
 
   const metadata = await generateEpisodeMeta({ intro, main, outro });
