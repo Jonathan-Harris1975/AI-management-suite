@@ -9,7 +9,7 @@ import { XMLBuilder, XMLParser } from "fast-xml-parser";
  * @param {Object} options.meta - Feed metadata (title, link, description, etc.)
  * @returns {string} XML feed string
  */
-export function buildRssXml({ items = [], meta = {} }) {
+function buildRssXml({ items = [], meta = {} }) {
   const builder = new XMLBuilder({
     ignoreAttributes: false,
     attributeNamePrefix: "",
@@ -48,7 +48,7 @@ export function buildRssXml({ items = [], meta = {} }) {
  * Parses an existing RSS XML string into a simplified structure
  * returning a normalized array of existing feed items.
  */
-export function parseExistingRssXml(xmlContent) {
+function parseExistingRssXml(xmlContent) {
   try {
     const parser = new XMLParser({
       ignoreAttributes: false,
