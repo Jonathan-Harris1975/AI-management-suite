@@ -45,7 +45,7 @@ async function readFileOrR2(filename) {
 // ─────────────────────────────────────────────
 // Load and Save Rotation State
 // ─────────────────────────────────────────────
-async function loadRotationState() {
+export async function loadRotationState() {
   try {
     const text = await getObjectAsText(R2_BUCKET, ROTATION_FILE);
     return JSON.parse(text);
@@ -54,7 +54,7 @@ async function loadRotationState() {
   }
 }
 
-async function saveRotationState(state) {
+export async function saveFeedRotation(state) {
   await putJson(R2_BUCKET, ROTATION_FILE, state);
   info("feedRotation.saved", state);
 }
@@ -63,7 +63,6 @@ async function saveRotationState(state) {
 // Main Rotation Logic
 // ─────────────────────────────────────────────
 export async function loadNextFeedBatch() {
-  // Load lists
   const rssText = await readFileOrR2(RSS_FILE);
   const urlText = await readFileOrR2(URL_FILE);
   const rssList = parseList(rssText);
@@ -73,12 +72,10 @@ export async function loadNextFeedBatch() {
     throw new Error("No feeds found in either file");
   }
 
-  // Load rotation state
   const rotation = await loadRotationState();
   const rssIndex = rotation.rssIndex || 0;
   const urlIndex = rotation.urlIndex || 0;
 
-  // Compute slices with wraparound
   const nextRss = [];
   for (let i = 0; i < MAX_RSS_FEEDS_PER_RUN; i++) {
     nextRss.push(rssList[(rssIndex + i) % rssList.length]);
@@ -89,13 +86,12 @@ export async function loadNextFeedBatch() {
     nextUrl.push(urlList[(urlIndex + i) % urlList.length]);
   }
 
-  // Update rotation indexes
   const newState = {
     rssIndex: (rssIndex + MAX_RSS_FEEDS_PER_RUN) % rssList.length,
     urlIndex: (urlIndex + MAX_URL_FEEDS_PER_RUN) % urlList.length,
   };
 
-  await saveRotationState(newState);
+  await saveFeedRotation(newState);
 
   info("feedRotation.nextBatch", {
     rssIndex,
