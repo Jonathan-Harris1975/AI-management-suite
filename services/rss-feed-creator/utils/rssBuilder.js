@@ -31,12 +31,18 @@ export function buildRssXml(channel, items = []) {
 
   const ch = doc.ele("channel");
 
+  // Required channel elements
   ch.ele("title").txt(safe(channel.title)).up();
   ch.ele("link").txt(safe(channel.link)).up();
-  ch.ele("description").dat(safe(channel.description)).up();
-  ch.ele("language").txt(safe(channel.language || "en-gb")).up();
+  ch.ele("description").txt(safe(channel.description)).up();
+
+  // Optional but recommended channel elements
+  if (channel.language) {
+    ch.ele("language").txt(safe(channel.language)).up();
+  }
   ch.ele("lastBuildDate").txt(rfc822(new Date())).up();
 
+  // Atom self-reference link
   if (channel.selfURL) {
     ch.ele("atom:link", {
       href: channel.selfURL,
@@ -48,14 +54,32 @@ export function buildRssXml(channel, items = []) {
   // Add feed items
   for (const issue of items) {
     const item = ch.ele("item");
+    
+    // Title is required for item
     item.ele("title").txt(safe(issue.title)).up();
-    if (issue.link) item.ele("link").txt(issue.link).up();
-    item
-      .ele("guid", { isPermaLink: "true" })
-      .txt(issue.link || issue.id || safe(issue.title))
+    
+    // Link (recommended)
+    if (issue.link) {
+      item.ele("link").txt(safe(issue.link)).up();
+    }
+    
+    // GUID - should have isPermaLink only if it's actually a URL
+    const guidValue = issue.guid || issue.link || issue.id || safe(issue.title);
+    const isPermaLink = issue.link && (issue.guid === issue.link || !issue.guid);
+    item.ele("guid", { isPermaLink: isPermaLink ? "true" : "false" })
+      .txt(safe(guidValue))
       .up();
-    item.ele("pubDate").txt(rfc822(issue.pubDate || new Date())).up();
-    item.ele("description").dat(safe(issue.description)).up();
+    
+    // PubDate (recommended)
+    if (issue.pubDate) {
+      item.ele("pubDate").txt(rfc822(issue.pubDate)).up();
+    }
+    
+    // Description - use txt() instead of dat() for proper escaping
+    if (issue.description) {
+      item.ele("description").txt(safe(issue.description)).up();
+    }
+    
     item.up();
   }
 
