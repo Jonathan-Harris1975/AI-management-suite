@@ -77,8 +77,20 @@ export async function finalizeAndUpload(sessionId) {
     await putText("raw-text", `${sessionId}/chunk_${i + 1}.txt`, chunk);
   }
 
-  const metadata = await generateComposedEpisode({ intro, main, outro });
+  const metadata = await generateEpisodeMeta({ intro, main, outro });
   await putJson("meta", `${sessionId}.json`, metadata);
 
   return { fullTranscript, chunks, metadata };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 🧩 Unified entry point for orchestrator
+// ─────────────────────────────────────────────────────────────
+export async function generateComposedEpisode(sessionId) {
+  const intro = await generateIntro(sessionId);
+  const main = await generateMain(sessionId);
+  const outro = await generateOutro(sessionId);
+
+  // store or finalize all
+  return await finalizeAndUpload(sessionId);
 }
