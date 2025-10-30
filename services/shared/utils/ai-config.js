@@ -29,9 +29,16 @@ export const aiConfig = {
 
   // ✅ Routing strategy
   routeModels: {
-    intro: ["google", "chatgpt", "meta"],
-    main: ["google", "chatgpt", "deepseek"],
-    outro: ["google", "chatgpt", "meta"],
+  intro: ["google", "chatgpt", "meta"],
+  main: ["google", "chatgpt", "deepseek"],
+  outro: ["google", "chatgpt", "meta"],
+  podcastHelper: ["chatgpt", "google"],
+
+  // ✅ Added aliases for orchestration keys
+  scriptIntro: ["google", "chatgpt", "meta"],
+  scriptMain: ["google", "chatgpt", "deepseek"],
+  scriptOutro: ["google", "chatgpt", "meta"],
+
 
     // 🧩 Compose step (used in orchestration)
     compose: ["deepseek", "anthropic", "google"],
