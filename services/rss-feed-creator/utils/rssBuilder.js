@@ -52,7 +52,7 @@ import { XMLParser } from "fast-xml-parser";
  * Parses an existing RSS XML string into a JavaScript object.
  * Keeps attributes and nested tags for feed regeneration.
  */
-);
+
     return parser.parse(xmlContent);
   } catch (err) {
     console.error("[rssBuilder] Failed to parse existing RSS XML:", err);
