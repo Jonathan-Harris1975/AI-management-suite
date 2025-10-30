@@ -1,63 +1,134 @@
 // ============================================================
-// 📰 Fetch Feeds Utility
+// 📰 Fetch Feeds Utility (PARSES items)
 // ============================================================
-// Loads RSS and URL feed lists, rotates through them using
-// the feedRotationManager, and returns the selected feed set.
+// Rotates through rss-feeds.txt and url-feeds.txt, then fetches
+// and parses each selected feed into article items.
 // ============================================================
 
 import Parser from "rss-parser";
-import { info } from "#logger.js";
+import { info, error } from "#logger.js";
 import { loadRotationState, saveFeedRotation } from "./feedRotationManager.js";
 import { readLocalOrR2File } from "./fileReader.js";
 
 const parser = new Parser();
 
+// Tunables
 const MAX_RSS_FEEDS_PER_RUN = Number(process.env.MAX_RSS_FEEDS_PER_RUN) || 5;
 const MAX_URL_FEEDS_PER_RUN = Number(process.env.MAX_URL_FEEDS_PER_RUN) || 1;
+const MAX_ITEMS_PER_FEED = Number(process.env.MAX_ITEMS_PER_FEED) || 20; // safety cap
 
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
-function parseUrlList(raw = "") {
+function parseList(raw = "") {
   return raw
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith("#"));
 }
 
-// ─────────────────────────────────────────────
-// MAIN FETCH FUNCTION
-// ─────────────────────────────────────────────
+function toArticle(item) {
+  // Map typical RSS fields → our internal article shape
+  const title = item.title?.toString().trim() || "";
+  const link = (item.link || item.guid || "").toString().trim();
+  const summary =
+    (item.contentSnippet || item.content || item.summary || item.description || "")
+      .toString()
+      .trim();
+
+  let pubDate = item.isoDate || item.pubDate || item.date || "";
+  try {
+    const d = new Date(pubDate);
+    if (!isNaN(d)) pubDate = d.toISOString();
+    else pubDate = new Date().toISOString();
+  } catch {
+    pubDate = new Date().toISOString();
+  }
+
+  return { title, summary, link, pubDate };
+}
+
+async function fetchAndParseOne(url) {
+  try {
+    const feed = await parser.parseURL(url);
+    const items = Array.isArray(feed.items) ? feed.items : [];
+    const mapped = items.slice(0, MAX_ITEMS_PER_FEED).map(toArticle);
+
+    // Filter out entries missing both title and summary
+    const cleaned = mapped.filter((i) => i.title || i.summary);
+
+    info("rss.fetchFeeds.parsed", {
+      url,
+      count: cleaned.length,
+      sourceItems: items.length,
+    });
+
+    return cleaned;
+  } catch (err) {
+    error("rss.fetchFeeds.parse.fail", { url, err: err.message });
+    return [];
+  }
+}
+
 export async function fetchFeeds() {
-  // Load feeds from text files (local or R2)
+  // 1) Load feed URL lists (from local or R2)
   const rssFeedsText = await readLocalOrR2File("rss-feeds.txt");
   const urlFeedsText = await readLocalOrR2File("url-feeds.txt");
 
-  const rssFeedsAll = parseUrlList(rssFeedsText);
-  const urlFeedsAll = parseUrlList(urlFeedsText);
+  const rssFeedsAll = parseList(rssFeedsText);
+  const urlFeedsAll = parseList(urlFeedsText);
 
-  // Determine rotation positions
-  const { rssIndex, urlIndex } = await loadRotationState();
-
-  const rssFeeds = rssFeedsAll.slice(rssIndex, rssIndex + MAX_RSS_FEEDS_PER_RUN);
-  const urlFeeds = urlFeedsAll.slice(urlIndex, urlIndex + MAX_URL_FEEDS_PER_RUN);
-
-  if (rssFeeds.length === 0 && urlFeeds.length === 0) {
-    throw new Error("No feeds available");
+  if (rssFeedsAll.length === 0 && urlFeedsAll.length === 0) {
+    throw new Error("No feeds available in rss-feeds.txt or url-feeds.txt");
   }
 
-  // Save next rotation index
-  await saveFeedRotation({
-    rssIndex: (rssIndex + MAX_RSS_FEEDS_PER_RUN) % rssFeedsAll.length,
-    urlIndex: (urlIndex + MAX_URL_FEEDS_PER_RUN) % urlFeedsAll.length,
-  });
+  // 2) Rotation state → pick the next batch
+  const { rssIndex = 0, urlIndex = 0 } = await loadRotationState();
 
-  const selectedFeeds = [...rssFeeds, ...urlFeeds];
+  const rssBatch = rssFeedsAll.slice(
+    rssIndex,
+    rssIndex + Math.min(MAX_RSS_FEEDS_PER_RUN, rssFeedsAll.length)
+  );
+  const urlBatch = urlFeedsAll.slice(
+    urlIndex,
+    urlIndex + Math.min(MAX_URL_FEEDS_PER_RUN, urlFeedsAll.length)
+  );
+
+  // 3) Advance rotation and persist
+  const nextRssIndex =
+    (rssIndex + Math.min(MAX_RSS_FEEDS_PER_RUN, Math.max(1, rssFeedsAll.length))) %
+    Math.max(1, rssFeedsAll.length);
+  const nextUrlIndex =
+    (urlIndex + Math.min(MAX_URL_FEEDS_PER_RUN, Math.max(1, urlFeedsAll.length))) %
+    Math.max(1, urlFeedsAll.length);
+
+  await saveFeedRotation({ rssIndex: nextRssIndex, urlIndex: nextUrlIndex });
+
+  const selected = [...rssBatch, ...urlBatch];
   info("rss.fetchFeeds.rotation.enabled", {
-    rssFeeds: rssFeeds.length,
-    urlFeeds: urlFeeds.length,
-    selected: selectedFeeds.length,
+    rssFeeds: rssBatch.length,
+    urlFeeds: urlBatch.length,
+    selected: selected.length,
   });
 
-  return selectedFeeds;
+  // 4) Parse each selected feed into article items
+  const parsedLists = await Promise.all(selected.map(fetchAndParseOne));
+  const items = parsedLists.flat();
+
+  // 5) De-dupe by link (and then by title as a fallback)
+  const seen = new Set();
+  const deduped = [];
+  for (const it of items) {
+    const key = it.link || `title:${it.title}`;
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      deduped.push(it);
+    }
+  }
+
+  info("rss.fetchFeeds.items.ready", {
+    parsedTotal: items.length,
+    deduped: deduped.length,
+  });
+
+  return deduped;
 }
+
+export default { fetchFeeds };
