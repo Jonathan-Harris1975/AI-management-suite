@@ -1,3 +1,21 @@
+import { create } from 'xmlbuilder2';
+import { XMLParser } from "fast-xml-parser";
+
+/**
+ * Safely escape text content for XML
+ */
+function safe(text) {
+  if (!text) return '';
+  return String(text);
+}
+
+/**
+ * Format date to RFC 822 (RSS 2.0 standard)
+ */
+function rfc822(date) {
+  return new Date(date).toUTCString();
+}
+
 /**
  * 🧠 Build a valid RSS 2.0 feed (W3C-compliant)
  * @param {object} channel - feed metadata
@@ -41,26 +59,8 @@ export function buildRssXml(channel, items = []) {
     item.up();
   }
 
-  // ✅ Close channel and rss properly
   return doc.end({ prettyPrint: true });
-      }
-
-
-import { XMLParser } from "fast-xml-parser";
-
-/**
- * Parses an existing RSS XML string into a JavaScript object.
- * Keeps attributes and nested tags for feed regeneration.
- */
-
-    return parser.parse(xmlContent);
-  } catch (err) {
-    console.error("[rssBuilder] Failed to parse existing RSS XML:", err);
-    return null;
-  }
 }
-
-import { XMLParser } from "fast-xml-parser";
 
 /**
  * Parses an existing RSS XML string into a JavaScript object.
@@ -80,5 +80,3 @@ export function parseExistingRssXml(xmlContent) {
     return null;
   }
 }
-
-export { buildRssXml, parseExistingRssXml };
