@@ -32,28 +32,12 @@ export const aiConfig = {
     intro: ["google", "chatgpt", "meta"],
     main: ["google", "chatgpt", "deepseek"],
     outro: ["google", "chatgpt", "meta"],
+    podcastHelper: ["chatgpt", "google"],
 
-    // 🧩 Compose step (used in orchestration)
-    compose: ["deepseek", "anthropic", "google"],
-
-    // 🧠 Metadata route — required for title/description/SEO/artwork generation
-    metadata: ["google", "chatgpt", "deepseek"],
-
-    // 🧩 Podcast helper (meta info, tone, etc.)
-    podcastHelper: ["deepseek", "anthropic", "google"],
-
-    // ✅ RSS rewriting route
-    rssRewrite: ["chatgpt", "google", "meta"],
-  },
-
-  commonParams: {
-    temperature: 0.75,
-    timeout: 45000,
-  },
-
-  headers: {
-    "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
-    "X-Title": process.env.APP_TITLE || "Podcast Script Generation",
+    // ✅ Added aliases for orchestration keys
+    scriptIntro: ["google", "chatgpt", "meta"],
+    scriptMain: ["google", "chatgpt", "deepseek"],
+    scriptOutro: ["google", "chatgpt", "meta"],
   },
 };
 
