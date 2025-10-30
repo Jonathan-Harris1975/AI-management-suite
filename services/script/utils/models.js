@@ -12,6 +12,9 @@ import chunkText from "./chunkText.js";
 import { generateEpisodeMeta } from "./podcastHelpers.js";
 import { getAllParts } from "./sessionCache.js";
 
+// ─────────────────────────────────────────────────────────────
+// 🧩 Intro Section
+// ─────────────────────────────────────────────────────────────
 export async function generateIntro(sessionId) {
   const weatherSummary =
     "Overcast and drizzly — perfect AI podcast weather.";
@@ -19,7 +22,6 @@ export async function generateIntro(sessionId) {
     "We can only see a short distance ahead, but we can see plenty there that needs to be done.";
   const prompt = getIntroPrompt({ weatherSummary, turingQuote });
 
-  // ✅ FIXED: pass route key, not raw prompt
   return await resilientRequest("scriptIntro", {
     sessionId,
     section: "intro",
@@ -27,11 +29,13 @@ export async function generateIntro(sessionId) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────
+// 🧩 Main Section
+// ─────────────────────────────────────────────────────────────
 export async function generateMain(sessionId) {
   const articles = await fetchFeedArticles(process.env.FEED_URL || "");
   const prompt = getMainPrompt({ articles, targetDuration: 60 });
 
-  // ✅ FIXED
   return await resilientRequest("scriptMain", {
     sessionId,
     section: "main",
@@ -39,10 +43,11 @@ export async function generateMain(sessionId) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────
+// 🧩 Outro Section
+// ─────────────────────────────────────────────────────────────
 export async function generateOutro(sessionId) {
-  const prompt = await getOutroPromptFull();
-
-  // ✅ FIXED
+  const prompt = getOutroPromptFull();
   return await resilientRequest("scriptOutro", {
     sessionId,
     section: "outro",
@@ -50,23 +55,30 @@ export async function generateOutro(sessionId) {
   });
 }
 
-export async function generateComposedEpisode(sessionId) {
+// ─────────────────────────────────────────────────────────────
+// 🧩 Combine + Upload Transcript / Metadata
+// ─────────────────────────────────────────────────────────────
+export async function finalizeAndUpload(sessionId) {
   const { intro, main, outro } = await getAllParts(sessionId);
-  const fullTranscript = cleanTranscript(`${intro}
 
-${main}
+  // ✅ Normalize sessionId to string
+  if (typeof sessionId === "object") {
+    sessionId = sessionId.id || sessionId.sessionId || String(sessionId);
+  }
 
-${outro}`);
+  const fullTranscript = cleanTranscript(`${intro}\n\n${main}\n\n${outro}`);
   const chunks = chunkText(fullTranscript);
 
-  // your R2 client already knows which bucket
-  // ✅ FIXED — pass bucket and key separately to R2 client
-await putText("transcript", `${sessionId}.txt`, fullTranscript);
-putText("raw-text", `${sessionId}/chunk_${i + 1}.txt`, chunk);
-  
+  // ✅ Upload transcript and chunks to proper R2 buckets
+  await putText("transcript", `${sessionId}.txt`, fullTranscript);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    await putText("raw-text", `${sessionId}/chunk_${i + 1}.txt`, chunk);
+  }
 
   const metadata = await generateEpisodeMeta({ intro, main, outro });
-  await putJson(`meta/${sessionId}.json`, metadata);
+  await putJson("meta", `${sessionId}.json`, metadata);
 
   return { fullTranscript, chunks, metadata };
 }
