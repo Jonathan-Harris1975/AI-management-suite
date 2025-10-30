@@ -1,8 +1,10 @@
 // ============================================================
-// 🧠 Clean, validator-safe RSS Builder + XML Parser
+// 🧠 Clean, validator-safe RSS Builder + XML Parser (ESM-safe)
 // ============================================================
 
-import { create, parse } from "xmlbuilder2";
+import pkg from "xmlbuilder2"; // CommonJS interop fix
+const { create, parse } = pkg;
+
 import { putText } from "../../shared/utils/r2-client.js";
 import { info, error } from "#logger.js";
 
