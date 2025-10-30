@@ -19,18 +19,18 @@ const MAX_RSS_FEEDS_PER_RUN = Number(process.env.MAX_RSS_FEEDS_PER_RUN) || 5;
 const MAX_URL_FEEDS_PER_RUN = Number(process.env.MAX_URL_FEEDS_PER_RUN) || 1;
 
 // ─────────────────────────────────────────────
-// Helpers
+// ✅ Define helper before any use
 // ─────────────────────────────────────────────
-async function readLocalOrR2File(filename) {
+export async function readLocalOrR2File(filename) {
   const localPath = path.resolve("services/rss-feed-creator/data", filename);
 
-  // 1️⃣ Try local file first
+  // Try local file first
   if (fs.existsSync(localPath)) {
     info("rss.fetchFeeds.local.hit", { file: filename });
     return fs.readFileSync(localPath, "utf-8");
   }
 
-  // 2️⃣ Fallback to R2
+  // Fallback to R2
   try {
     const text = await getObjectAsText(R2_BUCKET, `data/${filename}`);
     info("rss.fetchFeeds.r2.success", { bucket: R2_BUCKET, key: filename });
@@ -41,6 +41,9 @@ async function readLocalOrR2File(filename) {
   }
 }
 
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
 function parseUrlList(raw = "") {
   return raw
     .split(/\r?\n/)
