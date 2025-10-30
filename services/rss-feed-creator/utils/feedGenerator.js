@@ -111,7 +111,7 @@ async function loadExistingItems({ r2, bucket, feedKey }) {
  * Generate & save the RSS feed to R2.
  * CRITICAL: even if existing feed is empty/invalid, we still serialize the new batch.
  */
-export async function generateAndSaveFeed({
+export async function generateFeed({
   r2,              // your shared R2 client { getObjectAsText, uploadBuffer }
   bucket = "rss-feeds",
   feedKey = "feed.xml",
