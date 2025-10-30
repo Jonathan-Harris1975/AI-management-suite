@@ -1,5 +1,5 @@
 // /services/rss-feed-creator/utils/rssBuilder.js
-// ✅ Final version - 100% production safe
+// ✅ Final version - robust, ESM-safe
 
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
 
@@ -27,7 +27,7 @@ function buildRssXml({ items = [], meta = {} }) {
         language: meta.language || "en-gb",
         pubDate: new Date().toUTCString(),
         lastBuildDate: new Date().toUTCString(),
-        item: items.map((item) => ({
+        item: (items || []).map((item) => ({
           title: item.title || "Untitled",
           link: item.link || "",
           description: item.description || "",
@@ -43,7 +43,7 @@ function buildRssXml({ items = [], meta = {} }) {
 
 /**
  * Parses an existing RSS XML string into a normalized format.
- * Returns an object with { items, channel } or { items: [], channel: null }.
+ * Always returns { items, channel } — never undefined.
  */
 function parseExistingRssXml(xmlContent) {
   try {
@@ -62,27 +62,23 @@ function parseExistingRssXml(xmlContent) {
 
     const parsed = parser.parse(xmlContent);
 
-    // Normalize and detect RSS structure
+    // Support multiple possible RSS root structures
     const channel =
       parsed?.rss?.channel ||
       parsed?.rssFeed?.channel ||
       parsed?.feed?.channel ||
       null;
 
-    // Fallback for malformed feeds (like <rss><item>...</item></rss>)
+    // Fallback for malformed feeds (e.g., <rss><item>...</item></rss>)
     const itemsDirect = parsed?.rss?.item || parsed?.item || null;
 
     if (channel?.item) {
-      const items = Array.isArray(channel.item)
-        ? channel.item
-        : [channel.item];
+      const items = Array.isArray(channel.item) ? channel.item : [channel.item];
       return { items, channel };
     }
 
     if (itemsDirect) {
-      const items = Array.isArray(itemsDirect)
-        ? itemsDirect
-        : [itemsDirect];
+      const items = Array.isArray(itemsDirect) ? itemsDirect : [itemsDirect];
       return {
         items,
         channel: {
@@ -93,7 +89,7 @@ function parseExistingRssXml(xmlContent) {
       };
     }
 
-    console.warn("[rssBuilder] Parsed RSS but found no valid items.", Object.keys(parsed));
+    console.warn("[rssBuilder] Parsed RSS but found no valid items.", Object.keys(parsed || {}));
     return { items: [], channel: null };
   } catch (err) {
     console.error("[rssBuilder] Failed to parse existing RSS XML:", err);
