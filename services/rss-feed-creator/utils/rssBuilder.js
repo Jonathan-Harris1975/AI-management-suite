@@ -18,7 +18,7 @@ function rfc822(date) {
  * @param {Array<object>} items - newsletter issues
  * @returns {string} XML string
  */
-export function buildNewsletterRSS(channel, items = []) {
+export function buildRssXml(channel, items = []) {
   const doc = create({ version: "1.0", encoding: "UTF-8" })
     .ele("rss", {
       version: "2.0",
