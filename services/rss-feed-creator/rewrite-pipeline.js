@@ -1,48 +1,58 @@
 /**
  * rewrite-pipeline.js
- * -------------------
- * Full pipeline for the RSS Feed Creator.
- * 1. Fetch and parse upstream feeds
- * 2. Rewrite entries via AI (OpenRouter through resilientRequest)
- * 3. Shorten URLs (Short.io)
- * 4. Generate final RSS XML and upload to R2
+ * Orchestrates RSS rewriting and feed generation for Turing's Torch.
  */
 
-import { fetchFeeds } from "./utils/fetchFeeds.js";
-import { rewriteRssFeedItems } from "./utils/models.js";
-import { shortenUrl } from "./utils/shortio.js";
 import { generateFeed } from "./utils/feedGenerator.js";
+import { logInfo, logError } from "../../shared/utils/logger.js";
+import { rewriteArticle } from "./model/rewriteArticle.js";
 
 export async function endToEndRewrite() {
-  // 1️⃣ Fetch articles from all configured feeds
-  // NOTE: Feeds and URLs are preloaded at startup
-  const fetchedArticles = await fetchFeeds();
-  // fetchedArticles -> [{ title, summary, link, pubDate?, source? }, ...]
+  try {
+    logInfo("rss-feed-creator.pipeline.start");
 
-  // 2️⃣ Rewrite each article using AI via OpenRouter (resilientRequest)
-  const rewrittenArticles = await rewriteRssFeedItems(fetchedArticles);
-
-  // 3️⃣ Shorten URLs (non-blocking, fallback to original link if failure)
-  const withShortLinks = [];
-  for (const article of rewrittenArticles) {
-    let shortLink = null;
-    try {
-      shortLink = await shortenUrl(article.link);
-    } catch (_) {
-      // continue without breaking
+    // Load items for rewriting (from upstream RSS fetch)
+    const rssItems = globalThis.__latestFetchedItems || [];
+    if (!rssItems.length) {
+      logInfo("rss-feed-creator.noSourceItems", { count: 0 });
+      return;
     }
-    withShortLinks.push({
-      ...article,
-      shortLink: shortLink || article.link,
+
+    // Rewrite each article
+    const rewritten = [];
+    for (const item of rssItems) {
+      try {
+        const rewrittenText = await rewriteArticle(item);
+        if (rewrittenText) {
+          rewritten.push({
+            title: item.title || "Untitled",
+            link: item.link || "",
+            pubDate: item.pubDate || new Date().toUTCString(),
+            guid: item.guid || item.link || crypto.randomUUID(),
+            rewritten: rewrittenText,
+          });
+        }
+      } catch (err) {
+        logError("rss-feed-creator.article.rewrite.fail", err, {
+          title: item.title,
+        });
+      }
+    }
+
+    if (!rewritten.length) {
+      logInfo("rss-feed-creator.noRewrittenItems", { count: 0 });
+      return;
+    }
+
+    const bucketName = process.env.R2_BUCKET_RSS_FEEDS || "rss-feeds";
+
+    logInfo("rss-feed-creator.batch.complete", {
+      totalItems: rssItems.length,
+      rewrittenItems: rewritten.length,
     });
+
+    await generateFeed(bucketName, rewritten);
+  } catch (err) {
+    logError("rss-feed-creator.pipeline.fail", err);
   }
-
-  // 4️⃣ Generate the final RSS feed XML and upload to R2
-  const r2Result = await generateFeed(withShortLinks);
-
-  return {
-    ok: true,
-    itemsProcessed: withShortLinks.length,
-    r2Result,
-  };
 }
