@@ -103,19 +103,28 @@ function humanize(input) {
   return result;
 }
 
-// --- INTRO PROMPT ---
+// --- UPDATED INTRO PROMPT (natural flow, no temperature) ---
 export function getIntroPrompt({ weatherSummary, turingQuote }) {
   return `${persona}
 
-Write the intro script. Start with a dry, witty remark about the UK weather: ${weatherSummary}.
-Flow naturally into this Alan Turing quote, delivered sincerely: "${turingQuote}".
+Write the podcast intro script in a natural, conversational tone.
+Start with a dry, witty observation about the UK weather, based on this input: ${weatherSummary}.
+⚠️ Do NOT mention temperature, numbers, or weather data values.
+Let the remark sound natural — like a human would speak, not a robot.
 
-**TRANSITION RULE:** Do NOT start with "Right, another day..." or similar phrases. Begin conversationally.
+Then flow seamlessly into this Alan Turing quote, delivered sincerely but conversationally:
+"${turingQuote}"
 
-Use the quote as a springboard into the show's theme, rolling smoothly into:
+Use that quote as a thematic bridge into the show's introduction:
+
 "Tired of drowning in AI headlines? Ready for clarity, insight, and a direct line to the pulse of innovation? Welcome to Turing's Torch: AI Weekly! I'm Jonathan Harris, your host, and I'm cutting through the noise to bring you the most critical AI developments, explained, analysed, and delivered straight to you. Let's ignite your understanding of AI, together."
 
-Keep it compact and conversational.`;
+**STYLE REQUIREMENTS:**
+- Keep it compact, human, and fluent
+- Avoid robotic or abrupt transitions
+- Exclude temperature or numeric details
+- Plain text only (no sound cues, notes, or directions)
+- Smooth flow: weather → quote → theme intro`;
 }
 
 // --- ULTRA-STRICT MAIN PROMPT ---
