@@ -23,18 +23,13 @@ Your persona has the following traits:
 
 // --- AGGRESSIVE TRANSITION ENFORCER (hardened) ---
 function enforceTransitions(input) {
-  // Coerce any input to a safe string
   let modifiedText = "";
 
-  if (Array.isArray(input)) {
-    modifiedText = input.join(" ");
-  } else if (typeof input === "object" && input !== null) {
+  if (Array.isArray(input)) modifiedText = input.join(" ");
+  else if (typeof input === "object" && input !== null)
     modifiedText = input.text || JSON.stringify(input);
-  } else if (typeof input === "string") {
-    modifiedText = input;
-  } else {
-    modifiedText = String(input ?? "");
-  }
+  else if (typeof input === "string") modifiedText = input;
+  else modifiedText = String(input ?? "");
 
   const forbiddenPatterns = [
     /(Right|Well|So),\s*(another|a)\s*(week|day|batch|flurry)/gi,
@@ -43,7 +38,7 @@ function enforceTransitions(input) {
     /Well,\s*another/gi,
     /Right,\s*another/gi,
     /So,\s*there you have it/gi,
-    /Now,\s*moving on to/gi
+    /Now,\s*moving on to/gi,
   ];
 
   let violations = 0;
@@ -55,12 +50,12 @@ function enforceTransitions(input) {
         violations += matches.length;
         modifiedText = modifiedText.replace(pattern, () => {
           const alternatives = [
-            'This brings us to',
-            'Meanwhile,',
-            'In a related development,',
-            'Shifting focus to',
-            'Which naturally leads to',
-            'This story connects to'
+            "This brings us to",
+            "Meanwhile,",
+            "In a related development,",
+            "Shifting focus to",
+            "Which naturally leads to",
+            "This story connects to",
           ];
           return alternatives[Math.floor(Math.random() * alternatives.length)];
         });
@@ -68,14 +63,14 @@ function enforceTransitions(input) {
     }
   }
 
-  if (violations > 0) console.log(`🚫 Fixed ${violations} transition violations`);
+  if (violations > 0)
+    console.log(`🚫 Fixed ${violations} transition violations`);
 
   return modifiedText;
 }
 
 // --- ENHANCED HUMANIZER WITH TRANSITION FOCUS (hardened) ---
 function humanize(input) {
-  // Coerce to string before applying regexes
   let text = "";
   if (Array.isArray(input)) text = input.join(" ");
   else if (typeof input === "object" && input !== null)
@@ -85,14 +80,20 @@ function humanize(input) {
   let result = enforceTransitions(text);
 
   const synonyms = {
-    "AI": ["AI", "artificial intelligence", "these systems", "machine intelligence", "the current AI landscape"],
-    "however": ["though", "that said", "but then again", "although", "then again"],
-    "therefore": ["so", "which means", "consequently", "as a result", "thus"],
-    "significant": ["notable", "major", "important", "substantial", "considerable"],
+    AI: [
+      "AI",
+      "artificial intelligence",
+      "these systems",
+      "machine intelligence",
+      "the current AI landscape",
+    ],
+    however: ["though", "that said", "but then again", "although", "then again"],
+    therefore: ["so", "which means", "consequently", "as a result", "thus"],
+    significant: ["notable", "major", "important", "substantial", "considerable"],
   };
 
   for (const word in synonyms) {
-    const regex = new RegExp(`\\b${word}\\b`, 'gi');
+    const regex = new RegExp(`\\b${word}\\b`, "gi");
     result = result.replace(regex, () => {
       const options = synonyms[word];
       return options[Math.floor(Math.random() * options.length)];
@@ -117,11 +118,11 @@ Use the quote as a springboard into the show's theme, rolling smoothly into:
 Keep it compact and conversational.`;
 }
 
-// --- ULTRA-STRICT MAIN PROMPT (safe normalization) ---
+// --- ULTRA-STRICT MAIN PROMPT ---
 export function getMainPrompt({ articles = [], targetDuration = 60 }) {
   const normalizedArticles = Array.isArray(articles)
-    ? articles.filter(a => typeof a === 'string' && a.trim().length > 0)
-    : typeof articles === 'string'
+    ? articles.filter((a) => typeof a === "string" && a.trim().length > 0)
+    : typeof articles === "string"
     ? [articles]
     : [];
 
@@ -136,7 +137,11 @@ export function getMainPrompt({ articles = [], targetDuration = 60 }) {
     articleCount
   );
 
-  console.log(`📝 Articles: ${articleCount}, Target: ${targetChars} chars/article, Est: ${estimatedMinutes.toFixed(1)}min content`);
+  console.log(
+    `📝 Articles: ${articleCount}, Target: ${targetChars} chars/article, Est: ${estimatedMinutes.toFixed(
+      1
+    )}min content`
+  );
 
   const articleThemes = analyzeArticleThemes(normalizedArticles);
 
@@ -150,7 +155,7 @@ export function getMainPrompt({ articles = [], targetDuration = 60 }) {
 ❌ NEVER use numerical indicators like "first", "second", "next"
 
 **REQUIRED TRANSITION TECHNIQUES:**
-✅ Use thematic bridges: Connect stories through common themes like ${articleThemes.join(', ')}
+✅ Use thematic bridges: Connect stories through common themes like ${articleThemes.join(", ")}
 ✅ Use cause-and-effect: "This development naturally leads us to consider..."
 ✅ Use contrasting perspectives: "While that story focused on X, this one shows Y..."
 ✅ Use question flows: "But what does this mean for Z? That question brings us to..."
@@ -159,7 +164,9 @@ export function getMainPrompt({ articles = [], targetDuration = 60 }) {
 "The massive computing infrastructure being built by tech giants raises important questions about practical applications, which brings us to a fascinating development in the legal sector where AI is being deployed in surprisingly effective ways..."
 
 **ARTICLES TO COVER:**
-${normalizedArticles.map((text, index) => `--- ARTICLE ${index + 1} ---\n${text.substring(0, 500)}...`).join('\n\n')}
+${normalizedArticles
+    .map((text, index) => `--- ARTICLE ${index + 1} ---\n${text.substring(0, 500)}...`)
+    .join("\n\n")}
 
 **YOUR TASK:**
 1. Write ONE continuous monologue (no breaks, no sections)
@@ -176,17 +183,18 @@ ${normalizedArticles.map((text, index) => `--- ARTICLE ${index + 1} ---\n${text.
 function analyzeArticleThemes(articles) {
   const themes = new Set();
   const themeKeywords = {
-    'legal': ['legal', 'law', 'court', 'litigation', 'lawyer', 'firm'],
-    'technology': ['AI', 'algorithm', 'software', 'tech', 'digital', 'compute'],
-    'business': ['funding', 'investment', 'startup', 'market', 'business'],
-    'infrastructure': ['infrastructure', 'data center', 'server', 'GPU', 'compute'],
-    'education': ['education', 'training', 'curriculum', 'school', 'learn']
+    legal: ["legal", "law", "court", "litigation", "lawyer", "firm"],
+    technology: ["AI", "algorithm", "software", "tech", "digital", "compute"],
+    business: ["funding", "investment", "startup", "market", "business"],
+    infrastructure: ["infrastructure", "data center", "server", "GPU", "compute"],
+    education: ["education", "training", "curriculum", "school", "learn"],
   };
 
-  articles.forEach(article => {
-    const articleText = (typeof article === "string" ? article : JSON.stringify(article)).toLowerCase();
+  articles.forEach((article) => {
+    const articleText =
+      typeof article === "string" ? article.toLowerCase() : JSON.stringify(article).toLowerCase();
     for (const [theme, keywords] of Object.entries(themeKeywords)) {
-      if (keywords.some(keyword => articleText.includes(keyword))) {
+      if (keywords.some((keyword) => articleText.includes(keyword))) {
         themes.add(theme);
       }
     }
@@ -195,14 +203,27 @@ function analyzeArticleThemes(articles) {
   return Array.from(themes);
 }
 
-// --- OUTRO PROMPT ---
+// --- OUTRO PROMPT (hardened + validated) ---
 export async function getOutroPromptFull() {
-  const myBook = await getSponsor();
-  const title = myBook?.title ?? 'Digital Diagnosis: How AI Is Revolutionizing Healthcare';
-  const url = myBook?.url?.replace(/^https?:\/\//, '') ?? 'jonathan-harris.online';
-  const cta = await generateCta(myBook);
+  let myBook, title, url, cta;
 
-  return `${persona}
+  try {
+    myBook = await getSponsor();
+    title = myBook?.title || "Digital Diagnosis: How AI Is Revolutionizing Healthcare";
+    url = myBook?.url?.replace(/^https?:\/\//, "") || "jonathan-harris.online";
+    cta = await generateCta(myBook);
+  } catch (err) {
+    console.error("⚠️ Failed to resolve sponsor or CTA:", err);
+    title = "Digital Diagnosis: How AI Is Revolutionizing Healthcare";
+    url = "jonathan-harris.online";
+    cta = "Explore the future of AI in my latest eBook at jonathan-harris.online";
+  }
+
+  const safeCta = String(cta ?? "Learn more about my latest AI book online.");
+  const safeTitle = String(title ?? "AI Weekly");
+  const safeUrl = String(url ?? "jonathan-harris.online");
+
+  const outroPrompt = `${persona}
 
 Write the closing script that flows naturally from the final story.
 
@@ -210,55 +231,63 @@ Write the closing script that flows naturally from the final story.
 
 **STRUCTURE:**
 1. Start with a reflection that connects to the final story's theme
-2. Transition personally to your book using this CTA: "${cta}"
-3. Mention the book title: "${title}" and website: "${url}"
+2. Transition personally to your book using this CTA: "${safeCta}"
+3. Mention the book title: "${safeTitle}" and website: "${safeUrl}"
 4. Deliver the branded sign-off
 
 **BOOK PROMOTION GUIDELINES:**
 - Keep it authentic and personal - it's YOUR book
-- Integrate the CTA naturally: "${cta}"
-- Pronounce URLs naturally: "${url.replace(/\./g, ' dot ')}"
+- Integrate the CTA naturally: "${safeCta}"
+- Pronounce URLs naturally: "${safeUrl.replace(/\./g, " dot ")}"
 - Make it feel like a genuine recommendation, not an advertisement
 
 **EXAMPLE STRUCTURE:**
-"These legal technology developments show how AI is transforming traditional sectors... [CTA: ${cta}] I explore this transformation in depth in my book '${title}' available at ${url.replace(/\./g, ' dot ')}. And that's a wrap on another week in AI land..."
+"These legal technology developments show how AI is transforming traditional sectors... [CTA: ${safeCta}] I explore this transformation in depth in my book '${safeTitle}' available at ${safeUrl.replace(
+    /\./g,
+    " dot "
+  )}. And that's a wrap on another week in AI land..."
 
 **CRITICAL:**
-- MUST include the CTA: "${cta}"
+- MUST include the CTA: "${safeCta}"
 - MUST mention the book title and URL
 - No stage directions, only spoken words
 - Maintain continuous flow from the main content
 
 Create a single, unbroken closing monologue that includes all these elements naturally.`;
+
+  if (!outroPrompt || outroPrompt.trim().length < 10) {
+    throw new Error("Invalid outro prompt — empty or malformed content");
+  }
+
+  return outroPrompt;
 }
 
 // --- VALIDATION HELPERS ---
 export function validateScript(script) {
   const violations = [];
-
   const forbiddenPatterns = [
     /(Right|Well|So),\s*(another|a)\s*(week|day|batch|flurry)/gi,
     /Another\s*(week|day)\s*,?\s*another/gi,
     /Well,\s*another/gi,
     /Right,\s*another/gi,
-    /So,\s*there you have it/gi
+    /So,\s*there you have it/gi,
   ];
 
   const safeScript = String(script ?? "");
 
-  forbiddenPatterns.forEach(pattern => {
+  forbiddenPatterns.forEach((pattern) => {
     const matches = safeScript.match(pattern);
     if (matches) {
       violations.push({
         pattern: pattern.toString(),
         matches,
-        message: `Found forbidden transition pattern`
+        message: `Found forbidden transition pattern`,
       });
     }
   });
 
-  const sentences = safeScript.split(/[.!?]+/).filter(s => s.trim().length > 0);
-  const starters = sentences.map(s => s.trim().split(' ')[0].toLowerCase());
+  const sentences = safeScript.split(/[.!?]+/).filter((s) => s.trim().length > 0);
+  const starters = sentences.map((s) => s.trim().split(" ")[0].toLowerCase());
   const starterFrequency = starters.reduce((acc, starter) => {
     acc[starter] = (acc[starter] || 0) + 1;
     return acc;
@@ -267,9 +296,9 @@ export function validateScript(script) {
   Object.entries(starterFrequency).forEach(([starter, count]) => {
     if (count > 3 && count > sentences.length * 0.2) {
       violations.push({
-        pattern: 'Repetitive starter',
+        pattern: "Repetitive starter",
         matches: [`"${starter}" used ${count} times`],
-        message: `Overused sentence starter`
+        message: `Overused sentence starter`,
       });
     }
   });
@@ -277,7 +306,7 @@ export function validateScript(script) {
   return {
     isValid: violations.length === 0,
     violations,
-    score: Math.max(0, 10 - violations.length * 2)
+    score: Math.max(0, 10 - violations.length * 2),
   };
 }
 
@@ -290,20 +319,20 @@ export function validateOutro(script, expectedCta, expectedTitle, expectedUrl) {
   if (expectedTitle && !safeScript.includes(expectedTitle))
     issues.push(`Missing book title: "${expectedTitle}"`);
 
-  const cleanUrl = expectedUrl?.replace(/^https?:\/\//, '');
+  const cleanUrl = expectedUrl?.replace(/^https?:\/\//, "");
   if (cleanUrl && !safeScript.includes(cleanUrl))
     issues.push(`Missing website: "${cleanUrl}"`);
 
   const transitionViolations = validateScript(safeScript).violations;
   if (transitionViolations.length > 0)
-    issues.push(...transitionViolations.map(v => v.message));
+    issues.push(...transitionViolations.map((v) => v.message));
 
   return {
     isValid: issues.length === 0,
     issues,
     hasCta: expectedCta ? safeScript.includes(expectedCta) : false,
     hasBook: expectedTitle ? safeScript.includes(expectedTitle) : false,
-    hasUrl: cleanUrl ? safeScript.includes(cleanUrl) : false
+    hasUrl: cleanUrl ? safeScript.includes(cleanUrl) : false,
   };
 }
 
@@ -314,5 +343,5 @@ export default {
   humanize,
   enforceTransitions,
   validateScript,
-  validateOutro
+  validateOutro,
 };
