@@ -1,19 +1,26 @@
 // /services/shared/utils/r2-client.js
-// ✅ Universal R2 client for AI Podcast Suite (2025-10-31)
-// Compatible with both legacy and new services (rss, toneSetter, feedRotation, etc.)
+// ✅ FINAL UNIVERSAL VERSION (2025-10-31)
+// Covers: feedRotationManager, toneSetter, models, rssBuilder, feedGenerator
 
-import { S3Client, GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  GetObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import pino from "pino";
 import { env } from "process";
 
 const logger = pino({ level: env.LOG_LEVEL || "info" });
 
 // -----------------------------------------------------------------------------
-// R2 connection bootstrap
+// R2 connection
 // -----------------------------------------------------------------------------
 export const s3 = new S3Client({
   region: "auto",
-  endpoint: env.R2_ENDPOINT || "https://<your-cloudflare-account>.r2.cloudflarestorage.com",
+  endpoint:
+    env.R2_ENDPOINT ||
+    "https://<your-cloudflare-account>.r2.cloudflarestorage.com",
   credentials: {
     accessKeyId: env.R2_ACCESS_KEY_ID,
     secretAccessKey: env.R2_SECRET_ACCESS_KEY,
@@ -21,7 +28,7 @@ export const s3 = new S3Client({
 });
 
 // -----------------------------------------------------------------------------
-// R2 bucket constants — used across toneSetter, rssFeedCreator, etc.
+// Bucket constants
 // -----------------------------------------------------------------------------
 export const R2_BUCKETS = {
   PODCAST: env.R2_BUCKET_PODCAST || "podcast",
@@ -33,7 +40,7 @@ export const R2_BUCKETS = {
 };
 
 // -----------------------------------------------------------------------------
-// Utilities
+// Helpers
 // -----------------------------------------------------------------------------
 async function streamToString(stream) {
   if (!stream) return "";
@@ -43,24 +50,27 @@ async function streamToString(stream) {
 }
 
 // -----------------------------------------------------------------------------
-// Get object as text
+// Core read/write operations
 // -----------------------------------------------------------------------------
 export async function getObjectAsText(bucket, key) {
   try {
     const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
     const res = await s3.send(cmd);
     const body = await streamToString(res.Body);
-    logger.info({ service: "ai-podcast-suite", bucket, key, length: body.length }, "r2.getObjectAsText.success");
+    logger.info(
+      { service: "ai-podcast-suite", bucket, key, length: body.length },
+      "r2.getObjectAsText.success"
+    );
     return body;
   } catch (err) {
-    logger.error({ service: "ai-podcast-suite", bucket, key, err: err.message }, "r2.getObjectAsText.fail");
+    logger.error(
+      { service: "ai-podcast-suite", bucket, key, err: err.message },
+      "r2.getObjectAsText.fail"
+    );
     return null;
   }
 }
 
-// -----------------------------------------------------------------------------
-// Upload buffer
-// -----------------------------------------------------------------------------
 export async function uploadBuffer(bucket, key, buffer) {
   try {
     const cmd = new PutObjectCommand({
@@ -70,33 +80,41 @@ export async function uploadBuffer(bucket, key, buffer) {
       ContentType: "application/octet-stream",
     });
     await s3.send(cmd);
-    logger.info({ service: "ai-podcast-suite", bucket, key, size: buffer.length }, "r2.uploadBuffer.success");
+    logger.info(
+      { service: "ai-podcast-suite", bucket, key, size: buffer.length },
+      "r2.uploadBuffer.success"
+    );
     return true;
   } catch (err) {
-    logger.error({ service: "ai-podcast-suite", bucket, key, err: err.message }, "r2.uploadBuffer.fail");
+    logger.error(
+      { service: "ai-podcast-suite", bucket, key, err: err.message },
+      "r2.uploadBuffer.fail"
+    );
     return false;
   }
 }
 
 // -----------------------------------------------------------------------------
-// Upload string
+// String + JSON utilities (and legacy aliases)
 // -----------------------------------------------------------------------------
 export async function uploadString(bucket, key, str) {
   const buf = Buffer.from(str, "utf8");
   return uploadBuffer(bucket, key, buf);
 }
 
-// -----------------------------------------------------------------------------
-// Upload JSON + alias (putJson)
-// -----------------------------------------------------------------------------
+// ✅ legacy alias for compatibility with old code
+export const putText = uploadString;
+
 export async function uploadJSON(bucket, key, obj) {
   const buf = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
   return uploadBuffer(bucket, key, buf);
 }
+
+// ✅ legacy alias for compatibility with old code
 export const putJson = uploadJSON;
 
 // -----------------------------------------------------------------------------
-// List keys in a bucket (legacy compatibility)
+// List keys (for toneSetter + maintenance tasks)
 // -----------------------------------------------------------------------------
 export async function listKeys(bucket, prefix = "") {
   try {
@@ -106,16 +124,22 @@ export async function listKeys(bucket, prefix = "") {
     });
     const res = await s3.send(cmd);
     const keys = res?.Contents?.map((c) => c.Key) || [];
-    logger.info({ service: "ai-podcast-suite", bucket, prefix, count: keys.length }, "r2.listKeys.success");
+    logger.info(
+      { service: "ai-podcast-suite", bucket, prefix, count: keys.length },
+      "r2.listKeys.success"
+    );
     return keys;
   } catch (err) {
-    logger.error({ service: "ai-podcast-suite", bucket, prefix, err: err.message }, "r2.listKeys.fail");
+    logger.error(
+      { service: "ai-podcast-suite", bucket, prefix, err: err.message },
+      "r2.listKeys.fail"
+    );
     return [];
   }
 }
 
 // -----------------------------------------------------------------------------
-// Export all
+// Default export (for ESM compatibility)
 // -----------------------------------------------------------------------------
 export default {
   s3,
@@ -124,6 +148,7 @@ export default {
   uploadBuffer,
   uploadString,
   uploadJSON,
+  putText,
   putJson,
   listKeys,
 };
