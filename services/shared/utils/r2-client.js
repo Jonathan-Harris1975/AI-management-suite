@@ -1,7 +1,7 @@
 /**
- * AI Podcast Suite – Unified R2 Client
- * Fully backward compatible + bucket auto-fix
- * Works with Cloudflare R2 using AWS SDK v3
+ * AI Podcast Suite – Unified Cloudflare R2 Client
+ * Complete + Backward Compatible + Auto Bucket Fix
+ * Works in Node 22 / ESM on Render
  */
 
 import {
@@ -13,7 +13,7 @@ import {
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 
-// ---------- ENV ----------
+// ---------- ENVIRONMENT VARIABLES ----------
 const {
   R2_ENDPOINT,
   R2_ACCESS_KEY_ID,
@@ -24,7 +24,7 @@ const {
   R2_BUCKET_RAW_TEXT,
   R2_BUCKET_MERGED,
   R2_META_BUCKET,
-  R2_BUCKET_RSS_FEEDS, // optional fallback
+  R2_BUCKET_RSS_FEEDS,
   R2_PUBLIC_BASE_URL_PODCAST,
   R2_PUBLIC_BASE_URL_RAW,
   R2_PUBLIC_BASE_URL_RAW_TEXT,
@@ -45,10 +45,10 @@ export const r2Client = new S3Client({
   forcePathStyle: true,
 });
 
-// Legacy alias
+// Backward alias for older code
 export const s3 = r2Client;
 
-// ---------- LOGGING ----------
+// ---------- LOGGING HELPERS ----------
 function logInfo(event, meta = {}) {
   console.log(JSON.stringify({ level: "INFO", event, ...meta }));
 }
@@ -59,11 +59,25 @@ function logError(event, err, meta = {}) {
   );
 }
 
-// ---------- CORE OPS ----------
+// ---------- BUCKET MAP ----------
+export const R2_BUCKETS = {
+  podcast: R2_BUCKET_PODCAST,
+  raw: R2_BUCKET_RAW,
+  rawText: R2_BUCKET_RAW_TEXT,
+  merged: R2_BUCKET_MERGED,
+  meta: R2_META_BUCKET,
+  rss: R2_BUCKET_RSS_FEEDS || "rss-feeds",
+};
 
-// ---- Upload Buffer ----
+// ---------- CORE OPERATIONS ----------
+
+// ---- Upload Buffer (with auto bucket fix) ----
 export async function uploadBuffer({ bucket, key, body, contentType }) {
-  if (!bucket) throw new Error("uploadBuffer: bucket is required");
+  if (!bucket || bucket === "undefined" || bucket === "") {
+    bucket = R2_BUCKET_RSS_FEEDS || "rss-feeds";
+    logInfo("r2.uploadBuffer.bucket.autofix", { bucket, key });
+  }
+
   if (!key) throw new Error("uploadBuffer: key is required");
 
   const command = new PutObjectCommand({
@@ -78,11 +92,13 @@ export async function uploadBuffer({ bucket, key, body, contentType }) {
   return true;
 }
 
+// ---- Put JSON ----
 export async function putJson(bucket, key, json) {
   const body = Buffer.from(JSON.stringify(json, null, 2));
   return uploadBuffer({ bucket, key, body, contentType: "application/json" });
 }
 
+// ---- Put Text ----
 export async function putText(bucket, key, text) {
   const body = Buffer.from(text);
   return uploadBuffer({
@@ -96,7 +112,6 @@ export async function putText(bucket, key, text) {
 // ---- Get Object as Text (auto bucket fix) ----
 export async function getObjectAsText(bucket, key) {
   try {
-    // ✅ Auto-fallback for undefined bucket
     if (!bucket || bucket === "undefined" || bucket === "") {
       bucket = R2_BUCKET_RSS_FEEDS || "rss-feeds";
       logInfo("r2.getObjectAsText.bucket.autofix", { bucket, key });
@@ -137,7 +152,7 @@ export async function getObject(bucket, key) {
   }
 }
 
-// ---- Exists ----
+// ---- Check Existence ----
 export async function objectExists(bucket, key) {
   try {
     await r2Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
@@ -148,7 +163,7 @@ export async function objectExists(bucket, key) {
   }
 }
 
-// ---- Delete ----
+// ---- Delete Object ----
 export async function deleteObject(bucket, key) {
   try {
     await r2Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
@@ -160,14 +175,14 @@ export async function deleteObject(bucket, key) {
   }
 }
 
-// ---- List ----
+// ---- List Objects ----
 export async function listObjects(bucket, prefix = "") {
   const cmd = new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix });
   const res = await r2Client.send(cmd);
   return res.Contents || [];
 }
 
-// Legacy alias used by toneSetter.js
+// ---- Legacy Alias: listKeys ----
 export async function listKeys(bucket, prefix = "") {
   const objs = await listObjects(bucket, prefix);
   return objs.map((o) => o.Key);
@@ -187,19 +202,9 @@ export async function r2Json(bucket, key, obj) {
   return putJson(bucket, key, obj);
 }
 
-// ---------- COMMON BUCKET MAP ----------
-export const R2_BUCKETS = {
-  podcast: R2_BUCKET_PODCAST,
-  raw: R2_BUCKET_RAW,
-  rawText: R2_BUCKET_RAW_TEXT,
-  merged: R2_BUCKET_MERGED,
-  meta: R2_META_BUCKET,
-  rss: R2_BUCKET_RSS_FEEDS || "rss-feeds",
-};
-
-// ---------- LEGACY COMPAT ----------
 export const r2GetText = getObjectAsText;
 
+// ---------- PUBLIC URL HELPERS ----------
 export function r2GetPublicBase(bucket) {
   const map = {
     podcast: R2_PUBLIC_BASE_URL_PODCAST,
@@ -227,5 +232,7 @@ export function getBucketName(alias) {
 logInfo("r2-client.initialized", {
   endpoint: R2_ENDPOINT,
   region: DEFAULT_REGION,
-  buckets: Object.keys(R2_BUCKETS).filter((k) => R2_BUCKETS[k]),
+  buckets: Object.entries(R2_BUCKETS)
+    .filter(([_, v]) => !!v)
+    .map(([k]) => k),
 });
