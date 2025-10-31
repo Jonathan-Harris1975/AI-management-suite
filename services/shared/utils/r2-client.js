@@ -1,19 +1,28 @@
 // services/shared/utils/r2-client.js
 // ============================================================
-// ☁️ Cloudflare R2 Client (Full Version)
+// ☁️ Cloudflare R2 Client — Fully Unified (Backward Compatible)
 // ============================================================
 
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 import { log } from "#logger.js";
 
-// --- Load environment ---
+// ============================================================
+// 🔧 Environment Setup
+// ============================================================
+
 const {
   R2_ACCESS_KEY_ID,
   R2_SECRET_ACCESS_KEY,
   R2_ENDPOINT,
   R2_REGION,
 
-  // ✅ All R2 Buckets
+  // Buckets (full set from envBootstrap)
   R2_BUCKET_PODCAST,
   R2_BUCKET_RAW,
   R2_BUCKET_RAW_TEXT,
@@ -24,7 +33,7 @@ const {
   R2_BUCKET_PODCAST_RSS_FEEDS,
   R2_BUCKET_TRANSCRIPTS,
 
-  // Public URLs (for output linking)
+  // Public URLs
   R2_PUBLIC_BASE_URL_PODCAST,
   R2_PUBLIC_BASE_URL_RAW,
   R2_PUBLIC_BASE_URL_RAW_TEXT,
@@ -36,10 +45,10 @@ const {
 } = process.env;
 
 // ============================================================
-// 🧠 R2 Client Setup
+// 🧠 Client Initialization
 // ============================================================
 
-export const r2Client = new S3Client({
+export const s3 = new S3Client({
   region: R2_REGION || "auto",
   endpoint: R2_ENDPOINT,
   credentials: {
@@ -49,7 +58,7 @@ export const r2Client = new S3Client({
 });
 
 // ============================================================
-// 🪣 Unified Bucket Map
+// 🪣 Bucket Registry
 // ============================================================
 
 export const R2_BUCKETS = {
@@ -64,7 +73,7 @@ export const R2_BUCKETS = {
 };
 
 // ============================================================
-// 🌍 Public URL Map
+// 🌍 Public URL Registry
 // ============================================================
 
 export const R2_PUBLIC_URLS = {
@@ -79,29 +88,14 @@ export const R2_PUBLIC_URLS = {
 };
 
 // ============================================================
-// ✅ Validation on Startup
-// ============================================================
-
-Object.entries(R2_BUCKETS).forEach(([key, val]) => {
-  if (!val) {
-    console.warn(`⚠️ R2 bucket missing or undefined: ${key}`);
-  }
-});
-
-log.info(
-  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.values(R2_BUCKETS) },
-  "r2-client.initialized"
-);
-
-// ============================================================
-// 📦 Utility Functions
+// ⚙️ Core Functions
 // ============================================================
 
 export async function uploadBuffer(bucketKey, key, buffer, contentType = "application/octet-stream") {
   const bucket = R2_BUCKETS[bucketKey];
   if (!bucket) throw new Error(`Unknown R2 bucket key: ${bucketKey}`);
 
-  await r2Client.send(
+  await s3.send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: key,
@@ -109,6 +103,7 @@ export async function uploadBuffer(bucketKey, key, buffer, contentType = "applic
       ContentType: contentType,
     })
   );
+
   return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
 }
 
@@ -119,23 +114,81 @@ export async function uploadText(bucketKey, key, text, contentType = "text/plain
 export async function getObjectAsText(bucketKey, key) {
   const bucket = R2_BUCKETS[bucketKey];
   if (!bucket) throw new Error(`Unknown R2 bucket key: ${bucketKey}`);
-
-  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
-  const response = await r2Client.send(command);
+  const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   const chunks = [];
   for await (const chunk of response.Body) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf-8");
 }
 
 // ============================================================
-// ✅ Default Export
+// 🔁 Additional Utilities (Backward Compatibility)
+// ============================================================
+
+// Legacy aliases
+export const r2Put = uploadBuffer;
+export const putJson = async (bucketKey, key, obj) =>
+  uploadText(bucketKey, key, JSON.stringify(obj, null, 2), "application/json");
+export const putText = uploadText;
+export const putObject = uploadBuffer;
+export const getObject = getObjectAsText;
+
+// Stream-based read helper (for TTS merge)
+export async function getR2ReadStream(bucketKey, key) {
+  const bucket = R2_BUCKETS[bucketKey];
+  if (!bucket) throw new Error(`Unknown R2 bucket key: ${bucketKey}`);
+  const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  return response.Body;
+}
+
+// List keys in a bucket
+export async function listKeys(bucketKey, prefix = "") {
+  const bucket = R2_BUCKETS[bucketKey];
+  if (!bucket) throw new Error(`Unknown R2 bucket key: ${bucketKey}`);
+  const { Contents } = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix }));
+  return Contents ? Contents.map((c) => c.Key) : [];
+}
+
+// Delete object from R2
+export async function deleteObject(bucketKey, key) {
+  const bucket = R2_BUCKETS[bucketKey];
+  if (!bucket) throw new Error(`Unknown R2 bucket key: ${bucketKey}`);
+  await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  log.info({ bucket, key }, "🗑️ R2 object deleted");
+}
+
+// Build public URL (legacy)
+export function buildPublicUrl(bucketKey, key) {
+  return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
+}
+
+// ============================================================
+// 🧩 Logging
+// ============================================================
+
+log.info(
+  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.values(R2_BUCKETS) },
+  "r2-client.initialized"
+);
+
+// ============================================================
+// 📦 Default Export
 // ============================================================
 
 export default {
-  r2Client,
+  s3,
   R2_BUCKETS,
   R2_PUBLIC_URLS,
   uploadBuffer,
   uploadText,
   getObjectAsText,
+  deleteObject,
+  listKeys,
+  getR2ReadStream,
+  buildPublicUrl,
+  // Backward-compatible aliases
+  r2Put,
+  putJson,
+  putText,
+  putObject,
+  getObject,
 };
