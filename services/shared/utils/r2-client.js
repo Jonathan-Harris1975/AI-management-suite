@@ -1,8 +1,8 @@
 /**
- * R2 Client Utility (Unified Production Build)
- * ============================================
- * Works with Cloudflare R2 (AWS SDK v3)
- * Includes modern helpers + all legacy exports for backward compatibility.
+ * R2 Client Utility (Final Unified Build)
+ * =======================================
+ * Works seamlessly with Cloudflare R2 (AWS SDK v3)
+ * Includes modern helpers + legacy aliases for backward compatibility
  */
 
 import {
@@ -14,7 +14,7 @@ import {
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 
-// ---------- Configuration ----------
+// ---------- ENV CONFIG ----------
 const {
   R2_ENDPOINT,
   R2_ACCESS_KEY_ID,
@@ -34,7 +34,7 @@ const {
 
 const DEFAULT_REGION = R2_REGION || "auto";
 
-// ---------- Client ----------
+// ---------- CLIENT ----------
 export const r2Client = new S3Client({
   region: DEFAULT_REGION,
   endpoint: R2_ENDPOINT,
@@ -45,19 +45,21 @@ export const r2Client = new S3Client({
   forcePathStyle: true,
 });
 
-// legacy alias expected by older modules
+// Legacy alias used in older modules
 export const s3 = r2Client;
 
-// ---------- Logging ----------
+// ---------- LOGGING ----------
 function logInfo(event, meta = {}) {
   console.log(JSON.stringify({ level: "INFO", event, ...meta }));
 }
 
 function logError(event, err, meta = {}) {
-  console.error(JSON.stringify({ level: "ERROR", event, error: err?.message || err, ...meta }));
+  console.error(
+    JSON.stringify({ level: "ERROR", event, error: err?.message || err, ...meta })
+  );
 }
 
-// ---------- Core Ops ----------
+// ---------- CORE OPS ----------
 
 // ---- Upload (Buffer / JSON / Text) ----
 export async function uploadBuffer({ bucket, key, body, contentType }) {
@@ -83,7 +85,12 @@ export async function putJson(bucket, key, json) {
 
 export async function putText(bucket, key, text) {
   const body = Buffer.from(text);
-  return uploadBuffer({ bucket, key, body, contentType: "text/plain; charset=utf-8" });
+  return uploadBuffer({
+    bucket,
+    key,
+    body,
+    contentType: "text/plain; charset=utf-8",
+  });
 }
 
 // ---- Get Object as Text ----
@@ -100,6 +107,23 @@ export async function getObjectAsText(bucket, key) {
       return null;
     }
     logError("r2.getObjectAsText.fail", err, { bucket, key });
+    throw err;
+  }
+}
+
+// ---- Get Raw Object ----
+export async function getObject(bucket, key) {
+  try {
+    const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+    const res = await r2Client.send(command);
+    logInfo("r2.getObject.success", { bucket, key });
+    return res;
+  } catch (err) {
+    if (err.name === "NoSuchKey") {
+      logInfo("r2.getObject.notFound", { bucket, key });
+      return null;
+    }
+    logError("r2.getObject.fail", err, { bucket, key });
     throw err;
   }
 }
@@ -140,7 +164,7 @@ export async function listKeys(bucket, prefix = "") {
   return objs.map((o) => o.Key);
 }
 
-// ---------- Modern Shortcuts ----------
+// ---------- MODERN SHORTCUT WRAPPERS ----------
 export async function r2Put(bucket, key, content, contentType) {
   const body = Buffer.isBuffer(content) ? content : Buffer.from(content || "");
   return uploadBuffer({ bucket, key, body, contentType });
@@ -154,7 +178,7 @@ export async function r2Json(bucket, key, obj) {
   return putJson(bucket, key, obj);
 }
 
-// ---------- Common Bucket Map ----------
+// ---------- COMMON BUCKET MAP ----------
 export const R2_BUCKETS = {
   podcast: R2_BUCKET_PODCAST,
   raw: R2_BUCKET_RAW,
@@ -163,7 +187,7 @@ export const R2_BUCKETS = {
   meta: R2_META_BUCKET,
 };
 
-// ---------- Legacy Back-Compat Exports ----------
+// ---------- LEGACY BACK-COMPAT EXPORTS ----------
 export const r2GetText = getObjectAsText;
 
 export function r2GetPublicBase(bucket) {
@@ -188,7 +212,7 @@ export function getBucketName(alias) {
   return map[alias] || alias;
 }
 
-// ---------- Init Log ----------
+// ---------- INIT LOG ----------
 logInfo("r2-client.initialized", {
   endpoint: R2_ENDPOINT,
   region: DEFAULT_REGION,
