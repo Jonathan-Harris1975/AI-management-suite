@@ -1,40 +1,54 @@
-import { Router } from "express";
-import { endToEndRewrite } from "../rewrite-pipeline.js";
-
-const router = Router();
-
 /**
- * POST /rewrite
- *
- * Triggers:
- *  - fetch RSS sources
- *  - rewrite with AI (OpenRouter via resilientRequest)
- *  - shorten URLs
- *  - generate RSS XML
- *  - upload to R2
- *
- * Returns summary metadata. Does NOT require sessionId.
+ * rewrite.js
+ * Handles POST /rss/rewrite — fetches, rewrites, and regenerates the RSS feed.
  */
+
+import express from "express";
+import { endToEndRewrite } from "../rewrite-pipeline.js";
+import { getObjectAsText } from "../../shared/utils/r2-client.js";
+import { info, error } from "../../shared/utils/logger.js";
+
+export const router = express.Router();
+
 router.post("/rewrite", async (req, res) => {
   try {
+    info ("rewrite.route.start");
+
+    const bucket = process.env.R2_BUCKET_RSS_FEEDS || "rss-feeds";
+    const key = "data/rss-feeds.txt";
+
+    // Load RSS feed list from R2 if global cache is empty
+    if (!globalThis.__latestFetchedItems) {
+      info ("rewrite.route.loading.feeds", { bucket, key });
+      const feedText = await getObjectAsText(bucket, key);
+      if (!feedText) throw new Error("rss-feeds.txt missing in R2");
+      const urls = feedText
+        .split("\n")
+        .map((u) => u.trim())
+        .filter((u) => u.length);
+      globalThis.__latestFetchedItems = urls.map((u) => ({
+        title: `Placeholder from ${u}`,
+        link: u,
+        guid: u,
+        pubDate: new Date().toUTCString(),
+        summary: "Fetched placeholder awaiting rewrite",
+      }));
+      info ("rewrite.route.loaded.urls", { count: urls.length });
+    }
+
+    // Execute rewrite pipeline
     const result = await endToEndRewrite();
 
-    return res.status(200).json({
-      ok: true,
-      message: "Feed fetched, rewritten, and published to R2.",
-      meta: {
-        itemsProcessed: result.itemsProcessed,
-        r2: result.r2Result,
-      },
+    info ("rewrite.route.complete", { result });
+
+    res.json({
+      status: "ok",
+      message: "RSS rewrite process triggered successfully",
+      itemsProcessed: result?.rewrittenItems?.length || 0,
     });
   } catch (err) {
-    console.error("rewrite.route.error", err);
-    return res.status(500).json({
-      ok: false,
-      error: "Failed to generate rewritten RSS feed",
-      details: err?.message || String(err),
-    });
+  error("rewrite.route.error", err);
+    res.status(500).json({ error: err.message || "Rewrite route failed" });
   }
 });
 
-export default router;
