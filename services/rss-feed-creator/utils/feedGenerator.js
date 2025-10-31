@@ -7,7 +7,7 @@ function jlog(message, meta = undefined) {
   process.stdout.write(JSON.stringify(line) + "\n");
 }
 
-const PREFIX = "rss-feeds/";
+
 const FILE_FEEDS = PREFIX + "feeds.txt";
 const FILE_URLS = PREFIX + "urls.txt";
 const FILE_XML = PREFIX + "feed.xml";
