@@ -1,5 +1,3 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
-// utils/editAndFormat.js
 
 // A small helper to add subtle random bias in word choice / punctuation
 function humanizeText(text) {
