@@ -8,11 +8,11 @@ function jlog(message, meta = undefined) {
 }
 
 
-const FILE_FEEDS = PREFIX + "feeds.txt";
-const FILE_URLS = PREFIX + "urls.txt";
-const FILE_XML = PREFIX + "feed.xml";
-const FILE_JSON = PREFIX + "feed.json";
-const FILE_CURSOR = PREFIX + "cursor.json";
+const FILE_FEEDS = "feeds.txt";
+const FILE_URLS = "urls.txt";
+const FILE_XML = "feed.xml";
+const FILE_JSON = "feed.json";
+const FILE_CURSOR = "cursor.json";
 
 function esc(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
