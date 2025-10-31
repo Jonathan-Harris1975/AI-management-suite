@@ -175,3 +175,9 @@ export async function listKeys({ bucket, prefix }) {
     throw err;
   }
 }
+
+// ------------------------------------------------------------
+// Back-compat aliases for legacy code
+// ------------------------------------------------------------
+export const r2GetText = getObjectAsText;
+export const r2Put = uploadBuffer;
