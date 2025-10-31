@@ -47,11 +47,20 @@ export async function generateMain(sessionId) {
 // 🧩 Outro Section
 // ─────────────────────────────────────────────────────────────
 export async function generateOutro(sessionId) {
-  const prompt = getOutroPromptFull();
+  // ✅ FIXED: must await the async getOutroPromptFull()
+  const prompt = await getOutroPromptFull();
+
+  // Defensive validation to avoid empty prompts
+  if (!prompt || typeof prompt !== "string" || prompt.trim().length < 10) {
+    throw new Error("Invalid outro prompt — empty or malformed content");
+  }
+
   return await resilientRequest("scriptOutro", {
     sessionId,
     section: "outro",
     messages: [{ role: "system", content: prompt }],
+  });
+}],
   });
 }
 
