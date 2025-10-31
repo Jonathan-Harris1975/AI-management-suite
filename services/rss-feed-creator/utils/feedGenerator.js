@@ -5,7 +5,7 @@
 
 import { XMLBuilder } from "fast-xml-parser";
 import { r2Put } from "../../shared/utils/r2-client.js";
-import { logInfo, logError } from "#logger.js";
+import { info, error } from "#logger.js";
 
 export async function generateFeed(bucket, rewrittenItems) {
   try {
