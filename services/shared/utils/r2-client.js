@@ -1,154 +1,138 @@
-// /services/shared/utils/r2-client.js
-// ✅ FINAL UNIVERSAL VERSION (2025-10-31)
-// Covers: feedRotationManager, toneSetter, models, rssBuilder, feedGenerator
+// services/shared/utils/r2-client.js
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 
-import {
-  S3Client,
-  GetObjectCommand,
-  ListObjectsV2Command,
-  PutObjectCommand,
-} from "@aws-sdk/client-s3";
-import pino from "pino";
-import { env } from "process";
+/**
+ * Required env:
+ * - R2_ACCOUNT_ID
+ * - R2_ACCESS_KEY_ID
+ * - R2_SECRET_ACCESS_KEY
+ * Optional:
+ * - R2_ENDPOINT  (e.g. https://<accountid>.r2.cloudflarestorage.com)
+ *
+ * Buckets are passed per-call; do NOT hardcode bucket names here.
+ */
 
-const logger = pino({ level: env.LOG_LEVEL || "info" });
+function assertCreds() {
+  const missing = [];
+  if (!process.env.R2_ACCESS_KEY_ID) missing.push("R2_ACCESS_KEY_ID");
+  if (!process.env.R2_SECRET_ACCESS_KEY) missing.push("R2_SECRET_ACCESS_KEY");
+  if (!process.env.R2_ACCOUNT_ID && !process.env.R2_ENDPOINT) missing.push("R2_ACCOUNT_ID or R2_ENDPOINT");
+  if (missing.length) {
+    throw new Error(
+      `R2 credentials misconfigured. Missing: ${missing.join(", ")}. ` +
+      `Set env vars or provide a valid R2_ENDPOINT.`
+    );
+  }
+}
 
-// -----------------------------------------------------------------------------
-// R2 connection
-// -----------------------------------------------------------------------------
-export const s3 = new S3Client({
-  region: "auto",
-  endpoint:
-    env.R2_ENDPOINT ||
-    "https://<your-cloudflare-account>.r2.cloudflarestorage.com",
-  credentials: {
-    accessKeyId: env.R2_ACCESS_KEY_ID,
-    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-  },
-});
+let _client;
+function client() {
+  if (_client) return _client;
+  assertCreds();
 
-// -----------------------------------------------------------------------------
-// Bucket constants
-// -----------------------------------------------------------------------------
-export const R2_BUCKETS = {
-  PODCAST: env.R2_BUCKET_PODCAST || "podcast",
-  RAW: env.R2_BUCKET_RAW || "podcast-chunks",
-  RAW_TEXT: env.R2_BUCKET_RAW_TEXT || "raw-text",
-  MERGED: env.R2_BUCKET_MERGED || "podcast-merged",
-  META: env.R2_META_BUCKET || "podcast-meta",
-  FEEDS: env.R2_BUCKET_FEEDS || "rss-feeds",
-};
+  const endpoint =
+    process.env.R2_ENDPOINT ||
+    `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
 
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-async function streamToString(stream) {
-  if (!stream) return "";
+  _client = new S3Client({
+    region: "auto",
+    endpoint,
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    },
+  });
+  return _client;
+}
+
+// -------- helpers --------
+async function streamToBuffer(bodyStream) {
   const chunks = [];
-  for await (const chunk of stream) chunks.push(chunk);
-  return Buffer.concat(chunks).toString("utf8");
+  for await (const chunk of bodyStream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
-// -----------------------------------------------------------------------------
-// Core read/write operations
-// -----------------------------------------------------------------------------
+// -------- core ops (all named exports) --------
+
+/** Put plain text */
+export async function putText(bucket, key, text, contentType = "text/plain; charset=utf-8") {
+  if (!bucket || !key) throw new Error("putText requires bucket and key");
+  await client().send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: text,
+    ContentType: contentType,
+  }));
+  return { bucket, key };
+}
+
+/** Put JSON (optionally pretty) */
+export async function putJson(bucket, key, data, pretty = false) {
+  const body = pretty ? JSON.stringify(data, null, 2) : JSON.stringify(data);
+  return putText(bucket, key, body, "application/json; charset=utf-8");
+}
+
+/** Put Buffer/Uint8Array */
+export async function putBuffer(bucket, key, buffer, contentType = "application/octet-stream") {
+  if (!bucket || !key) throw new Error("putBuffer requires bucket and key");
+  await client().send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: buffer,
+    ContentType: contentType,
+  }));
+  return { bucket, key };
+}
+
+/** Get object as Buffer + minimal metadata */
+export async function getObject(bucket, key) {
+  if (!bucket || !key) throw new Error("getObject requires bucket and key");
+  const res = await client().send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const body = await streamToBuffer(res.Body);
+  return {
+    body,
+    contentType: res.ContentType,
+    contentLength: res.ContentLength,
+    eTag: res.ETag,
+    lastModified: res.LastModified,
+    metadata: res.Metadata,
+  };
+}
+
+/** Convenience: get object and decode as UTF-8 text */
 export async function getObjectAsText(bucket, key) {
-  try {
-    const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-    const res = await s3.send(cmd);
-    const body = await streamToString(res.Body);
-    logger.info(
-      { service: "ai-podcast-suite", bucket, key, length: body.length },
-      "r2.getObjectAsText.success"
-    );
-    return body;
-  } catch (err) {
-    logger.error(
-      { service: "ai-podcast-suite", bucket, key, err: err.message },
-      "r2.getObjectAsText.fail"
-    );
-    return null;
-  }
+  const { body } = await getObject(bucket, key);
+  return body.toString("utf8");
 }
 
-export async function uploadBuffer(bucket, key, buffer) {
-  try {
-    const cmd = new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: "application/octet-stream",
-    });
-    await s3.send(cmd);
-    logger.info(
-      { service: "ai-podcast-suite", bucket, key, size: buffer.length },
-      "r2.uploadBuffer.success"
-    );
-    return true;
-  } catch (err) {
-    logger.error(
-      { service: "ai-podcast-suite", bucket, key, err: err.message },
-      "r2.uploadBuffer.fail"
-    );
-    return false;
-  }
+/** HEAD (metadata only) */
+export async function headObject(bucket, key) {
+  if (!bucket || !key) throw new Error("headObject requires bucket and key");
+  return client().send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
 }
 
-// -----------------------------------------------------------------------------
-// String + JSON utilities (and legacy aliases)
-// -----------------------------------------------------------------------------
-export async function uploadString(bucket, key, str) {
-  const buf = Buffer.from(str, "utf8");
-  return uploadBuffer(bucket, key, buf);
+/** Delete */
+export async function deleteObject(bucket, key) {
+  if (!bucket || !key) throw new Error("deleteObject requires bucket and key");
+  await client().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  return { bucket, key, deleted: true };
 }
 
-// ✅ legacy alias for compatibility with old code
-export const putText = uploadString;
-
-export async function uploadJSON(bucket, key, obj) {
-  const buf = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
-  return uploadBuffer(bucket, key, buf);
-}
-
-// ✅ legacy alias for compatibility with old code
-export const putJson = uploadJSON;
-
-// -----------------------------------------------------------------------------
-// List keys (for toneSetter + maintenance tasks)
-// -----------------------------------------------------------------------------
-export async function listKeys(bucket, prefix = "") {
-  try {
-    const cmd = new ListObjectsV2Command({
-      Bucket: bucket,
-      Prefix: prefix,
-    });
-    const res = await s3.send(cmd);
-    const keys = res?.Contents?.map((c) => c.Key) || [];
-    logger.info(
-      { service: "ai-podcast-suite", bucket, prefix, count: keys.length },
-      "r2.listKeys.success"
-    );
-    return keys;
-  } catch (err) {
-    logger.error(
-      { service: "ai-podcast-suite", bucket, prefix, err: err.message },
-      "r2.listKeys.fail"
-    );
-    return [];
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Default export (for ESM compatibility)
-// -----------------------------------------------------------------------------
-export default {
-  s3,
-  R2_BUCKETS,
-  getObjectAsText,
-  uploadBuffer,
-  uploadString,
-  uploadJSON,
-  putText,
-  putJson,
-  listKeys,
-};
+/** List (prefix optional) */
+export async function listObjects(bucket, prefix = "", limit = 1000, continuationToken) {
+  if (!bucket) throw new Error("listObjects requires bucket");
+  const res = await client().send(new ListObjectsV2Command({
+    Bucket: bucket,
+    Prefix: prefix,
+    MaxKeys: limit,
+    ContinuationToken: continuationToken,
+  }));
+  return {
+    keys: (res.Contents || []).map(o => ({ key: o.Key, size: o.Size, lastModified: o.LastModified, eTag: o.ETag })),
+    isTruncated: !!res.IsTruncated,
+    nextToken: res.NextContinuationToken,
+  };
+                       }
