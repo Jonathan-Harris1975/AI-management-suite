@@ -1,19 +1,40 @@
 // /services/shared/utils/r2-client.js
+// ✅ Universal R2 client for AI Podcast Suite (2025-10-31)
+// Compatible with both legacy and new services (rss, toneSetter, feedRotation, etc.)
 
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
 import pino from "pino";
+import { env } from "process";
 
-const logger = pino({ level: process.env.LOG_LEVEL || "info" });
+const logger = pino({ level: env.LOG_LEVEL || "info" });
 
-const client = new S3Client({
+// -----------------------------------------------------------------------------
+// R2 connection bootstrap
+// -----------------------------------------------------------------------------
+export const s3 = new S3Client({
   region: "auto",
-  endpoint: process.env.R2_ENDPOINT,
+  endpoint: env.R2_ENDPOINT || "https://<your-cloudflare-account>.r2.cloudflarestorage.com",
   credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    accessKeyId: env.R2_ACCESS_KEY_ID,
+    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
   },
 });
 
+// -----------------------------------------------------------------------------
+// R2 bucket constants — used across toneSetter, rssFeedCreator, etc.
+// -----------------------------------------------------------------------------
+export const R2_BUCKETS = {
+  PODCAST: env.R2_BUCKET_PODCAST || "podcast",
+  RAW: env.R2_BUCKET_RAW || "podcast-chunks",
+  RAW_TEXT: env.R2_BUCKET_RAW_TEXT || "raw-text",
+  MERGED: env.R2_BUCKET_MERGED || "podcast-merged",
+  META: env.R2_META_BUCKET || "podcast-meta",
+  FEEDS: env.R2_BUCKET_FEEDS || "rss-feeds",
+};
+
+// -----------------------------------------------------------------------------
+// Utilities
+// -----------------------------------------------------------------------------
 async function streamToString(stream) {
   if (!stream) return "";
   const chunks = [];
@@ -21,10 +42,13 @@ async function streamToString(stream) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+// -----------------------------------------------------------------------------
+// Get object as text
+// -----------------------------------------------------------------------------
 export async function getObjectAsText(bucket, key) {
   try {
     const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-    const res = await client.send(cmd);
+    const res = await s3.send(cmd);
     const body = await streamToString(res.Body);
     logger.info({ service: "ai-podcast-suite", bucket, key, length: body.length }, "r2.getObjectAsText.success");
     return body;
@@ -34,6 +58,9 @@ export async function getObjectAsText(bucket, key) {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Upload buffer
+// -----------------------------------------------------------------------------
 export async function uploadBuffer(bucket, key, buffer) {
   try {
     const cmd = new PutObjectCommand({
@@ -42,7 +69,7 @@ export async function uploadBuffer(bucket, key, buffer) {
       Body: buffer,
       ContentType: "application/octet-stream",
     });
-    await client.send(cmd);
+    await s3.send(cmd);
     logger.info({ service: "ai-podcast-suite", bucket, key, size: buffer.length }, "r2.uploadBuffer.success");
     return true;
   } catch (err) {
@@ -51,17 +78,52 @@ export async function uploadBuffer(bucket, key, buffer) {
   }
 }
 
-export async function uploadJSON(bucket, key, obj) {
-  const buf = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
-  return uploadBuffer(bucket, key, buf);
-}
-
-// ✅ Legacy alias — feedRotationManager.js uses this name
-export const putJson = uploadJSON;
-
+// -----------------------------------------------------------------------------
+// Upload string
+// -----------------------------------------------------------------------------
 export async function uploadString(bucket, key, str) {
   const buf = Buffer.from(str, "utf8");
   return uploadBuffer(bucket, key, buf);
 }
 
-export default { getObjectAsText, uploadBuffer, uploadJSON, putJson, uploadString };
+// -----------------------------------------------------------------------------
+// Upload JSON + alias (putJson)
+// -----------------------------------------------------------------------------
+export async function uploadJSON(bucket, key, obj) {
+  const buf = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
+  return uploadBuffer(bucket, key, buf);
+}
+export const putJson = uploadJSON;
+
+// -----------------------------------------------------------------------------
+// List keys in a bucket (legacy compatibility)
+// -----------------------------------------------------------------------------
+export async function listKeys(bucket, prefix = "") {
+  try {
+    const cmd = new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix,
+    });
+    const res = await s3.send(cmd);
+    const keys = res?.Contents?.map((c) => c.Key) || [];
+    logger.info({ service: "ai-podcast-suite", bucket, prefix, count: keys.length }, "r2.listKeys.success");
+    return keys;
+  } catch (err) {
+    logger.error({ service: "ai-podcast-suite", bucket, prefix, err: err.message }, "r2.listKeys.fail");
+    return [];
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Export all
+// -----------------------------------------------------------------------------
+export default {
+  s3,
+  R2_BUCKETS,
+  getObjectAsText,
+  uploadBuffer,
+  uploadString,
+  uploadJSON,
+  putJson,
+  listKeys,
+};
