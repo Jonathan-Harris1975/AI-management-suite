@@ -53,6 +53,6 @@ export async function endToEndRewrite() {
 
     await generateFeed(bucketName, rewritten);
   } catch (err) {
-    error"rss-feed-creator.pipeline.fail", err);
+    error("rss-feed-creator.pipeline.fail", err);
   }
 }
