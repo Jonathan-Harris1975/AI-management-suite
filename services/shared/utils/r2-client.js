@@ -1,8 +1,7 @@
 /**
- * R2 Client Utility (Final Unified Build)
- * =======================================
- * Works seamlessly with Cloudflare R2 (AWS SDK v3)
- * Includes modern helpers + legacy aliases for backward compatibility
+ * AI Podcast Suite – Unified R2 Client
+ * Fully backward compatible + bucket auto-fix
+ * Works with Cloudflare R2 using AWS SDK v3
  */
 
 import {
@@ -14,7 +13,7 @@ import {
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 
-// ---------- ENV CONFIG ----------
+// ---------- ENV ----------
 const {
   R2_ENDPOINT,
   R2_ACCESS_KEY_ID,
@@ -25,6 +24,7 @@ const {
   R2_BUCKET_RAW_TEXT,
   R2_BUCKET_MERGED,
   R2_META_BUCKET,
+  R2_BUCKET_RSS_FEEDS, // optional fallback
   R2_PUBLIC_BASE_URL_PODCAST,
   R2_PUBLIC_BASE_URL_RAW,
   R2_PUBLIC_BASE_URL_RAW_TEXT,
@@ -45,7 +45,7 @@ export const r2Client = new S3Client({
   forcePathStyle: true,
 });
 
-// Legacy alias used in older modules
+// Legacy alias
 export const s3 = r2Client;
 
 // ---------- LOGGING ----------
@@ -61,7 +61,7 @@ function logError(event, err, meta = {}) {
 
 // ---------- CORE OPS ----------
 
-// ---- Upload (Buffer / JSON / Text) ----
+// ---- Upload Buffer ----
 export async function uploadBuffer({ bucket, key, body, contentType }) {
   if (!bucket) throw new Error("uploadBuffer: bucket is required");
   if (!key) throw new Error("uploadBuffer: key is required");
@@ -93,9 +93,15 @@ export async function putText(bucket, key, text) {
   });
 }
 
-// ---- Get Object as Text ----
+// ---- Get Object as Text (auto bucket fix) ----
 export async function getObjectAsText(bucket, key) {
   try {
+    // ✅ Auto-fallback for undefined bucket
+    if (!bucket || bucket === "undefined" || bucket === "") {
+      bucket = R2_BUCKET_RSS_FEEDS || "rss-feeds";
+      logInfo("r2.getObjectAsText.bucket.autofix", { bucket, key });
+    }
+
     const command = new GetObjectCommand({ Bucket: bucket, Key: key });
     const res = await r2Client.send(command);
     const body = await res.Body?.transformToString();
@@ -114,6 +120,9 @@ export async function getObjectAsText(bucket, key) {
 // ---- Get Raw Object ----
 export async function getObject(bucket, key) {
   try {
+    if (!bucket || bucket === "undefined" || bucket === "")
+      bucket = R2_BUCKET_RSS_FEEDS || "rss-feeds";
+
     const command = new GetObjectCommand({ Bucket: bucket, Key: key });
     const res = await r2Client.send(command);
     logInfo("r2.getObject.success", { bucket, key });
@@ -128,7 +137,7 @@ export async function getObject(bucket, key) {
   }
 }
 
-// ---- Existence ----
+// ---- Exists ----
 export async function objectExists(bucket, key) {
   try {
     await r2Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
@@ -158,13 +167,13 @@ export async function listObjects(bucket, prefix = "") {
   return res.Contents || [];
 }
 
-// Legacy alias expected by toneSetter.js
+// Legacy alias used by toneSetter.js
 export async function listKeys(bucket, prefix = "") {
   const objs = await listObjects(bucket, prefix);
   return objs.map((o) => o.Key);
 }
 
-// ---------- MODERN SHORTCUT WRAPPERS ----------
+// ---------- SHORTCUTS ----------
 export async function r2Put(bucket, key, content, contentType) {
   const body = Buffer.isBuffer(content) ? content : Buffer.from(content || "");
   return uploadBuffer({ bucket, key, body, contentType });
@@ -185,9 +194,10 @@ export const R2_BUCKETS = {
   rawText: R2_BUCKET_RAW_TEXT,
   merged: R2_BUCKET_MERGED,
   meta: R2_META_BUCKET,
+  rss: R2_BUCKET_RSS_FEEDS || "rss-feeds",
 };
 
-// ---------- LEGACY BACK-COMPAT EXPORTS ----------
+// ---------- LEGACY COMPAT ----------
 export const r2GetText = getObjectAsText;
 
 export function r2GetPublicBase(bucket) {
@@ -208,6 +218,7 @@ export function getBucketName(alias) {
     rawText: R2_BUCKET_RAW_TEXT,
     merged: R2_BUCKET_MERGED,
     meta: R2_META_BUCKET,
+    rss: R2_BUCKET_RSS_FEEDS || "rss-feeds",
   };
   return map[alias] || alias;
 }
