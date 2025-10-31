@@ -1,6 +1,6 @@
 // services/shared/utils/r2-client.js
 // ============================================================
-// ☁️ Cloudflare R2 Client — Final Unified Version
+// ☁️ Cloudflare R2 Client — Final Unified & Backward-Compatible Version
 // ============================================================
 
 import {
@@ -22,7 +22,7 @@ const {
   R2_ENDPOINT,
   R2_REGION,
 
-  // Buckets (full set from envBootstrap)
+  // Buckets (validated by envBootstrap)
   R2_BUCKET_PODCAST,
   R2_BUCKET_RAW,
   R2_BUCKET_RAW_TEXT,
@@ -41,7 +41,6 @@ const {
   R2_PUBLIC_BASE_URL_MERGE,
   R2_PUBLIC_BASE_URL_ART,
   R2_PUBLIC_BASE_URL_RSS,
-  R2_PUBLIC_BASE_URL_PODCAST_RSS,
   R2_PUBLIC_BASE_URL_TRANSCRIPT,
 } = process.env;
 
@@ -59,7 +58,7 @@ export const s3 = new S3Client({
 });
 
 // ============================================================
-// 🪣 Bucket Registry
+// 🪣 Bucket Registry (Complete, with Aliases)
 // ============================================================
 
 export const R2_BUCKETS = {
@@ -69,10 +68,13 @@ export const R2_BUCKETS = {
   meta: R2_BUCKET_META,
   merged: R2_BUCKET_MERGED,
   art: R2_BUCKET_ART,
-  rss: R2_BUCKET_RSS_FEEDS,
-  podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS,
 
-  // ✅ Fix: allow both singular and plural transcript keys
+  // ✅ RSS aliases
+  rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
+  podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS || R2_BUCKET_RSS_FEEDS || "rss-feeds",
+  "rss-feeds": R2_BUCKET_RSS_FEEDS || "rss-feeds",
+
+  // ✅ Transcript aliases
   transcripts: R2_BUCKET_TRANSCRIPTS,
   transcript: R2_BUCKET_TRANSCRIPTS,
 };
@@ -89,7 +91,6 @@ export const R2_PUBLIC_URLS = {
   merged: R2_PUBLIC_BASE_URL_MERGE,
   art: R2_PUBLIC_BASE_URL_ART,
   rss: R2_PUBLIC_BASE_URL_RSS,
-  podcastRss: R2_PUBLIC_BASE_URL_PODCAST_RSS,
   transcript: R2_PUBLIC_BASE_URL_TRANSCRIPT,
 };
 
@@ -146,14 +147,14 @@ export const putText = uploadText;
 export const putObject = uploadBuffer;
 export const getObject = getObjectAsText;
 
-// Stream read helper
+// Stream helper (for TTS merge, etc.)
 export async function getR2ReadStream(bucketKey, key) {
   const bucket = ensureBucketKey(bucketKey);
   const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   return response.Body;
 }
 
-// List keys
+// List keys in bucket
 export async function listKeys(bucketKey, prefix = "") {
   const bucket = ensureBucketKey(bucketKey);
   const { Contents } = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix }));
@@ -167,7 +168,7 @@ export async function deleteObject(bucketKey, key) {
   log.info({ bucket, key }, "🗑️ R2 object deleted");
 }
 
-// Public URL builder
+// Build public URL
 export function buildPublicUrl(bucketKey, key) {
   return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
 }
