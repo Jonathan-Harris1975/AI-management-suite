@@ -4,7 +4,7 @@
  */
 
 import { generateFeed } from "./utils/feedGenerator.js";
-import { logInfo, logError } from "#logger.js";
+import { info, error } from "#logger.js";
 import { rewriteRssFeedItem } from "./utils/models.js";
 
 export async function endToEndRewrite() {
