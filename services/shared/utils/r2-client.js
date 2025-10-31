@@ -1,191 +1,173 @@
-// ============================================================
-// 🧠 AI Podcast Suite — Unified Cloudflare R2 Client
-// ============================================================
-//
-// - Centralized S3Client config for Cloudflare R2
-// - Upload / download / list helpers
-// - Stream helper for ffmpeg
-// ============================================================
+/**
+ * R2 Client Utility
+ * =================
+ * Centralized Cloudflare R2 helper built on AWS SDK v3.
+ * Supports both modern and legacy signatures.
+ * Ensures consistent logging, error handling, and bucket resolution.
+ */
 
 import {
   S3Client,
-  GetObjectCommand,
   PutObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  DeleteObjectCommand,
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
-import { info, error } from "#logger.js";
+import { fromEnv } from "@aws-sdk/credential-providers";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { readFile } from "fs/promises";
 
-// ------------------------------------------------------------
-// R2 Connection Setup
-// ------------------------------------------------------------
-const R2_ENDPOINT = process.env.R2_ENDPOINT;
-const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
-const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-const R2_REGION = process.env.R2_REGION || "auto";
+// ---------- Configuration ----------
+const {
+  R2_ENDPOINT,
+  R2_ACCESS_KEY_ID,
+  R2_SECRET_ACCESS_KEY,
+  R2_REGION,
+  R2_BUCKET_PODCAST,
+  R2_BUCKET_RAW,
+  R2_BUCKET_RAW_TEXT,
+  R2_BUCKET_MERGED,
+  R2_META_BUCKET,
+} = process.env;
 
-if (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
-  error("r2.missing.config", {
-    R2_ENDPOINT: !!R2_ENDPOINT,
-    R2_ACCESS_KEY_ID: !!R2_ACCESS_KEY_ID,
-    R2_SECRET_ACCESS_KEY: !!R2_SECRET_ACCESS_KEY,
-  });
-}
+const DEFAULT_REGION = R2_REGION || "auto";
 
-export const s3 = new S3Client({
-  region: R2_REGION,
+// ---------- Client ----------
+export const r2Client = new S3Client({
+  region: DEFAULT_REGION,
   endpoint: R2_ENDPOINT,
   credentials: {
     accessKeyId: R2_ACCESS_KEY_ID,
     secretAccessKey: R2_SECRET_ACCESS_KEY,
   },
+  forcePathStyle: true,
 });
 
-// Back-compat alias
-export const r2Client = s3;
-
-// ------------------------------------------------------------
-// Buckets map
-// ------------------------------------------------------------
-export function r2GetPublicBase() {
-  return process.env.R2_PUBLIC_BASE_URL || "http://localhost:9000/r2-public";
+// ---------- Helpers ----------
+function logInfo(event, meta = {}) {
+  console.log(JSON.stringify({ level: "INFO", event, ...meta }));
 }
 
-export function getBucketName() {
-  return process.env.R2_BUCKET_RSS_FEEDS || process.env.R2_BUCKET_PODCAST || "rss-feeds";
+function logError(event, err, meta = {}) {
+  console.error(JSON.stringify({ level: "ERROR", event, error: err?.message || err, ...meta }));
 }
 
-export const R2_BUCKETS = {
-  RAW: process.env.R2_BUCKET_RAW,
-  RAW_TEXT: process.env.R2_BUCKET_RAW_TEXT,
-  MERGED: process.env.R2_BUCKET_MERGED,
-  PODCAST: process.env.R2_BUCKET_PODCAST,
-  META: process.env.R2_BUCKET_META,
-  RSS_FEEDS: process.env.R2_BUCKET_RSS_FEEDS,
-  ART: process.env.R2_BUCKET_ART,
-  CHUNKS: process.env.R2_BUCKET_CHUNKS,
-  TRANSCRIPTS: process.env.R2_BUCKET_TRANSCRIPTS,
-};
+// ---------- Core Ops ----------
 
-// ------------------------------------------------------------
-// Core Upload Helpers
-// ------------------------------------------------------------
+// ---- Upload (Buffer / JSON / Text) ----
 export async function uploadBuffer({ bucket, key, body, contentType }) {
+  if (!bucket) throw new Error("uploadBuffer: bucket is required");
+  if (!key) throw new Error("uploadBuffer: key is required");
+
+  const command = new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: body,
+    ContentType: contentType || "application/octet-stream",
+  });
+
+  await r2Client.send(command);
+  logInfo("r2.uploadBuffer.success", { bucket, key, size: body?.length || 0 });
+  return true;
+}
+
+export async function putJson(bucket, key, json) {
+  const body = Buffer.from(JSON.stringify(json, null, 2));
+  return uploadBuffer({ bucket, key, body, contentType: "application/json" });
+}
+
+export async function putText(bucket, key, text) {
+  const body = Buffer.from(text);
+  return uploadBuffer({ bucket, key, body, contentType: "text/plain; charset=utf-8" });
+}
+
+// ---- Get Object as Text ----
+export async function getObjectAsText(bucket, key) {
   try {
-    const cmd = new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: body,
-      ...(contentType ? { ContentType: contentType } : {}),
-    });
-    await s3.send(cmd);
-    info("r2.uploadBuffer.success", { bucket, key, size: body?.length });
+    const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+    const res = await r2Client.send(command);
+    const body = await res.Body?.transformToString();
+    logInfo("r2.getObjectAsText.success", { bucket, key, length: body?.length || 0 });
+    return body;
   } catch (err) {
-    error("r2.uploadBuffer.fail", { bucket, key, error: err.message });
+    if (err.name === "NoSuchKey") {
+      logInfo("r2.getObjectAsText.notFound", { bucket, key });
+      return null;
+    }
+    logError("r2.getObjectAsText.fail", err, { bucket, key });
     throw err;
   }
 }
 
-// Back-compat simple helper (string/Buffer)
-export async function uploadFileToR2(bucket, key, content, contentType) {
-  const body =
-    typeof content === "string" ? Buffer.from(content) : Buffer.from(content);
-  return uploadBuffer({
-    bucket,
-    key,
-    body,
-    contentType: contentType || "application/octet-stream",
-  });
+// ---- Existence ----
+export async function objectExists(bucket, key) {
+  try {
+    await r2Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return true;
+  } catch (err) {
+    if (err.name === "NotFound") return false;
+    throw err;
+  }
 }
 
-export async function putJson(bucket, key, data) {
-  const body = Buffer.from(JSON.stringify(data));
-  return uploadBuffer({
-    bucket,
-    key,
-    body,
-    contentType: "application/json; charset=utf-8",
-  });
+// ---- Delete ----
+export async function deleteObject(bucket, key) {
+  try {
+    await r2Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    logInfo("r2.deleteObject.success", { bucket, key });
+    return true;
+  } catch (err) {
+    logError("r2.deleteObject.fail", err, { bucket, key });
+    throw err;
+  }
 }
 
-export async function putText(bucket, key, text, contentType = "text/plain") {
-  const body = Buffer.from(typeof text === "string" ? text : String(text));
+// ---- List ----
+export async function listObjects(bucket, prefix = "") {
+  const cmd = new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix });
+  const res = await r2Client.send(cmd);
+  return res.Contents || [];
+}
+
+// ---- Signed URL ----
+export async function getSignedR2Url(bucket, key, expiresIn = 3600) {
+  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+  return getSignedUrl(r2Client, command, { expiresIn });
+}
+
+// ---------- LEGACY BACK-COMPAT WRAPPERS ----------
+/**
+ * Older code may call:
+ *   r2Put(bucket, key, content, contentType)
+ *   r2Get(bucket, key)
+ *   r2Json(bucket, key, obj)
+ * These wrappers forward to the modern functions.
+ */
+export async function r2Put(bucket, key, content, contentType) {
+  const body = Buffer.isBuffer(content) ? content : Buffer.from(content || "");
   return uploadBuffer({ bucket, key, body, contentType });
 }
 
-// ------------------------------------------------------------
-// Core Download Helpers
-// ------------------------------------------------------------
-export async function getObject(bucket, key) {
-  try {
-    const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-    const out = await s3.send(cmd);
-    const buf = Buffer.from(await out.Body?.transformToByteArray?.());
-    info("r2.getObject.success", { bucket, key, size: buf.length });
-    return buf;
-  } catch (err) {
-    error("r2.getObject.fail", { bucket, key, error: err.message });
-    throw err;
-  }
+export async function r2Get(bucket, key) {
+  return getObjectAsText(bucket, key);
 }
 
-export async function getObjectAsText(bucket, key) {
-  try {
-    const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-    const out = await s3.send(cmd);
-    const text = await out.Body?.transformToString?.();
-    info("r2.getObjectAsText.success", { bucket, key, length: text?.length });
-    return text;
-  } catch (err) {
-    // A NoSuchKey error is the standard way S3 reports a missing file (404).
-    // In this application, a missing file is often an expected condition (e.g., in rss-bootstrap.js).
-    // We catch it here and return null, allowing the caller to handle the missing file gracefully.
-    if (err.Code === "NoSuchKey" || err.name === "NoSuchKey") {
-      info("r2.getObjectAsText.notFound", { bucket, key });
-      return null;
-    }
-
-    error("r2.getObjectAsText.fail", { bucket, key, error: err.message });
-    throw err;
-  }
+export async function r2Json(bucket, key, obj) {
+  return putJson(bucket, key, obj);
 }
 
-// ------------------------------------------------------------
-// 🔥 Stream helper — for ffmpeg etc.
-// ------------------------------------------------------------
-export async function getR2ReadStream(bucket, key) {
-  try {
-    const command = new GetObjectCommand({ Bucket: bucket, Key: key });
-    const response = await s3.send(command);
-    if (!response.Body) {
-      throw new Error(`No body returned for ${key} in bucket ${bucket}`);
-    }
-    info("r2.getR2ReadStream.success", { bucket, key });
-    return response.Body; // readable stream
-  } catch (err) {
-    error("r2.getR2ReadStream.fail", { bucket, key, error: err.message });
-    throw err;
-  }
-}
+// ---------- Export Common Bucket Map ----------
+export const R2_BUCKETS = {
+  podcast: R2_BUCKET_PODCAST,
+  raw: R2_BUCKET_RAW,
+  rawText: R2_BUCKET_RAW_TEXT,
+  merged: R2_BUCKET_MERGED,
+  meta: R2_META_BUCKET,
+};
 
-// ------------------------------------------------------------
-// List Keys Utility
-// ------------------------------------------------------------
-export async function listKeys({ bucket, prefix }) {
-  try {
-    const out = await s3.send(
-      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix })
-    );
-    const keys = (out.Contents || []).map((o) => o.Key).filter(Boolean);
-    info("r2.listKeys.success", { bucket, prefix, count: keys.length });
-    return keys;
-  } catch (err) {
-    error("r2.listKeys.fail", { bucket, prefix, error: err.message });
-    throw err;
-  }
-}
-
-// ------------------------------------------------------------
-// Back-compat aliases for legacy code
-// ------------------------------------------------------------
-export const r2GetText = getObjectAsText;
-export const r2Put = uploadBuffer;
+logInfo("r2-client.initialized", {
+  endpoint: R2_ENDPOINT,
+  region: DEFAULT_REGION,
+  buckets: Object.keys(R2_BUCKETS).filter((k) => R2_BUCKETS[k]),
+});
