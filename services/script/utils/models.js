@@ -137,7 +137,7 @@ export async function finalizeAndUpload(sessionId) {
 
     // Upload individual chunks
     const chunkPromises = chunks.map((chunk, index) =>
-      putText("raw-text", `${normalizedSessionId}/chunk_${index + 1}.txt`, chunk)
+      putText("rawText", `${normalizedSessionId}/chunk_${index + 1}.txt`, chunk)
     );
     await Promise.all(chunkPromises);
 
