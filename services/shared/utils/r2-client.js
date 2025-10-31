@@ -1,9 +1,8 @@
 /**
- * R2 Client Utility (Clean Production Build)
+ * R2 Client Utility (Final Production Build)
  * ==========================================
- * Compatible with Cloudflare R2 and AWS SDK v3.
- * No external credential-provider or presigner modules required.
- * Includes back-compat wrappers for r2Put(), r2Get(), r2Json().
+ * Works with Cloudflare R2 using AWS SDK v3.
+ * Includes modern helpers and legacy back-compat exports.
  */
 
 import {
@@ -27,6 +26,11 @@ const {
   R2_BUCKET_RAW_TEXT,
   R2_BUCKET_MERGED,
   R2_META_BUCKET,
+  R2_PUBLIC_BASE_URL_PODCAST,
+  R2_PUBLIC_BASE_URL_RAW,
+  R2_PUBLIC_BASE_URL_RAW_TEXT,
+  R2_PUBLIC_BASE_URL_MERGE,
+  R2_PUBLIC_BASE_URL_META,
 } = process.env;
 
 const DEFAULT_REGION = R2_REGION || "auto";
@@ -48,7 +52,9 @@ function logInfo(event, meta = {}) {
 }
 
 function logError(event, err, meta = {}) {
-  console.error(JSON.stringify({ level: "ERROR", event, error: err?.message || err, ...meta }));
+  console.error(
+    JSON.stringify({ level: "ERROR", event, error: err?.message || err, ...meta })
+  );
 }
 
 // ---------- Core Ops ----------
@@ -77,7 +83,12 @@ export async function putJson(bucket, key, json) {
 
 export async function putText(bucket, key, text) {
   const body = Buffer.from(text);
-  return uploadBuffer({ bucket, key, body, contentType: "text/plain; charset=utf-8" });
+  return uploadBuffer({
+    bucket,
+    key,
+    body,
+    contentType: "text/plain; charset=utf-8",
+  });
 }
 
 // ---- Get Object as Text ----
@@ -128,7 +139,7 @@ export async function listObjects(bucket, prefix = "") {
   return res.Contents || [];
 }
 
-// ---------- LEGACY BACK-COMPAT WRAPPERS ----------
+// ---------- MODERN SHORTCUT WRAPPERS ----------
 export async function r2Put(bucket, key, content, contentType) {
   const body = Buffer.isBuffer(content) ? content : Buffer.from(content || "");
   return uploadBuffer({ bucket, key, body, contentType });
@@ -142,7 +153,7 @@ export async function r2Json(bucket, key, obj) {
   return putJson(bucket, key, obj);
 }
 
-// ---------- Common Bucket Map ----------
+// ---------- COMMON BUCKET MAP ----------
 export const R2_BUCKETS = {
   podcast: R2_BUCKET_PODCAST,
   raw: R2_BUCKET_RAW,
@@ -151,6 +162,35 @@ export const R2_BUCKETS = {
   meta: R2_META_BUCKET,
 };
 
+// ---------- LEGACY BACK-COMPAT EXPORTS ----------
+/**
+ * Restores older API names expected by modules like feedGenerator.js
+ */
+export const r2GetText = getObjectAsText;
+
+export function r2GetPublicBase(bucket) {
+  const map = {
+    podcast: R2_PUBLIC_BASE_URL_PODCAST,
+    raw: R2_PUBLIC_BASE_URL_RAW,
+    rawText: R2_PUBLIC_BASE_URL_RAW_TEXT,
+    merged: R2_PUBLIC_BASE_URL_MERGE,
+    meta: R2_PUBLIC_BASE_URL_META,
+  };
+  return map[bucket] || R2_PUBLIC_BASE_URL_PODCAST;
+}
+
+export function getBucketName(alias) {
+  const map = {
+    podcast: R2_BUCKET_PODCAST,
+    raw: R2_BUCKET_RAW,
+    rawText: R2_BUCKET_RAW_TEXT,
+    merged: R2_BUCKET_MERGED,
+    meta: R2_META_BUCKET,
+  };
+  return map[alias] || alias;
+}
+
+// ---------- INIT LOG ----------
 logInfo("r2-client.initialized", {
   endpoint: R2_ENDPOINT,
   region: DEFAULT_REGION,
