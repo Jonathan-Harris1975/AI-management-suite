@@ -1,9 +1,9 @@
 /**
- * R2 Client Utility
- * =================
- * Centralized Cloudflare R2 helper built on AWS SDK v3.
- * Supports both modern and legacy signatures.
- * Ensures consistent logging, error handling, and bucket resolution.
+ * R2 Client Utility (Clean Production Build)
+ * ==========================================
+ * Compatible with Cloudflare R2 and AWS SDK v3.
+ * No external credential-provider or presigner modules required.
+ * Includes back-compat wrappers for r2Put(), r2Get(), r2Json().
  */
 
 import {
@@ -14,8 +14,6 @@ import {
   DeleteObjectCommand,
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
-
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { readFile } from "fs/promises";
 
 // ---------- Configuration ----------
@@ -44,7 +42,7 @@ export const r2Client = new S3Client({
   forcePathStyle: true,
 });
 
-// ---------- Helpers ----------
+// ---------- Logging ----------
 function logInfo(event, meta = {}) {
   console.log(JSON.stringify({ level: "INFO", event, ...meta }));
 }
@@ -130,20 +128,7 @@ export async function listObjects(bucket, prefix = "") {
   return res.Contents || [];
 }
 
-// ---- Signed URL ----
-export async function getSignedR2Url(bucket, key, expiresIn = 3600) {
-  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
-  return getSignedUrl(r2Client, command, { expiresIn });
-}
-
 // ---------- LEGACY BACK-COMPAT WRAPPERS ----------
-/**
- * Older code may call:
- *   r2Put(bucket, key, content, contentType)
- *   r2Get(bucket, key)
- *   r2Json(bucket, key, obj)
- * These wrappers forward to the modern functions.
- */
 export async function r2Put(bucket, key, content, contentType) {
   const body = Buffer.isBuffer(content) ? content : Buffer.from(content || "");
   return uploadBuffer({ bucket, key, body, contentType });
@@ -157,7 +142,7 @@ export async function r2Json(bucket, key, obj) {
   return putJson(bucket, key, obj);
 }
 
-// ---------- Export Common Bucket Map ----------
+// ---------- Common Bucket Map ----------
 export const R2_BUCKETS = {
   podcast: R2_BUCKET_PODCAST,
   raw: R2_BUCKET_RAW,
