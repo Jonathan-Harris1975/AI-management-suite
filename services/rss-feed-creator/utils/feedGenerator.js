@@ -18,7 +18,7 @@ function esc(s) {
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
-export async function generateAndUploadFeed() {
+export async function generateFeed() {
   const bucket = getBucketName();
   const publicBase = r2GetPublicBase();
 
