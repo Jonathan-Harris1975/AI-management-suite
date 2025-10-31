@@ -11,6 +11,8 @@ import { cleanTranscript } from "./textHelpers.js";
 import chunkText from "./chunkText.js";
 import { generateEpisodeMeta } from "./podcastHelpers.js";
 import { getAllParts } from "./sessionCache.js";
+import { getWeatherSummary } from "./getWeatherSummary.js";
+import { getTuringQuote } from "./getTuringQuote.js";
 
 // ─────────────────────────────────────────────────────────────
 // 🛠️ Helper: Normalize sessionId to string
@@ -23,23 +25,35 @@ function normalizeSessionId(sessionId) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 🧩 Intro Section
+// 🧩 Intro Section (updated to use real utilities)
 // ─────────────────────────────────────────────────────────────
 export async function generateIntro(sessionId) {
   try {
-    const weatherSummary = "Overcast and drizzly — perfect AI podcast weather.";
-    const turingQuote =
-      "We can only see a short distance ahead, but we can see plenty there that needs to be done.";
+    // Fetch dynamic data for intro
+    const weatherSummary = await getWeatherSummary();
+    const turingQuote = await getTuringQuote();
+
+    // Build dynamic intro prompt
     const prompt = getIntroPrompt({ weatherSummary, turingQuote });
 
-    if (!prompt || typeof prompt !== "string") {
+    if (!prompt || typeof prompt !== "string" || prompt.trim().length < 10) {
       throw new Error("Invalid intro prompt generated");
     }
+
+    // Enforce plain-text output
+    const systemPrompt = `
+${prompt}
+
+IMPORTANT INSTRUCTIONS:
+- Produce a clean, plain text intro script only.
+- No stage directions, sound cues, or show notes.
+- Keep transitions smooth from weather → quote → main theme.
+- Maintain the existing persona tone.`;
 
     return await resilientRequest("scriptIntro", {
       sessionId,
       section: "intro",
-      messages: [{ role: "system", content: prompt }],
+      messages: [{ role: "system", content: systemPrompt }],
     });
   } catch (error) {
     console.error(`[generateIntro] Failed for session ${sessionId}:`, error);
@@ -69,10 +83,18 @@ export async function generateMain(sessionId) {
       throw new Error("Invalid main prompt generated");
     }
 
+    // Explicitly require plain text narrative
+    const systemPrompt = `
+${prompt}
+
+CRITICAL OUTPUT RULES:
+- Plain text only (no scene directions, music, or structural notes).
+- Natural human voice, continuous flow.`;
+
     return await resilientRequest("scriptMain", {
       sessionId,
       section: "main",
-      messages: [{ role: "system", content: prompt }],
+      messages: [{ role: "system", content: systemPrompt }],
     });
   } catch (error) {
     console.error(`[generateMain] Failed for session ${sessionId}:`, error);
@@ -91,10 +113,17 @@ export async function generateOutro(sessionId) {
       throw new Error("Invalid outro prompt — empty or malformed content");
     }
 
+    const systemPrompt = `
+${prompt}
+
+STRICT OUTPUT RULES:
+- Plain text only (no music, no production notes).
+- Maintain continuity and tone consistency from previous sections.`;
+
     return await resilientRequest("scriptOutro", {
       sessionId,
       section: "outro",
-      messages: [{ role: "system", content: prompt }],
+      messages: [{ role: "system", content: systemPrompt }],
     });
   } catch (error) {
     console.error(`[generateOutro] Failed for session ${sessionId}:`, error);
@@ -109,14 +138,12 @@ export async function finalizeAndUpload(sessionId) {
   try {
     const { intro, main, outro } = await getAllParts(sessionId);
 
-    // Validate all parts are present
     if (!intro || !main || !outro) {
       throw new Error(
         `Missing episode parts: intro=${!!intro}, main=${!!main}, outro=${!!outro}`
       );
     }
 
-    // Normalize sessionId without mutating parameter
     const normalizedSessionId = normalizeSessionId(sessionId);
 
     // Combine and clean transcript
@@ -135,13 +162,13 @@ export async function finalizeAndUpload(sessionId) {
     // Upload full transcript
     await putText("transcript", `${normalizedSessionId}.txt`, fullTranscript);
 
-    // Upload individual chunks
+    // Upload each text chunk
     const chunkPromises = chunks.map((chunk, index) =>
       putText("rawText", `${normalizedSessionId}/chunk_${index + 1}.txt`, chunk)
     );
     await Promise.all(chunkPromises);
 
-    // Generate and upload metadata
+    // Generate metadata
     const metadata = await generateEpisodeMeta({ intro, main, outro });
 
     if (!metadata || typeof metadata !== "object") {
