@@ -21,7 +21,7 @@ Your persona has the following traits:
 
 **TRANSITION ENFORCEMENT:** If you violate these rules, your response will be rejected and you'll have to start over.`;
 
-// --- AGGRESSIVE TRANSITION ENFORCER (hardened) ---
+// --- AGGRESSIVE TRANSITION ENFORCER ---
 function enforceTransitions(input) {
   let modifiedText = "";
 
@@ -42,7 +42,6 @@ function enforceTransitions(input) {
   ];
 
   let violations = 0;
-
   for (const pattern of forbiddenPatterns) {
     if (typeof modifiedText.match === "function") {
       const matches = modifiedText.match(pattern);
@@ -69,7 +68,7 @@ function enforceTransitions(input) {
   return modifiedText;
 }
 
-// --- ENHANCED HUMANIZER WITH TRANSITION FOCUS (hardened) ---
+// --- ENHANCED HUMANIZER ---
 function humanize(input) {
   let text = "";
   if (Array.isArray(input)) text = input.join(" ");
@@ -103,8 +102,15 @@ function humanize(input) {
   return result;
 }
 
-// --- UPDATED INTRO PROMPT (natural flow, no temperature) ---
+// --- INTRO PROMPT ---
 export function getIntroPrompt({ weatherSummary, turingQuote }) {
+  const introVariants = [
+    "Welcome to another episode of Turing's Torch: AI Weekly.",
+    "You're listening to Turing's Torch: AI Weekly.",
+    "This is Turing's Torch: AI Weekly — your spark in the world of AI.",
+  ];
+  const selectedIntro = introVariants[Math.floor(Math.random() * introVariants.length)];
+
   return `${persona}
 
 Write the podcast intro script in a natural, conversational tone.
@@ -117,7 +123,7 @@ Then flow seamlessly into this Alan Turing quote, delivered sincerely but conver
 
 Use that quote as a thematic bridge into the show's introduction:
 
-"Tired of drowning in AI headlines? Ready for clarity, insight, and a direct line to the pulse of innovation? Welcome to Turing's Torch: AI Weekly! I'm Jonathan Harris, your host, and I'm cutting through the noise to bring you the most critical AI developments, explained, analysed, and delivered straight to you. Let's ignite your understanding of AI, together."
+"Tired of drowning in AI headlines? Ready for clarity, insight, and a direct line to the pulse of innovation? ${selectedIntro} I'm Jonathan Harris, your host, cutting through the noise to bring you the most critical AI developments, explained, analysed, and delivered straight to you. Let's ignite your understanding of AI, together."
 
 **STYLE REQUIREMENTS:**
 - Keep it compact, human, and fluent
@@ -127,7 +133,7 @@ Use that quote as a thematic bridge into the show's introduction:
 - Smooth flow: weather → quote → theme intro`;
 }
 
-// --- ULTRA-STRICT MAIN PROMPT ---
+// --- MAIN PROMPT ---
 export function getMainPrompt({ articles = [], targetDuration = 60 }) {
   const normalizedArticles = Array.isArray(articles)
     ? articles.filter((a) => typeof a === "string" && a.trim().length > 0)
@@ -158,37 +164,28 @@ export function getMainPrompt({ articles = [], targetDuration = 60 }) {
 
 **YOUR PRIMARY MISSION:** Create a SINGLE, SEAMLESS monologue where ${articleCount} news stories flow together naturally. The listener should NOT be able to tell where one article ends and the next begins.
 
-**ZERO TOLERANCE RULES - VIOLATION MEANS FAILURE:**
-❌ NEVER use: "Right, another week...", "Well, another week...", "Right, well...", "So, there you have it..."
+**ZERO TOLERANCE RULES:**
+❌ NEVER use "Right, another week..." or similar
 ❌ NEVER start a new topic abruptly
-❌ NEVER use numerical indicators like "first", "second", "next"
+❌ NEVER use "first", "second", "next" to enumerate
 
-**REQUIRED TRANSITION TECHNIQUES:**
-✅ Use thematic bridges: Connect stories through common themes like ${articleThemes.join(", ")}
-✅ Use cause-and-effect: "This development naturally leads us to consider..."
-✅ Use contrasting perspectives: "While that story focused on X, this one shows Y..."
-✅ Use question flows: "But what does this mean for Z? That question brings us to..."
+**TRANSITION TECHNIQUES:**
+✅ Thematic bridges — connect stories through shared ideas: ${articleThemes.join(", ")}
+✅ Cause and effect: "This development naturally leads us to consider..."
+✅ Contrast: "While that story focused on X, this one shows Y..."
+✅ Question flow: "But what does this mean for Z? That brings us to..."
 
-**EXAMPLE OF PERFECT FLOW:**
-"The massive computing infrastructure being built by tech giants raises important questions about practical applications, which brings us to a fascinating development in the legal sector where AI is being deployed in surprisingly effective ways..."
-
-**ARTICLES TO COVER:**
+**ARTICLES:**
 ${normalizedArticles
-    .map((text, index) => `--- ARTICLE ${index + 1} ---\n${text.substring(0, 500)}...`)
+    .map((text, i) => `--- ARTICLE ${i + 1} ---\n${text.substring(0, 500)}...`)
     .join("\n\n")}
 
-**YOUR TASK:**
-1. Write ONE continuous monologue (no breaks, no sections)
-2. Find natural connections between the articles
-3. Maintain your witty, analytical tone throughout
-4. Keep it conversational and flowing
-
-**REMEMBER:** If you use repetitive transitions, your response will be rejected. Focus on creating a narrative that connects all stories organically.`;
+Now write one continuous, witty, analytical monologue in plain text with smooth flow.`;
 
   return humanize(mainPrompt);
 }
 
-// --- THEMATIC ANALYSIS HELPER ---
+// --- THEME DETECTOR ---
 function analyzeArticleThemes(articles) {
   const themes = new Set();
   const themeKeywords = {
@@ -199,20 +196,16 @@ function analyzeArticleThemes(articles) {
     education: ["education", "training", "curriculum", "school", "learn"],
   };
 
-  articles.forEach((article) => {
-    const articleText =
-      typeof article === "string" ? article.toLowerCase() : JSON.stringify(article).toLowerCase();
-    for (const [theme, keywords] of Object.entries(themeKeywords)) {
-      if (keywords.some((keyword) => articleText.includes(keyword))) {
-        themes.add(theme);
-      }
+  articles.forEach((a) => {
+    const text = (typeof a === "string" ? a : JSON.stringify(a)).toLowerCase();
+    for (const [theme, words] of Object.entries(themeKeywords)) {
+      if (words.some((w) => text.includes(w))) themes.add(theme);
     }
   });
-
   return Array.from(themes);
 }
 
-// --- OUTRO PROMPT (hardened + validated) ---
+// --- OUTRO PROMPT (with dynamic tagline) ---
 export async function getOutroPromptFull() {
   let myBook, title, url, cta;
 
@@ -232,46 +225,38 @@ export async function getOutroPromptFull() {
   const safeTitle = String(title ?? "AI Weekly");
   const safeUrl = String(url ?? "jonathan-harris.online");
 
+  const outroVariants = [
+    "That's it for this week's Turing's Torch. Keep the flame burning, stay curious, and I'll see you next week with more AI insights that matter. I'm Jonathan Harris—keep building the future.",
+    "And that wraps up this week's Turing's Torch. Stay curious, keep the flame alive, and join me next week for more AI stories that truly matter. I'm Jonathan Harris—keep building the future.",
+    "That’s all from this week’s Turing’s Torch. Keep that curiosity blazing, and I’ll see you next week for more insights that matter. I’m Jonathan Harris—keep building the future.",
+  ];
+  const selectedOutro = outroVariants[Math.floor(Math.random() * outroVariants.length)];
+
   const outroPrompt = `${persona}
 
 Write the closing script that flows naturally from the final story.
 
-**TRANSITION RULE:** Do NOT start with "Well, another week..." or similar. Create a smooth bridge from the last topic.
-
 **STRUCTURE:**
-1. Start with a reflection that connects to the final story's theme
-2. Transition personally to your book using this CTA: "${safeCta}"
-3. Mention the book title: "${safeTitle}" and website: "${safeUrl}"
-4. Deliver the branded sign-off
+1. Reflect briefly on the final story's theme
+2. Transition naturally into your personal CTA: "${safeCta}"
+3. Mention your book title: "${safeTitle}" and website: "${safeUrl}"
+4. End with this sign-off (allow natural paraphrasing, but maintain meaning):
+"${selectedOutro}"
 
-**BOOK PROMOTION GUIDELINES:**
-- Keep it authentic and personal - it's YOUR book
-- Integrate the CTA naturally: "${safeCta}"
-- Pronounce URLs naturally: "${safeUrl.replace(/\./g, " dot ")}"
-- Make it feel like a genuine recommendation, not an advertisement
+**GUIDELINES:**
+- Authentic, conversational tone
+- Integrate book mention naturally, not like an ad
+- Speak URL naturally (dots as "dot")
+- Plain text only
+- Smooth continuity from previous content`;
 
-**EXAMPLE STRUCTURE:**
-"These legal technology developments show how AI is transforming traditional sectors... [CTA: ${safeCta}] I explore this transformation in depth in my book '${safeTitle}' available at ${safeUrl.replace(
-    /\./g,
-    " dot "
-  )}. And that's a wrap on another week in AI land..."
-
-**CRITICAL:**
-- MUST include the CTA: "${safeCta}"
-- MUST mention the book title and URL
-- No stage directions, only spoken words
-- Maintain continuous flow from the main content
-
-Create a single, unbroken closing monologue that includes all these elements naturally.`;
-
-  if (!outroPrompt || outroPrompt.trim().length < 10) {
+  if (!outroPrompt || outroPrompt.trim().length < 10)
     throw new Error("Invalid outro prompt — empty or malformed content");
-  }
 
   return outroPrompt;
 }
 
-// --- VALIDATION HELPERS ---
+// --- VALIDATORS ---
 export function validateScript(script) {
   const violations = [];
   const forbiddenPatterns = [
@@ -297,38 +282,24 @@ export function validateScript(script) {
 
   const sentences = safeScript.split(/[.!?]+/).filter((s) => s.trim().length > 0);
   const starters = sentences.map((s) => s.trim().split(" ")[0].toLowerCase());
-  const starterFrequency = starters.reduce((acc, starter) => {
-    acc[starter] = (acc[starter] || 0) + 1;
-    return acc;
-  }, {});
-
-  Object.entries(starterFrequency).forEach(([starter, count]) => {
-    if (count > 3 && count > sentences.length * 0.2) {
-      violations.push({
-        pattern: "Repetitive starter",
-        matches: [`"${starter}" used ${count} times`],
-        message: `Overused sentence starter`,
-      });
-    }
+  const freq = starters.reduce((acc, s) => ((acc[s] = (acc[s] || 0) + 1), acc), {});
+  Object.entries(freq).forEach(([w, c]) => {
+    if (c > 3 && c > sentences.length * 0.2)
+      violations.push({ pattern: "Repetitive starter", matches: [`"${w}" used ${c} times`] });
   });
 
-  return {
-    isValid: violations.length === 0,
-    violations,
-    score: Math.max(0, 10 - violations.length * 2),
-  };
+  return { isValid: violations.length === 0, violations, score: Math.max(0, 10 - violations.length * 2) };
 }
 
 export function validateOutro(script, expectedCta, expectedTitle, expectedUrl) {
   const issues = [];
   const safeScript = String(script ?? "");
+  const cleanUrl = expectedUrl?.replace(/^https?:\/\//, "");
 
   if (expectedCta && !safeScript.includes(expectedCta))
     issues.push(`Missing CTA: "${expectedCta}"`);
   if (expectedTitle && !safeScript.includes(expectedTitle))
     issues.push(`Missing book title: "${expectedTitle}"`);
-
-  const cleanUrl = expectedUrl?.replace(/^https?:\/\//, "");
   if (cleanUrl && !safeScript.includes(cleanUrl))
     issues.push(`Missing website: "${cleanUrl}"`);
 
