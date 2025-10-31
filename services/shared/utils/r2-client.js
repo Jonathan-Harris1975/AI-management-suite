@@ -1,238 +1,141 @@
-/**
- * AI Podcast Suite – Unified Cloudflare R2 Client
- * Complete + Backward Compatible + Auto Bucket Fix
- * Works in Node 22 / ESM on Render
- */
+// services/shared/utils/r2-client.js
+// ============================================================
+// ☁️ Cloudflare R2 Client (Full Version)
+// ============================================================
 
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  HeadObjectCommand,
-  DeleteObjectCommand,
-  ListObjectsV2Command,
-} from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { log } from "#logger.js";
 
-// ---------- ENVIRONMENT VARIABLES ----------
+// --- Load environment ---
 const {
-  R2_ENDPOINT,
   R2_ACCESS_KEY_ID,
   R2_SECRET_ACCESS_KEY,
+  R2_ENDPOINT,
   R2_REGION,
+
+  // ✅ All R2 Buckets
   R2_BUCKET_PODCAST,
   R2_BUCKET_RAW,
   R2_BUCKET_RAW_TEXT,
+  R2_BUCKET_META,
   R2_BUCKET_MERGED,
-  R2_META_BUCKET,
+  R2_BUCKET_ART,
   R2_BUCKET_RSS_FEEDS,
+  R2_BUCKET_PODCAST_RSS_FEEDS,
+  R2_BUCKET_TRANSCRIPTS,
+
+  // Public URLs (for output linking)
   R2_PUBLIC_BASE_URL_PODCAST,
   R2_PUBLIC_BASE_URL_RAW,
   R2_PUBLIC_BASE_URL_RAW_TEXT,
-  R2_PUBLIC_BASE_URL_MERGE,
   R2_PUBLIC_BASE_URL_META,
+  R2_PUBLIC_BASE_URL_MERGE,
+  R2_PUBLIC_BASE_URL_ART,
+  R2_PUBLIC_BASE_URL_RSS,
+  R2_PUBLIC_BASE_URL_TRANSCRIPT,
 } = process.env;
 
-const DEFAULT_REGION = R2_REGION || "auto";
+// ============================================================
+// 🧠 R2 Client Setup
+// ============================================================
 
-// ---------- CLIENT ----------
 export const r2Client = new S3Client({
-  region: DEFAULT_REGION,
+  region: R2_REGION || "auto",
   endpoint: R2_ENDPOINT,
   credentials: {
     accessKeyId: R2_ACCESS_KEY_ID,
     secretAccessKey: R2_SECRET_ACCESS_KEY,
   },
-  forcePathStyle: true,
 });
 
-// Backward alias for older code
-export const s3 = r2Client;
+// ============================================================
+// 🪣 Unified Bucket Map
+// ============================================================
 
-// ---------- LOGGING HELPERS ----------
-function logInfo(event, meta = {}) {
-  console.log(JSON.stringify({ level: "INFO", event, ...meta }));
-}
-
-function logError(event, err, meta = {}) {
-  console.error(
-    JSON.stringify({ level: "ERROR", event, error: err?.message || err, ...meta })
-  );
-}
-
-// ---------- BUCKET MAP ----------
 export const R2_BUCKETS = {
   podcast: R2_BUCKET_PODCAST,
   raw: R2_BUCKET_RAW,
   rawText: R2_BUCKET_RAW_TEXT,
+  meta: R2_BUCKET_META,
   merged: R2_BUCKET_MERGED,
-  meta: R2_META_BUCKET,
-  rss: R2_BUCKET_RSS_FEEDS || "rss-feeds",
+  art: R2_BUCKET_ART,
+  rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
+  transcripts: R2_BUCKET_TRANSCRIPTS,
 };
 
-// ---------- CORE OPERATIONS ----------
+// ============================================================
+// 🌍 Public URL Map
+// ============================================================
 
-// ---- Upload Buffer (with auto bucket fix) ----
-export async function uploadBuffer({ bucket, key, body, contentType }) {
-  if (!bucket || bucket === "undefined" || bucket === "") {
-    bucket = R2_BUCKET_RSS_FEEDS || "rss-feeds";
-    logInfo("r2.uploadBuffer.bucket.autofix", { bucket, key });
+export const R2_PUBLIC_URLS = {
+  podcast: R2_PUBLIC_BASE_URL_PODCAST,
+  raw: R2_PUBLIC_BASE_URL_RAW,
+  rawText: R2_PUBLIC_BASE_URL_RAW_TEXT,
+  meta: R2_PUBLIC_BASE_URL_META,
+  merged: R2_PUBLIC_BASE_URL_MERGE,
+  art: R2_PUBLIC_BASE_URL_ART,
+  rss: R2_PUBLIC_BASE_URL_RSS,
+  transcript: R2_PUBLIC_BASE_URL_TRANSCRIPT,
+};
+
+// ============================================================
+// ✅ Validation on Startup
+// ============================================================
+
+Object.entries(R2_BUCKETS).forEach(([key, val]) => {
+  if (!val) {
+    console.warn(`⚠️ R2 bucket missing or undefined: ${key}`);
   }
-
-  if (!key) throw new Error("uploadBuffer: key is required");
-
-  const command = new PutObjectCommand({
-    Bucket: bucket,
-    Key: key,
-    Body: body,
-    ContentType: contentType || "application/octet-stream",
-  });
-
-  await r2Client.send(command);
-  logInfo("r2.uploadBuffer.success", { bucket, key, size: body?.length || 0 });
-  return true;
-}
-
-// ---- Put JSON ----
-export async function putJson(bucket, key, json) {
-  const body = Buffer.from(JSON.stringify(json, null, 2));
-  return uploadBuffer({ bucket, key, body, contentType: "application/json" });
-}
-
-// ---- Put Text ----
-export async function putText(bucket, key, text) {
-  const body = Buffer.from(text);
-  return uploadBuffer({
-    bucket,
-    key,
-    body,
-    contentType: "text/plain; charset=utf-8",
-  });
-}
-
-// ---- Get Object as Text (auto bucket fix) ----
-export async function getObjectAsText(bucket, key) {
-  try {
-    if (!bucket || bucket === "undefined" || bucket === "") {
-      bucket = R2_BUCKET_RSS_FEEDS || "rss-feeds";
-      logInfo("r2.getObjectAsText.bucket.autofix", { bucket, key });
-    }
-
-    const command = new GetObjectCommand({ Bucket: bucket, Key: key });
-    const res = await r2Client.send(command);
-    const body = await res.Body?.transformToString();
-    logInfo("r2.getObjectAsText.success", { bucket, key, length: body?.length || 0 });
-    return body;
-  } catch (err) {
-    if (err.name === "NoSuchKey") {
-      logInfo("r2.getObjectAsText.notFound", { bucket, key });
-      return null;
-    }
-    logError("r2.getObjectAsText.fail", err, { bucket, key });
-    throw err;
-  }
-}
-
-// ---- Get Raw Object ----
-export async function getObject(bucket, key) {
-  try {
-    if (!bucket || bucket === "undefined" || bucket === "")
-      bucket = R2_BUCKET_RSS_FEEDS || "rss-feeds";
-
-    const command = new GetObjectCommand({ Bucket: bucket, Key: key });
-    const res = await r2Client.send(command);
-    logInfo("r2.getObject.success", { bucket, key });
-    return res;
-  } catch (err) {
-    if (err.name === "NoSuchKey") {
-      logInfo("r2.getObject.notFound", { bucket, key });
-      return null;
-    }
-    logError("r2.getObject.fail", err, { bucket, key });
-    throw err;
-  }
-}
-
-// ---- Check Existence ----
-export async function objectExists(bucket, key) {
-  try {
-    await r2Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-    return true;
-  } catch (err) {
-    if (err.name === "NotFound") return false;
-    throw err;
-  }
-}
-
-// ---- Delete Object ----
-export async function deleteObject(bucket, key) {
-  try {
-    await r2Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
-    logInfo("r2.deleteObject.success", { bucket, key });
-    return true;
-  } catch (err) {
-    logError("r2.deleteObject.fail", err, { bucket, key });
-    throw err;
-  }
-}
-
-// ---- List Objects ----
-export async function listObjects(bucket, prefix = "") {
-  const cmd = new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix });
-  const res = await r2Client.send(cmd);
-  return res.Contents || [];
-}
-
-// ---- Legacy Alias: listKeys ----
-export async function listKeys(bucket, prefix = "") {
-  const objs = await listObjects(bucket, prefix);
-  return objs.map((o) => o.Key);
-}
-
-// ---------- SHORTCUTS ----------
-export async function r2Put(bucket, key, content, contentType) {
-  const body = Buffer.isBuffer(content) ? content : Buffer.from(content || "");
-  return uploadBuffer({ bucket, key, body, contentType });
-}
-
-export async function r2Get(bucket, key) {
-  return getObjectAsText(bucket, key);
-}
-
-export async function r2Json(bucket, key, obj) {
-  return putJson(bucket, key, obj);
-}
-
-export const r2GetText = getObjectAsText;
-
-// ---------- PUBLIC URL HELPERS ----------
-export function r2GetPublicBase(bucket) {
-  const map = {
-    podcast: R2_PUBLIC_BASE_URL_PODCAST,
-    raw: R2_PUBLIC_BASE_URL_RAW,
-    rawText: R2_PUBLIC_BASE_URL_RAW_TEXT,
-    merged: R2_PUBLIC_BASE_URL_MERGE,
-    meta: R2_PUBLIC_BASE_URL_META,
-  };
-  return map[bucket] || R2_PUBLIC_BASE_URL_PODCAST;
-}
-
-export function getBucketName(alias) {
-  const map = {
-    podcast: R2_BUCKET_PODCAST,
-    raw: R2_BUCKET_RAW,
-    rawText: R2_BUCKET_RAW_TEXT,
-    merged: R2_BUCKET_MERGED,
-    meta: R2_META_BUCKET,
-    rss: R2_BUCKET_RSS_FEEDS || "rss-feeds",
-  };
-  return map[alias] || alias;
-}
-
-// ---------- INIT LOG ----------
-logInfo("r2-client.initialized", {
-  endpoint: R2_ENDPOINT,
-  region: DEFAULT_REGION,
-  buckets: Object.entries(R2_BUCKETS)
-    .filter(([_, v]) => !!v)
-    .map(([k]) => k),
 });
+
+log.info(
+  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.values(R2_BUCKETS) },
+  "r2-client.initialized"
+);
+
+// ============================================================
+// 📦 Utility Functions
+// ============================================================
+
+export async function uploadBuffer(bucketKey, key, buffer, contentType = "application/octet-stream") {
+  const bucket = R2_BUCKETS[bucketKey];
+  if (!bucket) throw new Error(`Unknown R2 bucket key: ${bucketKey}`);
+
+  await r2Client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType,
+    })
+  );
+  return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
+}
+
+export async function uploadText(bucketKey, key, text, contentType = "text/plain") {
+  return uploadBuffer(bucketKey, key, Buffer.from(text, "utf-8"), contentType);
+}
+
+export async function getObjectAsText(bucketKey, key) {
+  const bucket = R2_BUCKETS[bucketKey];
+  if (!bucket) throw new Error(`Unknown R2 bucket key: ${bucketKey}`);
+
+  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+  const response = await r2Client.send(command);
+  const chunks = [];
+  for await (const chunk of response.Body) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
+// ============================================================
+// ✅ Default Export
+// ============================================================
+
+export default {
+  r2Client,
+  R2_BUCKETS,
+  R2_PUBLIC_URLS,
+  uploadBuffer,
+  uploadText,
+  getObjectAsText,
+};
