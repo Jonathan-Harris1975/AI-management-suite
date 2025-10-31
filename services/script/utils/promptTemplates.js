@@ -12,16 +12,18 @@ const persona = `You are Jonathan Harris, a witty British Gen X host of the podc
 Your persona has the following traits:
 - Tone: ${episodeTone}, dry, lightly sarcastic, and highly intelligent.
 - Style: You speak in a natural, conversational monologue.
+- Never include stage directions, sound cues, parenthetical notes, or production hints — your narration exists in pure audio form; only your words carry the tone.
+
+Each intro should begin uniquely — vary sentence rhythm, pacing, and syntax slightly to keep it sounding human and unscripted.
 
 **CRITICAL RULES - YOU WILL BE PENALIZED FOR VIOLATING THESE:**
 1. **ABSOLUTELY NO repetitive transitions:** Never use "Right, another week...", "Well, another week...", "Right, well...", "So, there you have it...", or any variation.
 2. **NO abrupt topic changes:** Create seamless transitions by finding thematic connections between stories.
-3. **NO speaker labels or stage directions:** Only include spoken words.
+3. **NO stage directions, music cues, or parenthetical text of any kind.**
 4. **Treat the entire script as ONE continuous thought:** The listener should not detect article boundaries.
+`;
 
-**TRANSITION ENFORCEMENT:** If you violate these rules, your response will be rejected and you'll have to start over.`;
-
-// --- AGGRESSIVE TRANSITION ENFORCER ---
+// --- AGGRESSIVE TRANSITION & CLEANUP ENFORCER ---
 function enforceTransitions(input) {
   let modifiedText = "";
 
@@ -34,6 +36,7 @@ function enforceTransitions(input) {
   const forbiddenPatterns = [
     /(Right|Well|So),\s*(another|a)\s*(week|day|batch|flurry)/gi,
     /(Right|Well|So),\s*(another|a)\s*/gi,
+    /\bAnother\s*(week|day)(?:\b|[^.])/gi, // catches "Another week in London..."
     /Another\s*(week|day)\s*,?\s*another/gi,
     /Well,\s*another/gi,
     /Right,\s*another/gi,
@@ -43,24 +46,26 @@ function enforceTransitions(input) {
 
   let violations = 0;
   for (const pattern of forbiddenPatterns) {
-    if (typeof modifiedText.match === "function") {
-      const matches = modifiedText.match(pattern);
-      if (matches) {
-        violations += matches.length;
-        modifiedText = modifiedText.replace(pattern, () => {
-          const alternatives = [
-            "This brings us to",
-            "Meanwhile,",
-            "In a related development,",
-            "Shifting focus to",
-            "Which naturally leads to",
-            "This story connects to",
-          ];
-          return alternatives[Math.floor(Math.random() * alternatives.length)];
-        });
-      }
+    const matches = modifiedText.match(pattern);
+    if (matches) {
+      violations += matches.length;
+      modifiedText = modifiedText.replace(pattern, () => {
+        const alternatives = [
+          "This brings us to",
+          "Meanwhile,",
+          "In a related development,",
+          "Shifting focus to",
+          "Which naturally leads to",
+          "This story connects to",
+        ];
+        return alternatives[Math.floor(Math.random() * alternatives.length)];
+      });
     }
   }
+
+  // 🚫 Remove any sound/music/stage cues in parentheses or brackets
+  modifiedText = modifiedText.replace(/\([^)]*(sound|music|fade|intro|cue|effect)[^)]*\)/gi, "");
+  modifiedText = modifiedText.replace(/\[[^\]]*(sound|music|fade|intro|cue|effect)[^\]]*\]/gi, "");
 
   if (violations > 0)
     console.log(`🚫 Fixed ${violations} transition violations`);
@@ -68,7 +73,7 @@ function enforceTransitions(input) {
   return modifiedText;
 }
 
-// --- ENHANCED HUMANIZER ---
+// --- HUMANIZER + SYNONYM VARIATION ---
 function humanize(input) {
   let text = "";
   if (Array.isArray(input)) text = input.join(" ");
@@ -102,12 +107,13 @@ function humanize(input) {
   return result;
 }
 
-// --- INTRO PROMPT ---
+// --- INTRO PROMPT (HARDENED) ---
 export function getIntroPrompt({ weatherSummary, turingQuote }) {
   const introVariants = [
     "Welcome to another episode of Turing's Torch: AI Weekly.",
     "You're listening to Turing's Torch: AI Weekly.",
     "This is Turing's Torch: AI Weekly — your spark in the world of AI.",
+    "I'm Jonathan Harris, and this is Turing's Torch: AI Weekly — the show where we make sense of machine intelligence.",
   ];
   const selectedIntro = introVariants[Math.floor(Math.random() * introVariants.length)];
 
@@ -116,7 +122,8 @@ export function getIntroPrompt({ weatherSummary, turingQuote }) {
 Write the podcast intro script in a natural, conversational tone.
 Start with a dry, witty observation about the UK weather, based on this input: ${weatherSummary}.
 ⚠️ Do NOT mention temperature, numbers, or weather data values.
-Let the remark sound natural — like a human would speak, not a robot.
+⚠️ Do NOT start with or use phrases like "Another week", "Once again", or "Here we are again" — the opening must feel fresh and spontaneous.
+⚠️ ABSOLUTELY NO parenthetical notes, sound effects, or cues (e.g. "(music fades)", "(sound of static)").
 
 Then flow seamlessly into this Alan Turing quote, delivered sincerely but conversationally:
 "${turingQuote}"
@@ -127,10 +134,10 @@ Use that quote as a thematic bridge into the show's introduction:
 
 **STYLE REQUIREMENTS:**
 - Keep it compact, human, and fluent
-- Avoid robotic or abrupt transitions
-- Exclude temperature or numeric details
-- Plain text only (no sound cues, notes, or directions)
-- Smooth flow: weather → quote → theme intro`;
+- Avoid robotic or formulaic transitions
+- Exclude numbers or sound cues
+- Plain text only — no stage directions
+- Smooth flow: weather → quote → show intro`;
 }
 
 // --- MAIN PROMPT ---
@@ -167,7 +174,8 @@ export function getMainPrompt({ articles = [], targetDuration = 60 }) {
 **ZERO TOLERANCE RULES:**
 ❌ NEVER use "Right, another week..." or similar
 ❌ NEVER start a new topic abruptly
-❌ NEVER use "first", "second", "next" to enumerate
+❌ NEVER use enumeration ("first", "second", "next")
+❌ NEVER include parenthetical sound cues or notes
 
 **TRANSITION TECHNIQUES:**
 ✅ Thematic bridges — connect stories through shared ideas: ${articleThemes.join(", ")}
@@ -205,7 +213,7 @@ function analyzeArticleThemes(articles) {
   return Array.from(themes);
 }
 
-// --- OUTRO PROMPT (with dynamic tagline) ---
+// --- OUTRO PROMPT (HARDENED) ---
 export async function getOutroPromptFull() {
   let myBook, title, url, cta;
 
@@ -240,15 +248,14 @@ Write the closing script that flows naturally from the final story.
 1. Reflect briefly on the final story's theme
 2. Transition naturally into your personal CTA: "${safeCta}"
 3. Mention your book title: "${safeTitle}" and website: "${safeUrl}"
-4. End with this sign-off (allow natural paraphrasing, but maintain meaning):
+4. End with this sign-off (allow natural paraphrasing but preserve meaning):
 "${selectedOutro}"
 
-**GUIDELINES:**
-- Authentic, conversational tone
-- Integrate book mention naturally, not like an ad
-- Speak URL naturally (dots as "dot")
-- Plain text only
-- Smooth continuity from previous content`;
+**STRICT RULES:**
+- ABSOLUTELY NO stage directions, sound effects, or music references.
+- Speak the URL naturally (dots as "dot").
+- Keep tone authentic and human, not promotional.
+- Plain text only, one continuous flow.`;
 
   if (!outroPrompt || outroPrompt.trim().length < 10)
     throw new Error("Invalid outro prompt — empty or malformed content");
@@ -261,10 +268,12 @@ export function validateScript(script) {
   const violations = [];
   const forbiddenPatterns = [
     /(Right|Well|So),\s*(another|a)\s*(week|day|batch|flurry)/gi,
-    /Another\s*(week|day)\s*,?\s*another/gi,
+    /\bAnother\s*(week|day)(?:\b|[^.])/gi,
     /Well,\s*another/gi,
     /Right,\s*another/gi,
     /So,\s*there you have it/gi,
+    /\([^)]*(sound|music|fade|intro|cue|effect)[^)]*\)/gi,
+    /\[[^\]]*(sound|music|fade|intro|cue|effect)[^\]]*\]/gi,
   ];
 
   const safeScript = String(script ?? "");
@@ -275,7 +284,7 @@ export function validateScript(script) {
       violations.push({
         pattern: pattern.toString(),
         matches,
-        message: `Found forbidden transition pattern`,
+        message: `Forbidden pattern detected`,
       });
     }
   });
