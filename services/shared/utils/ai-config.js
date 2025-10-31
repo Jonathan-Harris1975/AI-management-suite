@@ -27,30 +27,24 @@ export const aiConfig = {
     },
   },
 
-  // ✅ Routing strategy
+  // ✅ Routing strategy for AI Podcast Suite + RSS Feed Creator
   routeModels: {
-  intro: ["google", "chatgpt", "meta"],
-  main: ["google", "chatgpt", "deepseek"],
-  outro: ["google", "chatgpt", "meta"],
-  podcastHelper: ["chatgpt", "google"],
+    // --- Podcast generation routes ---
+    intro: ["google", "chatgpt", "meta"],
+    main: ["google", "chatgpt", "deepseek"],
+    outro: ["google", "chatgpt", "meta"],
+    scriptIntro: ["google", "chatgpt", "meta"],
+    scriptMain: ["google", "chatgpt", "deepseek"],
+    scriptOutro: ["google", "chatgpt", "meta"],
 
-  // ✅ Added aliases for orchestration keys
-  scriptIntro: ["google", "chatgpt", "meta"],
-  scriptMain: ["google", "chatgpt", "deepseek"],
-  scriptOutro: ["google", "chatgpt", "meta"],
-
-
-    // 🧩 Compose step (used in orchestration)
+    // --- Composition & metadata ---
     compose: ["deepseek", "anthropic", "google"],
-
-    // 🧠 Metadata route — required for title/description/SEO/artwork generation
     metadata: ["google", "chatgpt", "deepseek"],
-
-    // 🧩 Podcast helper (meta info, tone, etc.)
     podcastHelper: ["deepseek", "anthropic", "google"],
 
-    // ✅ RSS rewriting route
-    rssRewrite: ["chatgpt", "google", "meta"],
+    // --- RSS feed routes ---
+    rssRewrite: ["chatgpt", "google", "meta"],       // 🧠 AI article rewrite
+    rssShortTitle: ["chatgpt", "google", "meta"],    // ✅ Added short title generation
   },
 
   commonParams: {
