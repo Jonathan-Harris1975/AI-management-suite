@@ -136,6 +136,14 @@ export async function getObjectAsText(bucket, key) {
     info("r2.getObjectAsText.success", { bucket, key, length: text?.length });
     return text;
   } catch (err) {
+    // A NoSuchKey error is the standard way S3 reports a missing file (404).
+    // In this application, a missing file is often an expected condition (e.g., in rss-bootstrap.js).
+    // We catch it here and return null, allowing the caller to handle the missing file gracefully.
+    if (err.Code === "NoSuchKey" || err.name === "NoSuchKey") {
+      info("r2.getObjectAsText.notFound", { bucket, key });
+      return null;
+    }
+
     error("r2.getObjectAsText.fail", { bucket, key, error: err.message });
     throw err;
   }
