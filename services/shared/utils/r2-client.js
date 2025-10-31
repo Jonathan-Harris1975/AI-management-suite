@@ -1,25 +1,19 @@
 // /services/shared/utils/r2-client.js
-// ✅ Centralized R2 client — full version
 
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { Readable } from "stream";
-import { env } from "process";
 import pino from "pino";
 
 const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 
 const client = new S3Client({
   region: "auto",
-  endpoint: env.R2_ENDPOINT || "https://<your-cloudflare-account>.r2.cloudflarestorage.com",
+  endpoint: process.env.R2_ENDPOINT,
   credentials: {
-    accessKeyId: env.R2_ACCESS_KEY_ID,
-    secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+    accessKeyId: process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
   },
 });
 
-/**
- * Convert an R2 (S3) stream to string
- */
 async function streamToString(stream) {
   if (!stream) return "";
   const chunks = [];
@@ -27,9 +21,6 @@ async function streamToString(stream) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/**
- * Read object as text
- */
 export async function getObjectAsText(bucket, key) {
   try {
     const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
@@ -43,16 +34,13 @@ export async function getObjectAsText(bucket, key) {
   }
 }
 
-/**
- * Upload a text or buffer payload to R2
- */
 export async function uploadBuffer(bucket, key, buffer) {
   try {
     const cmd = new PutObjectCommand({
       Bucket: bucket,
       Key: key,
       Body: buffer,
-      ContentType: "application/xml",
+      ContentType: "application/octet-stream",
     });
     await client.send(cmd);
     logger.info({ service: "ai-podcast-suite", bucket, key, size: buffer.length }, "r2.uploadBuffer.success");
@@ -63,20 +51,17 @@ export async function uploadBuffer(bucket, key, buffer) {
   }
 }
 
-/**
- * Upload JSON directly
- */
 export async function uploadJSON(bucket, key, obj) {
   const buf = Buffer.from(JSON.stringify(obj, null, 2), "utf8");
   return uploadBuffer(bucket, key, buf);
 }
 
-/**
- * Write string
- */
+// ✅ Legacy alias — feedRotationManager.js uses this name
+export const putJson = uploadJSON;
+
 export async function uploadString(bucket, key, str) {
   const buf = Buffer.from(str, "utf8");
   return uploadBuffer(bucket, key, buf);
 }
 
-export default { getObjectAsText, uploadBuffer, uploadJSON, uploadString };
+export default { getObjectAsText, uploadBuffer, uploadJSON, putJson, uploadString };
