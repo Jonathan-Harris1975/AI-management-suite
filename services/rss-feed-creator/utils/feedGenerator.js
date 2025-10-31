@@ -1,161 +1,89 @@
-// /services/rss-feed-creator/utils/feedGenerator.js
-// ✅ Final version - always serializes new batch, robust merge/dedupe/retention
+// Builds RSS XML + JSON metadata from feeds.txt + urls.txt in R2
+import { r2GetText, r2Put, r2GetPublicBase, getBucketName } from "../../shared/utils/r2-client.js";
 
-import { buildRssXml, parseExistingRssXml } from "./rssBuilder.js";
+function jlog(message, meta = undefined) {
+  const line = { time: new Date().toISOString(), message };
+  if (meta && typeof meta === "object") line.meta = meta;
+  process.stdout.write(JSON.stringify(line) + "\n");
+}
 
-/**
- * Make a best-effort normalized RSS item from various upstream shapes.
- * Supports shapes like: {title, link/url, description/summary, pubDate/datePublished/date, guid/id}
- */
-function normalizeItem(raw) {
-  if (!raw || typeof raw !== "object") return null;
+const PREFIX = "rss-feeds/";
+const FILE_FEEDS = PREFIX + "feeds.txt";
+const FILE_URLS = PREFIX + "urls.txt";
+const FILE_XML = PREFIX + "feed.xml";
+const FILE_JSON = PREFIX + "feed.json";
+const FILE_CURSOR = PREFIX + "cursor.json";
 
-  const title =
-    raw.title ||
-    raw.headline ||
-    raw.name ||
-    "";
+function esc(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
 
-  const link =
-    raw.link ||
-    raw.url ||
-    raw.permalink ||
-    "";
+export async function generateAndUploadFeed() {
+  const bucket = getBucketName();
+  const publicBase = r2GetPublicBase();
 
-  const description =
-    raw.description ||
-    raw.summary ||
-    raw.content ||
-    raw.body ||
-    "";
+  const feedsTxt = await r2GetText(bucket, FILE_FEEDS);
+  const urlsTxt  = await r2GetText(bucket, FILE_URLS);
+  const feeds = (feedsTxt || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const urls  = (urlsTxt  || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
-  const pubDate =
-    raw.pubDate ||
-    raw.datePublished ||
-    raw.date ||
-    raw.published ||
-    (raw.isoDate || raw.updated) ||
-    new Date().toUTCString();
+  jlog("🟡 rss:process", { feeds: feeds.length, urls: urls.length });
 
-  const guid =
-    raw.guid ||
-    raw.id ||
-    raw.guid?.["#text"] || // some parsers give { guid: { "#text": "..." } }
-    link ||
-    `${title}-${pubDate}`;
+  const now = new Date().toISOString();
+  const items = [];
+  const maxFeeds = 5; // Use exactly 5 RSS feeds
+  const maxUrls = 1;  // Use exactly 1 URL item
+  const max = Math.max(maxFeeds, maxUrls);
+  for (let i = 0; i < max; i++) {
+        const f = (i < maxFeeds && feeds[i]) ? feeds[i] : "";
+        const u = (i < maxUrls && urls[i]) ? urls[i] : "";
+    if (!f && !u) continue;
+    items.push({
+      title: `Item ${i+1}`,
+      link: u || f,
+      guid: `${u || f}#${i+1}`,
+      pubDate: now,
+      source: f || null
+    });
+  }
 
-  return {
-    title: String(title).trim(),
-    link: String(link).trim(),
-    description: String(description).trim(),
-    pubDate: new Date(pubDate).toString() === "Invalid Date"
-      ? new Date().toUTCString()
-      : new Date(pubDate).toUTCString(),
-    guid: String(guid).trim(),
+  const channelTitle = "AI Podcast Suite Feed";
+  const channelLink  = publicBase;
+  const channelDesc  = "Auto-generated feed from feeds.txt + urls.txt";
+
+  const xmlItems = items.map(it => [
+    "<item>",
+    `<title>${esc(it.title)}</title>`,
+    `<link>${esc(it.link)}</link>`,
+    `<guid>${esc(it.guid)}</guid>`,
+    `<pubDate>${esc(it.pubDate)}</pubDate>`,
+    it.source ? `<source>${esc(it.source)}</source>` : "",
+    "</item>"
+  ].join("")).join("");
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>${esc(channelTitle)}</title>
+    <link>${esc(channelLink)}</link>
+    <description>${esc(channelDesc)}</description>
+    <lastBuildDate>${esc(now)}</lastBuildDate>
+    ${xmlItems}
+  </channel>
+</rss>`;
+
+  const meta = {
+    generatedAt: now,
+    publicBase: publicBase,
+    items: items.length
   };
+
+  await r2Put(bucket, FILE_XML, Buffer.from(xml, "utf-8"), "application/rss+xml; charset=utf-8");
+  await r2Put(bucket, FILE_JSON, Buffer.from(JSON.stringify(meta, null, 2), "utf-8"), "application/json; charset=utf-8");
+
+  const cursor = { lastRun: now, items: items.length };
+  await r2Put(bucket, FILE_CURSOR, Buffer.from(JSON.stringify(cursor, null, 2), "utf-8"), "application/json; charset=utf-8");
+
+  return { items: items.length, wrote: [FILE_XML, FILE_JSON, FILE_CURSOR] };
 }
 
-/**
- * Remove duplicates by GUID → link → title+date key.
- */
-function dedupeItems(items) {
-  const seen = new Set();
-  const result = [];
-
-  for (const it of items) {
-    if (!it) continue;
-    const key = (it.guid || it.link || `${it.title}::${it.pubDate}`).toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(it);
-  }
-  return result;
-}
-
-/**
- * Applies retention by days and max length, keeping newest first.
- */
-function applyRetention(items, { retentionDays = 60, maxItems = 500 }) {
-  const now = Date.now();
-  const cutoff = now - retentionDays * 24 * 60 * 60 * 1000;
-
-  const filtered = items.filter((it) => {
-    const t = Date.parse(it.pubDate);
-    return Number.isFinite(t) ? t >= cutoff : true; // keep if no date
-  });
-
-  // Sort newest first
-  filtered.sort((a, b) => Date.parse(b.pubDate) - Date.parse(a.pubDate));
-
-  // Cap list
-  return filtered.slice(0, maxItems);
-}
-
-/**
- * Load and parse existing feed.xml from R2.
- * Return normalized items array (possibly empty).
- */
-async function loadExistingItems({ r2, bucket, feedKey }) {
-  try {
-    const xml = await r2.getObjectAsText(bucket, feedKey);
-    if (!xml) return [];
-    const { items } = parseExistingRssXml(xml);
-    const normalized = (items || []).map(normalizeItem).filter(Boolean);
-    return dedupeItems(normalized);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Generate & save the RSS feed to R2.
- * CRITICAL: even if existing feed is empty/invalid, we still serialize the new batch.
- */
-export async function generateFeed({
-  r2,              // your shared R2 client { getObjectAsText, uploadBuffer }
-  bucket = "rss-feeds",
-  feedKey = "feed.xml",
-  meta = {},
-  newItems = [],
-  retentionDays = 60,
-  maxItems = 500,
-  logger = console,
-}) {
-  // Normalize new batch first
-  const normalizedNew = (newItems || []).map(normalizeItem).filter(Boolean);
-
-  // Load existing (best effort)
-  const existing = await loadExistingItems({ r2, bucket, feedKey });
-
-  // Merge: newest batch first (preferred), then existing
-  let merged = dedupeItems([...normalizedNew, ...existing]);
-
-  // Retention & cap
-  merged = applyRetention(merged, { retentionDays, maxItems });
-
-  logger.info?.("rss.feedGenerator.merge", {
-    incoming: normalizedNew.length,
-    existing: existing.length,
-    merged: merged.length,
-    retentionDays,
-    maxItems,
-  });
-
-  // Build XML from merged (never empty unless literally no items at all)
-  const xml = buildRssXml({ items: merged, meta });
-
-  // Save
-  const buf = Buffer.from(xml, "utf8");
-  await r2.uploadBuffer(bucket, feedKey, buf);
-
-  logger.info?.("rss.feedGenerator.save.success", {
-    feedKey,
-    totalItems: merged.length,
-    newItems: normalizedNew.length,
-    retentionDays,
-    maxItems,
-    size: buf.length,
-  });
-
-  return { totalItems: merged.length, newItems: normalizedNew.length, size: buf.length };
-}
