@@ -6,7 +6,7 @@
 import express from "express";
 import { endToEndRewrite } from "../rewrite-pipeline.js";
 import { getObjectAsText } from "../../shared/utils/r2-client.js";
-import { info, error } from "../../shared/utils/logger.js";
+import { info, error } from "#logger.js";
 
 export const router = express.Router();
 
