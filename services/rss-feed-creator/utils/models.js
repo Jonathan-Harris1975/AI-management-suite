@@ -12,7 +12,7 @@ import crypto from "crypto";
 import { info, error } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { RSS_PROMPTS } from "./rss-prompts.js";
-import { shortenUrl } from "./utils/shortio.js";
+import { shortenUrl } from "./shortio.js";
 
 /**
  * Generate a concise, branded short title for the article.
