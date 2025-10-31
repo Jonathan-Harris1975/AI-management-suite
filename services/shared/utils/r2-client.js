@@ -68,7 +68,8 @@ export const R2_BUCKETS = {
   meta: R2_BUCKET_META,
   merged: R2_BUCKET_MERGED,
   art: R2_BUCKET_ART,
-  rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
+  rss: R2_BUCKET_RSS_FEEDS 
+ podcastrss:R2_BUCKET_PODCAST_RSS_FEEDS ,
 
   // ✅ Fix: allow both singular and plural transcript keys
   transcripts: R2_BUCKET_TRANSCRIPTS,
