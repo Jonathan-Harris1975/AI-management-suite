@@ -4,7 +4,7 @@
  */
 
 import { generateFeed } from "./utils/feedGenerator.js";
-import { logInfo, logError } from "../shared/utils/logger.js";
+import { logInfo, logError } from "#logger.js";
 import { rewriteArticle } from "./model/rewriteArticle.js";
 
 export async function endToEndRewrite() {
