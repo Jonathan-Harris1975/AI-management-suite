@@ -1,8 +1,8 @@
 /**
- * R2 Client Utility (Final Production Build)
- * ==========================================
- * Works with Cloudflare R2 using AWS SDK v3.
- * Includes modern helpers and legacy back-compat exports.
+ * R2 Client Utility (Unified Production Build)
+ * ============================================
+ * Works with Cloudflare R2 (AWS SDK v3)
+ * Includes modern helpers + all legacy exports for backward compatibility.
  */
 
 import {
@@ -13,7 +13,6 @@ import {
   DeleteObjectCommand,
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
-import { readFile } from "fs/promises";
 
 // ---------- Configuration ----------
 const {
@@ -46,15 +45,16 @@ export const r2Client = new S3Client({
   forcePathStyle: true,
 });
 
+// legacy alias expected by older modules
+export const s3 = r2Client;
+
 // ---------- Logging ----------
 function logInfo(event, meta = {}) {
   console.log(JSON.stringify({ level: "INFO", event, ...meta }));
 }
 
 function logError(event, err, meta = {}) {
-  console.error(
-    JSON.stringify({ level: "ERROR", event, error: err?.message || err, ...meta })
-  );
+  console.error(JSON.stringify({ level: "ERROR", event, error: err?.message || err, ...meta }));
 }
 
 // ---------- Core Ops ----------
@@ -83,12 +83,7 @@ export async function putJson(bucket, key, json) {
 
 export async function putText(bucket, key, text) {
   const body = Buffer.from(text);
-  return uploadBuffer({
-    bucket,
-    key,
-    body,
-    contentType: "text/plain; charset=utf-8",
-  });
+  return uploadBuffer({ bucket, key, body, contentType: "text/plain; charset=utf-8" });
 }
 
 // ---- Get Object as Text ----
@@ -139,7 +134,13 @@ export async function listObjects(bucket, prefix = "") {
   return res.Contents || [];
 }
 
-// ---------- MODERN SHORTCUT WRAPPERS ----------
+// Legacy alias expected by toneSetter.js
+export async function listKeys(bucket, prefix = "") {
+  const objs = await listObjects(bucket, prefix);
+  return objs.map((o) => o.Key);
+}
+
+// ---------- Modern Shortcuts ----------
 export async function r2Put(bucket, key, content, contentType) {
   const body = Buffer.isBuffer(content) ? content : Buffer.from(content || "");
   return uploadBuffer({ bucket, key, body, contentType });
@@ -153,7 +154,7 @@ export async function r2Json(bucket, key, obj) {
   return putJson(bucket, key, obj);
 }
 
-// ---------- COMMON BUCKET MAP ----------
+// ---------- Common Bucket Map ----------
 export const R2_BUCKETS = {
   podcast: R2_BUCKET_PODCAST,
   raw: R2_BUCKET_RAW,
@@ -162,10 +163,7 @@ export const R2_BUCKETS = {
   meta: R2_META_BUCKET,
 };
 
-// ---------- LEGACY BACK-COMPAT EXPORTS ----------
-/**
- * Restores older API names expected by modules like feedGenerator.js
- */
+// ---------- Legacy Back-Compat Exports ----------
 export const r2GetText = getObjectAsText;
 
 export function r2GetPublicBase(bucket) {
@@ -190,7 +188,7 @@ export function getBucketName(alias) {
   return map[alias] || alias;
 }
 
-// ---------- INIT LOG ----------
+// ---------- Init Log ----------
 logInfo("r2-client.initialized", {
   endpoint: R2_ENDPOINT,
   region: DEFAULT_REGION,
