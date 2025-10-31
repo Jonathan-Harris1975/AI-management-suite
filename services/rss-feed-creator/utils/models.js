@@ -16,7 +16,7 @@ import { RSS_PROMPTS } from "./rss-prompts.js"; // ✅ Correct import
  * Rewrites a single RSS feed entry using AI.
  * Safely builds the prompt and ensures valid message content.
  */
-export async function rewriteRssFeedItem(item = {}) {
+export async function rewriteArticle(item = {}) {
   try {
     // Defensive normalization
     const title = item?.title?.trim() || "Untitled article";
