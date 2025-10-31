@@ -10,7 +10,7 @@ import { info, error } from "#logger.js";
 export async function generateFeed(bucket, rewrittenItems) {
   try {
     if (!Array.isArray(rewrittenItems) || rewrittenItems.length === 0) {
-      logInfo("rss-feed-creator.generateFeed.skip", { reason: "no items" });
+      info("rss-feed-creator.generateFeed.skip", { reason: "no items" });
       return;
     }
 
@@ -60,13 +60,13 @@ export async function generateFeed(bucket, rewrittenItems) {
     await r2Put(bucket, "feed.xml", xmlString, "application/rss+xml");
     await r2Put(bucket, "feed.json", jsonString, "application/json");
 
-    logInfo("rss-feed-creator.generateFeed.success", {
+    info("rss-feed-creator.generateFeed.success", {
       bucket,
       items: rewrittenItems.length,
       size: xmlString.length,
     });
   } catch (err) {
-    logError("rss-feed-creator.generateFeed.fail", err, { bucket });
+    error("rss-feed-creator.generateFeed.fail", err, { bucket });
   }
 }
 
