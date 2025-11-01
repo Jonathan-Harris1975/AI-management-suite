@@ -2,7 +2,7 @@
 import Parser from "rss-parser";
 import fetch from "node-fetch";
 import durationRotator from "./durationRotator.js";
-import DurationCalculator from "./durationCalculator.js";
+import { calculateDuration } from "./durationCalculator.js"; // ✅ fixed
 import { info, error } from "#logger.js";
 
 const parser = new Parser();
