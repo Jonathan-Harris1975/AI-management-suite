@@ -1,7 +1,7 @@
 // services/script/utils/fetchFeeds.js
 import Parser from "rss-parser";
 import fetch from "node-fetch";
-import durationRotator from "./durationRotator.js";
+import { rotateDurations } from "./durationRotator.js";
 import { calculateDuration } from "./durationCalculator.js"; // ✅ fixed
 import { info, error } from "#logger.js";
 
