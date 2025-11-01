@@ -1,90 +1,102 @@
 // ============================================================
 // 🎙️ services/script/utils/promptTemplates.js
 // ============================================================
+//
+// Clean, deterministic prompt templates.
+// Each episode has one consistent persona + tone.
+// ============================================================
 
 import getSponsor from "./getSponsor.js";
 import generateCta from "./generateCta.js";
-import { getRandomTone } from "./toneSetter.js";
-import DurationCalculator from "./durationCalculator.js";
+import { buildPersona } from "./toneSetter.js";
+import * as DurationCalculator from "./durationCalculator.js";
 
-const episodeTone = getRandomTone();
-
-// --- Core Persona ---
-const persona = `You are Jonathan Harris, a witty British Gen X host of the podcast "Turing's Torch: AI Weekly".
-You speak in a natural, reflective tone — sharp, intelligent, dryly humorous.
-You NEVER use stage directions, parenthetical notes, or sound cues.
-Your words alone carry the tone — pure transcript form only.`;
-
-// --- INTRO PROMPT ---
-export function getIntroPrompt({ weatherSummary, turingQuote, targetMins = 45 }) {
-  const introVariants = [
+// ─────────────────────────────────────────────────────────────
+// 🧩 INTRO PROMPT
+// ─────────────────────────────────────────────────────────────
+export function getIntroPrompt({ weatherSummary, turingQuote, sessionId }) {
+  const persona = buildPersona(sessionId);
+  const intros = [
     "Welcome to Turing's Torch: AI Weekly.",
     "You're listening to Turing's Torch: AI Weekly.",
     "This is Turing's Torch: AI Weekly — your spark in the world of AI.",
     "I'm Jonathan Harris, and this is Turing's Torch: AI Weekly — the show where we make sense of machine intelligence.",
   ];
-  const selectedIntro = introVariants[Math.floor(Math.random() * introVariants.length)];
+  const selectedIntro = intros[Math.floor(Math.random() * intros.length)];
 
   return `${persona}
 
 Write a clean, plain-text intro monologue.
 
-Start with a wry, human observation about the current UK weather:
+Start with a witty observation about the UK weather:
 "${weatherSummary}"
 
-Then flow naturally into this Alan Turing quote:
+Then naturally connect to this Alan Turing quote:
 "${turingQuote}"
 
-Use that quote as a bridge to set the reflective tone for this episode’s ${targetMins}-minute runtime.
-
-Avoid repetition or filler. Conclude with:
+Use the quote as a thematic bridge into:
 "Tired of drowning in AI headlines? Ready for clarity, insight, and a direct line to the pulse of innovation? ${selectedIntro} I'm Jonathan Harris, your host, cutting through the noise to bring you the most critical AI developments, explained, analysed, and delivered straight to you. Let's ignite your understanding of AI, together."
 
 RULES:
-- Plain text only — no parenthetical or stage directions.
-- Smooth weather → quote → tone transition.
-- Keep flow natural and concise.`;
+- Plain text only (no cues or formatting)
+- Smooth weather → quote → tone transition
+- Avoid repetition or filler language`;
 }
 
-// --- MAIN PROMPT ---
-export function getMainPrompt({ articles = [], targetDuration = 45 }) {
-  const normalizedArticles = Array.isArray(articles)
+// ─────────────────────────────────────────────────────────────
+// 🧩 MAIN PROMPT (Dynamic Duration + Shared Tone)
+// ─────────────────────────────────────────────────────────────
+export async function getMainPrompt({ articles = [], sessionId }) {
+  const persona = buildPersona(sessionId);
+
+  const normalized = Array.isArray(articles)
     ? articles.filter((a) => typeof a === "string" && a.trim().length > 0)
     : typeof articles === "string"
     ? [articles]
     : [];
 
-  const articleCount = normalizedArticles.length;
-
+  const articleCount = normalized.length;
+  const { targetMins } = await DurationCalculator.calculateDuration(sessionId, "main");
   const { targetChars, estimatedMinutes } = DurationCalculator.calculateArticleTargets(
-    targetDuration,
+    targetMins,
     articleCount
   );
 
-  const articlePreview = normalizedArticles
+  console.log(
+    `🕒 Runtime target: ${targetMins} min (${estimatedMinutes.toFixed(
+      1
+    )} est) for ${articleCount} articles`
+  );
+
+  const articlePreview = normalized
     .map((t, i) => `--- ARTICLE ${i + 1} ---\n${t.slice(0, 400)}...`)
     .join("\n\n");
 
   return `${persona}
 
-Create one seamless spoken monologue (no headings or breaks) about ${articleCount} AI stories.
-Each topic should transition organically to the next — the listener should never hear a hard boundary.
+Create a single, continuous spoken monologue covering ${articleCount} AI stories.
+The listener should never detect story boundaries.
 
-DURATION: approximately ${targetDuration} minutes total (${estimatedMinutes.toFixed(1)} expected).
+TARGET LENGTH: ~${targetMins} minutes.
 
-Rules:
-- Plain text only — no lists, no "first/second", no cues or brackets.
-- Avoid repeated openers like "Right," or "Well,".
-- Maintain analytical yet conversational tone.
-- Use thematic links: cause/effect, contrast, or question-based transitions.
+RULES:
+- Plain text only (no lists or formatting)
+- Smooth logical transitions between stories
+- Keep tone ${buildPersona(sessionId)
+    .match(/persona is (.*?),/i)?.[1]
+    ?.toLowerCase() || "consistent"} throughout
 
 Source material:
 ${articlePreview}`;
 }
 
-// --- OUTRO PROMPT ---
-export async function getOutroPromptFull(targetMins = 45) {
+// ─────────────────────────────────────────────────────────────
+// 🧩 OUTRO PROMPT (Shared Tone)
+// ─────────────────────────────────────────────────────────────
+export async function getOutroPromptFull(sessionId) {
+  const persona = buildPersona(sessionId);
   let book, title, url, cta;
+
   try {
     book = await getSponsor();
     title = book?.title || "Digital Diagnosis: How AI Is Revolutionizing Healthcare";
@@ -93,27 +105,32 @@ export async function getOutroPromptFull(targetMins = 45) {
   } catch {
     title = "Digital Diagnosis: How AI Is Revolutionizing Healthcare";
     url = "jonathan-harris.online";
-    cta = "Explore more of my AI work at jonathan-harris.online.";
+    cta = "Explore my latest AI eBooks at jonathan-harris.online.";
   }
 
-  const outroVariants = [
-    "That’s all for this week’s Turing’s Torch. Keep that curiosity blazing, and I’ll see you next time for more insights that matter. I’m Jonathan Harris—keep building the future.",
+  const outros = [
+    "That’s all for this week’s Turing’s Torch. Keep that curiosity blazing, and I’ll see you next time. I’m Jonathan Harris—keep building the future.",
     "And that wraps up this week’s Turing’s Torch. Stay curious, keep learning, and I’ll catch you next time. I’m Jonathan Harris—keep building the future.",
   ];
-  const selectedOutro = outroVariants[Math.floor(Math.random() * outroVariants.length)];
+  const selectedOutro = outros[Math.floor(Math.random() * outros.length)];
 
   return `${persona}
 
-Write a closing monologue for a ${targetMins}-minute episode that flows naturally from the main discussion.
+Write a reflective closing monologue that flows naturally from the main discussion.
 
 Include:
-1. A reflective comment on the episode’s central theme.
-2. A subtle personal call-to-action: "${cta}"
-3. Mention your book: "${title}" and website: "${url}"
-4. Conclude with this paraphrased sign-off: "${selectedOutro}"
+1. A short reflection on the episode's main theme.
+2. A subtle call-to-action: "${cta}"
+3. Mention your book "${title}" and website "${url}"
+4. End with: "${selectedOutro}"
 
-STRICT RULES:
-- Plain text only — no sound cues, music notes, or formatting.
-- Speak URLs naturally (“dot” instead of punctuation).
-- Smooth tone, no abrupt ending.`;
+RULES:
+- Plain text only — no stage cues or formatting
+- Keep tone consistent with the intro and main sections`;
 }
+
+export default {
+  getIntroPrompt,
+  getMainPrompt,
+  getOutroPromptFull,
+};
