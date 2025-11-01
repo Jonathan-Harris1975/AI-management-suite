@@ -1,8 +1,8 @@
 // services/script/utils/mainChunker.js
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { getMainPrompt } from "./promptTemplates.js";
-import { putText } from "../../shared/utils/r2-client.js";
 import { cleanTranscript } from "./textHelpers.js";
+import * as sessionCache from "./sessionCache.js";
 import { info } from "#logger.js";
 
 /**
@@ -16,18 +16,17 @@ function chunk(arr, n) {
 
 /**
  * Generate long-form MAIN section by chunking articles and calling the LLM
- * for each group. Returns combined text.
+ * for each group. Stores each chunk in temporary session cache, and returns
+ * the combined text (no R2 writes here).
  */
 export async function generateMainLongform(sessionMeta, articles, totalMainSeconds) {
   if (!articles?.length) return "";
 
-  // Prefer 3–4 per group for depth without bloat
   const groupSize = articles.length >= 16 ? 4 : 3;
   const groups = chunk(articles, groupSize);
 
-  // Allocate time fairly per group (reserve small buffer for transitions)
-  const buffer = Math.min(180, Math.round(totalMainSeconds * 0.05)); // up to 3 minutes
-  const perGroupSeconds = Math.max(420, Math.floor((totalMainSeconds - buffer) / groups.length)); // ≥7 min per chunk
+  const buffer = Math.min(180, Math.round(totalMainSeconds * 0.05));
+  const perGroupSeconds = Math.max(420, Math.floor((totalMainSeconds - buffer) / groups.length));
 
   info("script.main.chunking", {
     groups: groups.length,
@@ -51,14 +50,13 @@ export async function generateMainLongform(sessionMeta, articles, totalMainSecon
     });
 
     const cleaned = cleanTranscript(String(res || ""));
-    const fname = `${sessionMeta.sessionId}-main-chunk-${String(i + 1).padStart(2, "0")}.txt`;
-    await putText("raw-text", fname, cleaned);
     parts.push(cleaned);
+
+    await sessionCache.storeTempPart(sessionMeta, `main-chunk-${i + 1}`, cleaned);
   }
 
-  // Merge with light transition whitespace
   const combined = parts.join("\n\n");
-  await putText("raw-text", `${sessionMeta.sessionId}-main.txt`, combined);
+  await sessionCache.storeTempPart(sessionMeta, "main", combined);
   return combined;
 }
 

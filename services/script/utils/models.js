@@ -1,5 +1,5 @@
 // ============================================================
-// 🎧 services/script/utils/models.js — Long-form Transcript Generator
+// 🎧 services/script/utils/models.js — TTS-ready Transcript Pipeline
 // ============================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
@@ -11,7 +11,9 @@ import { calculateDuration } from "./durationCalculator.js";
 import { getWeatherSummary } from "./getWeatherSummary.js";
 import getTuringQuote from "./getTuringQuote.js";
 import editAndFormat from "./editAndFormat.js";
+import chunkText from "./chunkText.js";
 import { generateMainLongform } from "./mainChunker.js";
+import * as sessionCache from "./sessionCache.js";
 import { info } from "#logger.js";
 
 function toPlainText(s) {
@@ -40,9 +42,6 @@ function normalizeSessionMeta(sessionIdLike) {
   return { sessionId: "unknown", date: undefined };
 }
 
-// ─────────────────────────────────────────────────────────────
-// INTRO
-// ─────────────────────────────────────────────────────────────
 export async function generateIntro(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
   const weatherSummary = await getWeatherSummary();
@@ -56,17 +55,14 @@ export async function generateIntro(sessionIdLike) {
   });
 
   const cleaned = sanitizeOutput(res);
-  await putText("raw-text", `${sessionMeta.sessionId}-intro.txt`, cleaned);
+  await sessionCache.storeTempPart(sessionMeta, "intro", cleaned);
   return cleaned;
 }
 
-// ─────────────────────────────────────────────────────────────
-// MAIN (long-form via chunker)
-// ─────────────────────────────────────────────────────────────
 export async function generateMain(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
 
-  const { items, feedUrl } = await fetchFeedArticles(); // pulls last 7 days, scored
+  const { items, feedUrl } = await fetchFeedArticles();
   const articles = (items || []).map((it) => ({
     title: it?.title?.trim() || "",
     summary: it?.summary?.trim() || it?.contentSnippet?.trim() || it?.description?.trim() || "",
@@ -76,14 +72,10 @@ export async function generateMain(sessionIdLike) {
   const { mainSeconds, targetMins } = calculateDuration("main", sessionMeta, articles.length);
   info("script.main.runtimeTarget", { targetMins, mainSeconds, articleCount: articles.length, feedUrl });
 
-  // Long-form generation across all available (7-day) articles
   const combined = await generateMainLongform(sessionMeta, articles, mainSeconds);
   return sanitizeOutput(combined);
 }
 
-// ─────────────────────────────────────────────────────────────
-// OUTRO
-// ─────────────────────────────────────────────────────────────
 export async function generateOutro(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
   const prompt = await getOutroPromptFull(sessionMeta);
@@ -95,30 +87,36 @@ export async function generateOutro(sessionIdLike) {
   });
 
   const cleaned = sanitizeOutput(res);
-  await putText("raw-text", `${sessionMeta.sessionId}-outro.txt`, cleaned);
+  await sessionCache.storeTempPart(sessionMeta, "outro", cleaned);
   return cleaned;
 }
 
-// ─────────────────────────────────────────────────────────────
-// COMPOSE & UPLOAD
-// ─────────────────────────────────────────────────────────────
 export async function generateComposedEpisode(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
 
-  const [intro, main, outro] = await Promise.all([
-    generateIntro(sessionMeta),
-    generateMain(sessionMeta),
-    generateOutro(sessionMeta),
-  ]);
+  const introCached = await sessionCache.getTempPart(sessionMeta, "intro");
+  const mainCached = await sessionCache.getTempPart(sessionMeta, "main");
+  const outroCached = await sessionCache.getTempPart(sessionMeta, "outro");
+
+  const intro = introCached || await generateIntro(sessionMeta);
+  const main = mainCached || await generateMain(sessionMeta);
+  const outro = outroCached || await generateOutro(sessionMeta);
 
   const rawTranscript = [intro, "", main, "", outro].join("\n");
-  const transcript = editAndFormat(rawTranscript);
+
+  const edited = editAndFormat(rawTranscript);
+
+  const ttsChunks = chunkText(edited) || [];
+  const ttsMeta = ttsChunks.map((chunk, i) => ({ index: i + 1, length: chunk?.length || 0 }));
 
   const id = sessionMeta.sessionId || "episode";
-  await putText("transcripts", `${id}.txt`, transcript);
+
+  await putText("raw-text", `${id}.txt`, edited);
+  await putText("transcripts", `${id}.txt`, edited);
   await putJson("meta", `${id}.json`, {
     session: sessionMeta,
     createdAt: new Date().toISOString(),
+    ttsChunks: ttsMeta,
     durations: {
       ...calculateDuration("intro", sessionMeta),
       ...calculateDuration("main", sessionMeta),
@@ -126,7 +124,7 @@ export async function generateComposedEpisode(sessionIdLike) {
     },
   });
 
-  return { transcript, session: sessionMeta };
+  return { transcript: edited, session: sessionMeta, ttsChunks: ttsMeta };
 }
 
 export default {
