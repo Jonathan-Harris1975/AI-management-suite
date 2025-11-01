@@ -67,7 +67,7 @@ async function fetchAndParseOne(url) {
   }
 }
 
-export async function fetchFeeds() {
+export async function fetchAndParseFeeds() {
   // 1) Load feed URL lists (from local or R2)
   const rssFeedsText = await readLocalOrR2File("rss-feeds.txt");
   const urlFeedsText = await readLocalOrR2File("url-feeds.txt");
@@ -131,4 +131,4 @@ export async function fetchFeeds() {
   return deduped;
 }
 
-export default { fetchFeeds };
+export default { fetchAndParseFeeds };
