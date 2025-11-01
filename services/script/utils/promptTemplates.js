@@ -11,7 +11,7 @@
 import getSponsor from "./getSponsor.js";
 import generateCta from "./generateCta.js";
 import { buildPersona } from "./toneSetter.js";
-import { calculateDuration } from "./durationCalculator.js"; // ✅ fixed import
+import { calculateDuration } from "./durationCalculator.js"; // ✅ fixed
 
 // ─────────────────────────────────────────────────────────────
 // 🧩 INTRO PROMPT (Fixed Duration)
