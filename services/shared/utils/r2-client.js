@@ -203,4 +203,5 @@ export default {
   putText,
   putObject,
   getObject,
+  r2Get,
 };
