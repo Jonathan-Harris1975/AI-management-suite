@@ -1,6 +1,13 @@
 // ============================================================
 // 🎧 services/script/utils/models.js — Clean Transcript Generator
 // ============================================================
+//
+// - Generates intro, main, and outro segments
+// - Fetches weather and Turing quotes dynamically
+// - Builds RSS-driven main content
+// - Cleans and formats all text
+// - Applies humanized final polish via editAndFormat()
+// ============================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
@@ -10,8 +17,12 @@ import { cleanTranscript } from "./textHelpers.js";
 import { calculateDuration } from "./durationCalculator.js";
 import { getWeatherSummary } from "./getWeatherSummary.js";
 import getTuringQuote from "./getTuringQuote.js";
+import editAndFormat from "./editAndFormat.js"; // ✅ Added
 import { info } from "#logger.js";
 
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
 function toPlainText(s) {
   if (!s) return "";
   return String(s)
@@ -38,6 +49,9 @@ function normalizeSessionMeta(sessionIdLike) {
   return { sessionId: "unknown", date: undefined };
 }
 
+// ─────────────────────────────────────────────────────────────
+// Intro
+// ─────────────────────────────────────────────────────────────
 export async function generateIntro(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
   const weatherSummary = await getWeatherSummary();
@@ -51,6 +65,9 @@ export async function generateIntro(sessionIdLike) {
   return sanitizeOutput(res);
 }
 
+// ─────────────────────────────────────────────────────────────
+// Main
+// ─────────────────────────────────────────────────────────────
 export async function generateMain(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
   const { items, feedUrl } = await fetchFeedArticles();
@@ -61,6 +78,7 @@ export async function generateMain(sessionIdLike) {
       link: it?.link || it?.url || "",
     }))
     .filter((a) => a.title || a.summary);
+
   const { mainSeconds, targetMins } = calculateDuration("main", sessionMeta, articles.length);
   info("script.main.runtimeTarget", { targetMins, mainSeconds, articleCount: articles.length, feedUrl });
   const prompt = getMainPrompt({ sessionMeta, articles, mainSeconds });
@@ -72,6 +90,9 @@ export async function generateMain(sessionIdLike) {
   return sanitizeOutput(res);
 }
 
+// ─────────────────────────────────────────────────────────────
+// Outro
+// ─────────────────────────────────────────────────────────────
 export async function generateOutro(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
   const prompt = await getOutroPromptFull(sessionMeta);
@@ -83,14 +104,23 @@ export async function generateOutro(sessionIdLike) {
   return sanitizeOutput(res);
 }
 
+// ─────────────────────────────────────────────────────────────
+// Compose & Upload
+// ─────────────────────────────────────────────────────────────
 export async function generateComposedEpisode(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
+
   const [intro, main, outro] = await Promise.all([
     generateIntro(sessionMeta),
     generateMain(sessionMeta),
     generateOutro(sessionMeta),
   ]);
-  const transcript = [intro, "", main, "", outro].join("\n");
+
+  // ✅ Apply editAndFormat to the final transcript only
+  const rawTranscript = [intro, "", main, "", outro].join("\n");
+  const transcript = editAndFormat(rawTranscript);
+
+  // Upload artifacts
   const id = sessionMeta.sessionId || "episode";
   await putText("transcripts", `${id}.txt`, transcript);
   await putJson("meta", `${id}.json`, {
@@ -102,6 +132,7 @@ export async function generateComposedEpisode(sessionIdLike) {
       ...calculateDuration("outro", sessionMeta),
     },
   });
+
   return { transcript, session: sessionMeta };
 }
 
