@@ -1,28 +1,29 @@
 // ============================================================
-// 🧠 RSS Feed Creator — End-to-End Rewrite Pipeline
+// 🧠 RSS Feed Creator — End-to-End Rewrite Pipeline (Shiper)
 // ============================================================
 //
-// - Fetches source RSS feeds
-// - Rewrites + enriches items via AI (rssRewrite + rssShortTitle)
-// - Builds and uploads RSS feed to R2
+// Uses the ACTUAL file names from your repo:
+//  - ./utils/fetchFeeds.js
+//  - ./utils/models.js
+//  - ./utils/feedGenerator.js
+//
+// Ensures the enriched array (rewrittenItems) is used to build the feed.
+// Adds clear preview logging and a one-shot retry on upload.
 // ============================================================
 
 import { info, error } from "#logger.js";
-import { fetchAndParseFeeds } from "./utils/sourceFeeds.js";
-import { rewriteRssFeedItems } from "./models.js";
+import { fetchAndParseFeeds } from "./utils/fetchFeeds.js";
+import { rewriteRssFeedItems } from "./utils/models.js";
 import { generateFeed } from "./utils/feedGenerator.js";
 
 export async function endToEndRewrite() {
   try {
     info("rss-feed-creator.pipeline.start");
 
-    // 1️⃣ Fetch source feeds
+    // 1) Fetch source items
     const feedItems = await fetchAndParseFeeds();
-
     if (!Array.isArray(feedItems) || feedItems.length === 0) {
-      info("rss-feed-creator.pipeline.noItems", {
-        reason: "No valid items fetched from sources",
-      });
+      info("rss-feed-creator.pipeline.noItems", { reason: "no valid items" });
       return { totalItems: 0, rewrittenItems: 0 };
     }
 
@@ -31,20 +32,19 @@ export async function endToEndRewrite() {
       sampleTitle: feedItems[0]?.title,
     });
 
-    // 2️⃣ Rewrite + enrich feed items (adds shortTitle, shortUrl, rewritten, shortGuid)
+    // 2) Rewrite + enrich (adds shortTitle, shortUrl, rewritten, shortGuid, pubDate)
     const rewrittenItems = await rewriteRssFeedItems(feedItems);
-
     if (!Array.isArray(rewrittenItems) || rewrittenItems.length === 0) {
       throw new Error("rewriteRssFeedItems() returned no results");
     }
 
-    // 🧩 Quick sample log to confirm enrichment before feed generation
-    const first = rewrittenItems[0];
+    // Preview the first enriched item to confirm correct fields
+    const first = rewrittenItems[0] || {};
     info("rss-feed-creator.pipeline.sample", {
-      shortTitle: first?.shortTitle,
-      shortUrl: first?.shortUrl,
-      guid: first?.shortGuid,
-      rewritten: !!first?.rewritten,
+      shortTitle: first.shortTitle,
+      shortUrl: first.shortUrl,
+      guid: first.shortGuid,
+      hasRewritten: !!first.rewritten,
     });
 
     info("rss-feed-creator.batch.complete", {
@@ -52,7 +52,7 @@ export async function endToEndRewrite() {
       rewrittenItems: rewrittenItems.length,
     });
 
-    // 3️⃣ Generate RSS feed using enriched data
+    // 3) Build + upload RSS using the ENRICHED array (not the originals)
     await safeGenerateFeed("rss", rewrittenItems);
 
     info("rss-feed-creator.pipeline.done", {
@@ -62,37 +62,32 @@ export async function endToEndRewrite() {
 
     return { totalItems: feedItems.length, rewrittenItems: rewrittenItems.length };
   } catch (err) {
-    error("rss-feed-creator.pipeline.fail", {
-      message: err?.message,
-      stack: err?.stack,
-    });
+    error("rss-feed-creator.pipeline.fail", { message: err?.message, stack: err?.stack });
     throw err;
   }
 }
 
-// ============================================================
-// 🔁 Safe feed generator with retry logic
-// ============================================================
-
+// ------------------------------------------------------------
+// 🔁 Safe feed generation with one retry
+// ------------------------------------------------------------
 async function safeGenerateFeed(bucket, items) {
   try {
-    await generateFeed(bucket, items);
-  } catch (err) {
-    error("rss-feed-creator.generateFeed.retry", {
-      message: err?.message,
-    });
-
-    // Simple one-time retry after 2s delay
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    try {
-      await generateFeed(bucket, items);
-      info("rss-feed-creator.generateFeed.retry.success");
-    } catch (retryErr) {
-      error("rss-feed-creator.generateFeed.retry.fail", {
-        message: retryErr?.message,
+    if (items?.[0]) {
+      info("🧩 feed preview", {
+        title: items[0]?.shortTitle || items[0]?.title,
+        link: items[0]?.shortUrl || items[0]?.link,
+        hasRewritten: !!items[0]?.rewritten,
       });
-      throw retryErr;
     }
+
+    await generateFeed(bucket, items);
+    info("rss-feed-creator.generateFeed.success", { bucket, items: items.length });
+  } catch (err) {
+    error("rss-feed-creator.generateFeed.fail", { message: err?.message });
+
+    // retry once after 2s
+    await new Promise((r) => setTimeout(r, 2000));
+    await generateFeed(bucket, items);
+    info("rss-feed-creator.generateFeed.retry.success", { bucket });
   }
 }
