@@ -1,116 +1,24 @@
-// services/script/utils/promptTemplates.js
+// ============================================================
+// 🎙️ services/script/utils/promptTemplates.js
+// ============================================================
 
-import getSponsor from './getSponsor.js';
-import generateCta from './generateCta.js';
-import { getRandomTone } from './toneSetter.js';
-import DurationCalculator from './durationCalculator.js';
+import getSponsor from "./getSponsor.js";
+import generateCta from "./generateCta.js";
+import { getRandomTone } from "./toneSetter.js";
+import DurationCalculator from "./durationCalculator.js";
 
 const episodeTone = getRandomTone();
 
-// --- STRICTER PERSONA PROMPT ---
+// --- Core Persona ---
 const persona = `You are Jonathan Harris, a witty British Gen X host of the podcast "Turing's Torch: AI Weekly".
-Your persona has the following traits:
-- Tone: ${episodeTone}, dry, lightly sarcastic, and highly intelligent.
-- Style: You speak in a natural, conversational monologue.
-- Never include stage directions, sound cues, parenthetical notes, or production hints — your narration exists in pure audio form; only your words carry the tone.
+You speak in a natural, reflective tone — sharp, intelligent, dryly humorous.
+You NEVER use stage directions, parenthetical notes, or sound cues.
+Your words alone carry the tone — pure transcript form only.`;
 
-Each intro should begin uniquely — vary sentence rhythm, pacing, and syntax slightly to keep it sounding human and unscripted.
-
-**CRITICAL RULES - YOU WILL BE PENALIZED FOR VIOLATING THESE:**
-1. **ABSOLUTELY NO repetitive transitions:** Never use "Right, another week...", "Well, another week...", "Right, well...", "So, there you have it...", or any variation.
-2. **NO abrupt topic changes:** Create seamless transitions by finding thematic connections between stories.
-3. **NO stage directions, music cues, or parenthetical text of any kind.**
-4. **Treat the entire script as ONE continuous thought:** The listener should not detect article boundaries.
-`;
-
-// --- AGGRESSIVE TRANSITION & CLEANUP ENFORCER ---
-function enforceTransitions(input) {
-  let modifiedText = "";
-
-  if (Array.isArray(input)) modifiedText = input.join(" ");
-  else if (typeof input === "object" && input !== null)
-    modifiedText = input.text || JSON.stringify(input);
-  else if (typeof input === "string") modifiedText = input;
-  else modifiedText = String(input ?? "");
-
-  const forbiddenPatterns = [
-    /(Right|Well|So),\s*(another|a)\s*(week|day|batch|flurry)/gi,
-    /(Right|Well|So),\s*(another|a)\s*/gi,
-    /\bAnother\s*(week|day)(?:\b|[^.])/gi, // catches "Another week in London..."
-    /Another\s*(week|day)\s*,?\s*another/gi,
-    /Well,\s*another/gi,
-    /Right,\s*another/gi,
-    /So,\s*there you have it/gi,
-    /Now,\s*moving on to/gi,
-  ];
-
-  let violations = 0;
-  for (const pattern of forbiddenPatterns) {
-    const matches = modifiedText.match(pattern);
-    if (matches) {
-      violations += matches.length;
-      modifiedText = modifiedText.replace(pattern, () => {
-        const alternatives = [
-          "This brings us to",
-          "Meanwhile,",
-          "In a related development,",
-          "Shifting focus to",
-          "Which naturally leads to",
-          "This story connects to",
-        ];
-        return alternatives[Math.floor(Math.random() * alternatives.length)];
-      });
-    }
-  }
-
-  // 🚫 Remove any sound/music/stage cues in parentheses or brackets
-  modifiedText = modifiedText.replace(/\([^)]*(sound|music|fade|intro|cue|effect)[^)]*\)/gi, "");
-  modifiedText = modifiedText.replace(/\[[^\]]*(sound|music|fade|intro|cue|effect)[^\]]*\]/gi, "");
-
-  if (violations > 0)
-    console.log(`🚫 Fixed ${violations} transition violations`);
-
-  return modifiedText;
-}
-
-// --- HUMANIZER + SYNONYM VARIATION ---
-function humanize(input) {
-  let text = "";
-  if (Array.isArray(input)) text = input.join(" ");
-  else if (typeof input === "object" && input !== null)
-    text = input.text || JSON.stringify(input);
-  else text = String(input ?? "");
-
-  let result = enforceTransitions(text);
-
-  const synonyms = {
-    AI: [
-      "AI",
-      "artificial intelligence",
-      "these systems",
-      "machine intelligence",
-      "the current AI landscape",
-    ],
-    however: ["though", "that said", "but then again", "although", "then again"],
-    therefore: ["so", "which means", "consequently", "as a result", "thus"],
-    significant: ["notable", "major", "important", "substantial", "considerable"],
-  };
-
-  for (const word in synonyms) {
-    const regex = new RegExp(`\\b${word}\\b`, "gi");
-    result = result.replace(regex, () => {
-      const options = synonyms[word];
-      return options[Math.floor(Math.random() * options.length)];
-    });
-  }
-
-  return result;
-}
-
-// --- INTRO PROMPT (HARDENED) ---
-export function getIntroPrompt({ weatherSummary, turingQuote }) {
+// --- INTRO PROMPT ---
+export function getIntroPrompt({ weatherSummary, turingQuote, targetMins = 45 }) {
   const introVariants = [
-    "Welcome to another episode of Turing's Torch: AI Weekly.",
+    "Welcome to Turing's Torch: AI Weekly.",
     "You're listening to Turing's Torch: AI Weekly.",
     "This is Turing's Torch: AI Weekly — your spark in the world of AI.",
     "I'm Jonathan Harris, and this is Turing's Torch: AI Weekly — the show where we make sense of machine intelligence.",
@@ -119,29 +27,27 @@ export function getIntroPrompt({ weatherSummary, turingQuote }) {
 
   return `${persona}
 
-Write the podcast intro script in a natural, conversational tone.
-Start with a dry, witty observation about the UK weather, based on this input: ${weatherSummary}.
-⚠️ Do NOT mention temperature, numbers, or weather data values.
-⚠️ Do NOT start with or use phrases like "Another week", "Once again", or "Here we are again" — the opening must feel fresh and spontaneous.
-⚠️ ABSOLUTELY NO parenthetical notes, sound effects, or cues (e.g. "(music fades)", "(sound of static)").
+Write a clean, plain-text intro monologue.
 
-Then flow seamlessly into this Alan Turing quote, delivered sincerely but conversationally:
+Start with a wry, human observation about the current UK weather:
+"${weatherSummary}"
+
+Then flow naturally into this Alan Turing quote:
 "${turingQuote}"
 
-Use that quote as a thematic bridge into the show's introduction:
+Use that quote as a bridge to set the reflective tone for this episode’s ${targetMins}-minute runtime.
 
+Avoid repetition or filler. Conclude with:
 "Tired of drowning in AI headlines? Ready for clarity, insight, and a direct line to the pulse of innovation? ${selectedIntro} I'm Jonathan Harris, your host, cutting through the noise to bring you the most critical AI developments, explained, analysed, and delivered straight to you. Let's ignite your understanding of AI, together."
 
-**STYLE REQUIREMENTS:**
-- Keep it compact, human, and fluent
-- Avoid robotic or formulaic transitions
-- Exclude numbers or sound cues
-- Plain text only — no stage directions
-- Smooth flow: weather → quote → show intro`;
+RULES:
+- Plain text only — no parenthetical or stage directions.
+- Smooth weather → quote → tone transition.
+- Keep flow natural and concise.`;
 }
 
 // --- MAIN PROMPT ---
-export function getMainPrompt({ articles = [], targetDuration = 60 }) {
+export function getMainPrompt({ articles = [], targetDuration = 45 }) {
   const normalizedArticles = Array.isArray(articles)
     ? articles.filter((a) => typeof a === "string" && a.trim().length > 0)
     : typeof articles === "string"
@@ -150,187 +56,64 @@ export function getMainPrompt({ articles = [], targetDuration = 60 }) {
 
   const articleCount = normalizedArticles.length;
 
-  if (articleCount === 0) {
-    return `${persona}\n\nNo articles are available. Create an engaging 5-7 minute monologue about recent AI developments.`;
-  }
-
   const { targetChars, estimatedMinutes } = DurationCalculator.calculateArticleTargets(
     targetDuration,
     articleCount
   );
 
-  console.log(
-    `📝 Articles: ${articleCount}, Target: ${targetChars} chars/article, Est: ${estimatedMinutes.toFixed(
-      1
-    )}min content`
-  );
+  const articlePreview = normalizedArticles
+    .map((t, i) => `--- ARTICLE ${i + 1} ---\n${t.slice(0, 400)}...`)
+    .join("\n\n");
 
-  const articleThemes = analyzeArticleThemes(normalizedArticles);
+  return `${persona}
 
-  const mainPrompt = `${persona}
+Create one seamless spoken monologue (no headings or breaks) about ${articleCount} AI stories.
+Each topic should transition organically to the next — the listener should never hear a hard boundary.
 
-**YOUR PRIMARY MISSION:** Create a SINGLE, SEAMLESS monologue where ${articleCount} news stories flow together naturally. The listener should NOT be able to tell where one article ends and the next begins.
+DURATION: approximately ${targetDuration} minutes total (${estimatedMinutes.toFixed(1)} expected).
 
-**ZERO TOLERANCE RULES:**
-❌ NEVER use "Right, another week..." or similar
-❌ NEVER start a new topic abruptly
-❌ NEVER use enumeration ("first", "second", "next")
-❌ NEVER include parenthetical sound cues or notes
+Rules:
+- Plain text only — no lists, no "first/second", no cues or brackets.
+- Avoid repeated openers like "Right," or "Well,".
+- Maintain analytical yet conversational tone.
+- Use thematic links: cause/effect, contrast, or question-based transitions.
 
-**TRANSITION TECHNIQUES:**
-✅ Thematic bridges — connect stories through shared ideas: ${articleThemes.join(", ")}
-✅ Cause and effect: "This development naturally leads us to consider..."
-✅ Contrast: "While that story focused on X, this one shows Y..."
-✅ Question flow: "But what does this mean for Z? That brings us to..."
-
-**ARTICLES:**
-${normalizedArticles
-    .map((text, i) => `--- ARTICLE ${i + 1} ---\n${text.substring(0, 500)}...`)
-    .join("\n\n")}
-
-Now write one continuous, witty, analytical monologue in plain text with smooth flow.`;
-
-  return humanize(mainPrompt);
+Source material:
+${articlePreview}`;
 }
 
-// --- THEME DETECTOR ---
-function analyzeArticleThemes(articles) {
-  const themes = new Set();
-  const themeKeywords = {
-    legal: ["legal", "law", "court", "litigation", "lawyer", "firm"],
-    technology: ["AI", "algorithm", "software", "tech", "digital", "compute"],
-    business: ["funding", "investment", "startup", "market", "business"],
-    infrastructure: ["infrastructure", "data center", "server", "GPU", "compute"],
-    education: ["education", "training", "curriculum", "school", "learn"],
-  };
-
-  articles.forEach((a) => {
-    const text = (typeof a === "string" ? a : JSON.stringify(a)).toLowerCase();
-    for (const [theme, words] of Object.entries(themeKeywords)) {
-      if (words.some((w) => text.includes(w))) themes.add(theme);
-    }
-  });
-  return Array.from(themes);
-}
-
-// --- OUTRO PROMPT (HARDENED) ---
-export async function getOutroPromptFull() {
-  let myBook, title, url, cta;
-
+// --- OUTRO PROMPT ---
+export async function getOutroPromptFull(targetMins = 45) {
+  let book, title, url, cta;
   try {
-    myBook = await getSponsor();
-    title = myBook?.title || "Digital Diagnosis: How AI Is Revolutionizing Healthcare";
-    url = myBook?.url?.replace(/^https?:\/\//, "") || "jonathan-harris.online";
-    cta = await generateCta(myBook);
-  } catch (err) {
-    console.error("⚠️ Failed to resolve sponsor or CTA:", err);
+    book = await getSponsor();
+    title = book?.title || "Digital Diagnosis: How AI Is Revolutionizing Healthcare";
+    url = book?.url?.replace(/^https?:\/\//, "") || "jonathan-harris.online";
+    cta = await generateCta(book);
+  } catch {
     title = "Digital Diagnosis: How AI Is Revolutionizing Healthcare";
     url = "jonathan-harris.online";
-    cta = "Explore the future of AI in my latest eBook at jonathan-harris.online";
+    cta = "Explore more of my AI work at jonathan-harris.online.";
   }
 
-  const safeCta = String(cta ?? "Learn more about my latest AI book online.");
-  const safeTitle = String(title ?? "AI Weekly");
-  const safeUrl = String(url ?? "jonathan-harris.online");
-
   const outroVariants = [
-    "That's it for this week's Turing's Torch. Keep the flame burning, stay curious, and I'll see you next week with more AI insights that matter. I'm Jonathan Harris—keep building the future.",
-    "And that wraps up this week's Turing's Torch. Stay curious, keep the flame alive, and join me next week for more AI stories that truly matter. I'm Jonathan Harris—keep building the future.",
-    "That’s all from this week’s Turing’s Torch. Keep that curiosity blazing, and I’ll see you next week for more insights that matter. I’m Jonathan Harris—keep building the future.",
+    "That’s all for this week’s Turing’s Torch. Keep that curiosity blazing, and I’ll see you next time for more insights that matter. I’m Jonathan Harris—keep building the future.",
+    "And that wraps up this week’s Turing’s Torch. Stay curious, keep learning, and I’ll catch you next time. I’m Jonathan Harris—keep building the future.",
   ];
   const selectedOutro = outroVariants[Math.floor(Math.random() * outroVariants.length)];
 
-  const outroPrompt = `${persona}
+  return `${persona}
 
-Write the closing script that flows naturally from the final story.
+Write a closing monologue for a ${targetMins}-minute episode that flows naturally from the main discussion.
 
-**STRUCTURE:**
-1. Reflect briefly on the final story's theme
-2. Transition naturally into your personal CTA: "${safeCta}"
-3. Mention your book title: "${safeTitle}" and website: "${safeUrl}"
-4. End with this sign-off (allow natural paraphrasing but preserve meaning):
-"${selectedOutro}"
+Include:
+1. A reflective comment on the episode’s central theme.
+2. A subtle personal call-to-action: "${cta}"
+3. Mention your book: "${title}" and website: "${url}"
+4. Conclude with this paraphrased sign-off: "${selectedOutro}"
 
-**STRICT RULES:**
-- ABSOLUTELY NO stage directions, sound effects, or music references.
-- Speak the URL naturally (dots as "dot").
-- Keep tone authentic and human, not promotional.
-- Plain text only, one continuous flow.`;
-
-  if (!outroPrompt || outroPrompt.trim().length < 10)
-    throw new Error("Invalid outro prompt — empty or malformed content");
-
-  return outroPrompt;
+STRICT RULES:
+- Plain text only — no sound cues, music notes, or formatting.
+- Speak URLs naturally (“dot” instead of punctuation).
+- Smooth tone, no abrupt ending.`;
 }
-
-// --- VALIDATORS ---
-export function validateScript(script) {
-  const violations = [];
-  const forbiddenPatterns = [
-    /(Right|Well|So),\s*(another|a)\s*(week|day|batch|flurry)/gi,
-    /\bAnother\s*(week|day)(?:\b|[^.])/gi,
-    /Well,\s*another/gi,
-    /Right,\s*another/gi,
-    /So,\s*there you have it/gi,
-    /\([^)]*(sound|music|fade|intro|cue|effect)[^)]*\)/gi,
-    /\[[^\]]*(sound|music|fade|intro|cue|effect)[^\]]*\]/gi,
-  ];
-
-  const safeScript = String(script ?? "");
-
-  forbiddenPatterns.forEach((pattern) => {
-    const matches = safeScript.match(pattern);
-    if (matches) {
-      violations.push({
-        pattern: pattern.toString(),
-        matches,
-        message: `Forbidden pattern detected`,
-      });
-    }
-  });
-
-  const sentences = safeScript.split(/[.!?]+/).filter((s) => s.trim().length > 0);
-  const starters = sentences.map((s) => s.trim().split(" ")[0].toLowerCase());
-  const freq = starters.reduce((acc, s) => ((acc[s] = (acc[s] || 0) + 1), acc), {});
-  Object.entries(freq).forEach(([w, c]) => {
-    if (c > 3 && c > sentences.length * 0.2)
-      violations.push({ pattern: "Repetitive starter", matches: [`"${w}" used ${c} times`] });
-  });
-
-  return { isValid: violations.length === 0, violations, score: Math.max(0, 10 - violations.length * 2) };
-}
-
-export function validateOutro(script, expectedCta, expectedTitle, expectedUrl) {
-  const issues = [];
-  const safeScript = String(script ?? "");
-  const cleanUrl = expectedUrl?.replace(/^https?:\/\//, "");
-
-  if (expectedCta && !safeScript.includes(expectedCta))
-    issues.push(`Missing CTA: "${expectedCta}"`);
-  if (expectedTitle && !safeScript.includes(expectedTitle))
-    issues.push(`Missing book title: "${expectedTitle}"`);
-  if (cleanUrl && !safeScript.includes(cleanUrl))
-    issues.push(`Missing website: "${cleanUrl}"`);
-
-  const transitionViolations = validateScript(safeScript).violations;
-  if (transitionViolations.length > 0)
-    issues.push(...transitionViolations.map((v) => v.message));
-
-  return {
-    isValid: issues.length === 0,
-    issues,
-    hasCta: expectedCta ? safeScript.includes(expectedCta) : false,
-    hasBook: expectedTitle ? safeScript.includes(expectedTitle) : false,
-    hasUrl: cleanUrl ? safeScript.includes(cleanUrl) : false,
-  };
-}
-
-export default {
-  getIntroPrompt,
-  getMainPrompt,
-  getOutroPromptFull,
-  humanize,
-  enforceTransitions,
-  validateScript,
-  validateOutro,
-};
