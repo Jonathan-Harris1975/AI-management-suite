@@ -64,7 +64,7 @@ export const s3 = new S3Client({
 export const R2_BUCKETS = {
   podcast: R2_BUCKET_PODCAST,
   raw: R2_BUCKET_RAW,
-  rawText: R2_BUCKET_RAW_TEXT,
+  rawtext: R2_BUCKET_RAW_TEXT,
   meta: R2_BUCKET_META,
   merged: R2_BUCKET_MERGED,
   art: R2_BUCKET_ART,
