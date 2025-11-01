@@ -5,7 +5,7 @@ import { info, error } from "#logger.js";
 export async function getWeatherSummary() {
   const apiKey = process.env.RAPIDAPI_KEY;
   const apiHost = process.env.RAPIDAPI_HOST || "weatherapi-com.p.rapidapi.com";
-  const location = "London, England";
+  const location = "London";
 
   try {
     if (!apiKey) throw new Error("Missing RAPIDAPI_KEY");
