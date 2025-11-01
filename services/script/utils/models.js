@@ -3,145 +3,111 @@
 // ============================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-import {
-  getIntroPrompt,
-  getMainPrompt,
-  getOutroPromptFull,
-} from "./promptTemplates.js";
+import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
 import fetchFeedArticles from "./fetchFeeds.js";
 import { putText, putJson } from "../../shared/utils/r2-client.js";
 import { cleanTranscript } from "./textHelpers.js";
-import chunkText from "./chunkText.js";
-import { generateEpisodeMeta,extractAndParseJson,
-  getTitleDescriptionPrompt,
-  getSEOKeywordsPrompt,
-  getArtworkPrompt } from "./podcastHelpers.js";
-import { getAllParts } from "./sessionCache.js";
+import { calculateDuration } from "./durationCalculator.js";
 import { getWeatherSummary } from "./getWeatherSummary.js";
-import { getTuringQuote } from "./getTuringQuote.js";
+import getTuringQuote from "./getTuringQuote.js";
+import { info } from "#logger.js";
 
-function normalizeSessionId(sessionId) {
-  return typeof sessionId === "object" && sessionId
-    ? sessionId.id || sessionId.sessionId || String(sessionId)
-    : String(sessionId);
-}
-
-// Clean any model output to guaranteed plain text
-function sanitizeOutput(text = "") {
-  return text
-    .replace(/\(.*?\)/g, "")
-    .replace(/\[.*?\]/g, "")
-    .replace(/[*_~`#<>]/g, "")
-    .replace(/\s{2,}/g, " ")
-    .replace(/^\s+|\s+$/g, "")
+function toPlainText(s) {
+  if (!s) return "";
+  return String(s)
+    .replace(/\[(?:music|sfx|cue|intro|outro|.*?)]/gi, "")
+    .replace(/\((?:music|sfx|cue|intro|outro|.*?)]?\)/gi, "")
+    .replace(/\*{1,3}/g, "")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-// 🧩 Intro
-export async function generateIntro(sessionId, targetMins = 45) {
+function sanitizeOutput(s) {
+  return cleanTranscript(toPlainText(s));
+}
+
+function normalizeSessionMeta(sessionIdLike) {
+  if (typeof sessionIdLike === "string") {
+    const m = sessionIdLike.match(/\d{4}-\d{2}-\d{2}/);
+    return { sessionId: sessionIdLike, date: m ? m[0] : undefined };
+  }
+  if (typeof sessionIdLike === "object" && sessionIdLike) {
+    return { sessionId: sessionIdLike.sessionId || "", date: sessionIdLike.date };
+  }
+  return { sessionId: "unknown", date: undefined };
+}
+
+export async function generateIntro(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
   const weatherSummary = await getWeatherSummary();
   const turingQuote = await getTuringQuote();
-  const prompt = getIntroPrompt({ weatherSummary, turingQuote, targetMins });
-
-  const systemPrompt = `
-${prompt}
-
-CRITICAL INSTRUCTIONS:
-- Output plain text only — no cues, brackets, or meta.
-- Maintain smooth weather → quote → tone progression.
-  `.trim();
-
+  const prompt = getIntroPrompt({ weatherSummary, turingQuote, sessionMeta });
   const res = await resilientRequest("scriptIntro", {
-    sessionId,
+    sessionId: sessionMeta,
     section: "intro",
-    messages: [{ role: "system", content: systemPrompt }],
+    messages: [{ role: "system", content: prompt }],
   });
-
   return sanitizeOutput(res);
 }
 
-// 🧩 Main
-export async function generateMain(sessionId, targetMins = 45) {
-  const feedUrl = process.env.FEED_URL;
-  if (!feedUrl) throw new Error("Missing FEED_URL env variable");
-
-  const articles = await fetchFeedArticles(feedUrl);
-  if (!articles?.length) throw new Error("No articles fetched");
-
-  const prompt = getMainPrompt({ articles, targetDuration: targetMins });
-  const systemPrompt = `
-${prompt}
-
-OUTPUT REQUIREMENTS:
-- Produce continuous, plain-text narrative only.
-- Avoid meta, headings, or structural formatting.
-  `.trim();
-
+export async function generateMain(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
+  const { items, feedUrl } = await fetchFeedArticles();
+  const articles = (items || [])
+    .map((it) => ({
+      title: it?.title?.trim() || "",
+      summary: it?.summary?.trim() || it?.description?.trim() || "",
+      link: it?.link || it?.url || "",
+    }))
+    .filter((a) => a.title || a.summary);
+  const { mainSeconds, targetMins } = calculateDuration("main", sessionMeta, articles.length);
+  info("script.main.runtimeTarget", { targetMins, mainSeconds, articleCount: articles.length, feedUrl });
+  const prompt = getMainPrompt({ sessionMeta, articles, mainSeconds });
   const res = await resilientRequest("scriptMain", {
-    sessionId,
+    sessionId: sessionMeta,
     section: "main",
-    messages: [{ role: "system", content: systemPrompt }],
+    messages: [{ role: "system", content: prompt }],
   });
-
   return sanitizeOutput(res);
 }
 
-// 🧩 Outro
-export async function generateOutro(sessionId, targetMins = 45) {
-  const prompt = await getOutroPromptFull(targetMins);
-  const systemPrompt = `
-${prompt}
-
-OUTPUT RULES:
-- Plain text only.
-- Natural closing tone.
-- No sound cues or parentheticals.
-  `.trim();
-
+export async function generateOutro(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
+  const prompt = await getOutroPromptFull(sessionMeta);
   const res = await resilientRequest("scriptOutro", {
-    sessionId,
+    sessionId: sessionMeta,
     section: "outro",
-    messages: [{ role: "system", content: systemPrompt }],
+    messages: [{ role: "system", content: prompt }],
   });
-
   return sanitizeOutput(res);
 }
 
-// 🧩 Combine + Upload
-export async function finalizeAndUpload(sessionId) {
-  const { intro, main, outro } = await getAllParts(sessionId);
-  if (!intro || !main || !outro)
-    throw new Error("Missing one or more transcript parts");
-
-  const fullTranscript = cleanTranscript(`${intro}\n\n${main}\n\n${outro}`);
-  const cleaned = sanitizeOutput(fullTranscript);
-
-  const chunks = chunkText(cleaned);
-  const id = normalizeSessionId(sessionId);
-
-  await putText("transcript", `${id}.txt`, cleaned);
-  await Promise.all(
-    chunks.map((chunk, i) =>
-      putText("rawText", `${id}/chunk_${i + 1}.txt`, chunk)
-    )
-  );
-
-  const metadata = await generateEpisodeMeta({ intro, main, outro });
-  await putJson("meta", `${id}.json`, metadata);
-
-  return { fullTranscript: cleaned, chunks, metadata };
+export async function generateComposedEpisode(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
+  const [intro, main, outro] = await Promise.all([
+    generateIntro(sessionMeta),
+    generateMain(sessionMeta),
+    generateOutro(sessionMeta),
+  ]);
+  const transcript = [intro, "", main, "", outro].join("\n");
+  const id = sessionMeta.sessionId || "episode";
+  await putText("transcripts", `${id}.txt`, transcript);
+  await putJson("meta", `${id}.json`, {
+    session: sessionMeta,
+    createdAt: new Date().toISOString(),
+    durations: {
+      ...calculateDuration("intro", sessionMeta),
+      ...calculateDuration("main", sessionMeta),
+      ...calculateDuration("outro", sessionMeta),
+    },
+  });
+  return { transcript, session: sessionMeta };
 }
 
-// 🧩 Orchestrator
-export async function generateComposedEpisode(sessionId, targetMins = 45) {
-  console.log(`🎙️ Starting ${targetMins}-minute episode for session ${sessionId}`);
-
-  const [intro, main, outro] = await Promise.all([
-    generateIntro(sessionId, targetMins),
-    generateMain(sessionId, targetMins),
-    generateOutro(sessionId, targetMins),
-  ]);
-
-  console.log("🧩 All sections generated — finalizing upload...");
-  return await finalizeAndUpload(sessionId);
-    }
+export default {
+  generateIntro,
+  generateMain,
+  generateOutro,
+  generateComposedEpisode,
+};

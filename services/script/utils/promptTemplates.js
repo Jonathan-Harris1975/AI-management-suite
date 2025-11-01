@@ -1,140 +1,78 @@
 // ============================================================
 // 🎙️ services/script/utils/promptTemplates.js
 // ============================================================
-//
-// Generates AI prompt templates for each podcast section.
-// - Shared persona and tone per episode
-// - Auto-rotating duration only for MAIN section
-// - Strict plain-text output, no cues or formatting
-// ============================================================
 
 import getSponsor from "./getSponsor.js";
 import generateCta from "./generateCta.js";
+import { calculateDuration } from "./durationCalculator.js";
 import { buildPersona } from "./toneSetter.js";
-import { calculateDuration } from "./durationCalculator.js"; // ✅ fixed
 
-// ─────────────────────────────────────────────────────────────
-// 🧩 INTRO PROMPT (Fixed Duration)
-// ─────────────────────────────────────────────────────────────
-export function getIntroPrompt({ weatherSummary, turingQuote, sessionId }) {
-  const persona = buildPersona(sessionId);
-  const intros = [
-    "Welcome to Turing's Torch: AI Weekly.",
-    "You're listening to Turing's Torch: AI Weekly.",
-    "This is Turing's Torch: AI Weekly — your spark in the world of AI.",
-    "I'm Jonathan Harris, and this is Turing's Torch: AI Weekly — the show where we make sense of machine intelligence.",
-  ];
-  const selectedIntro = intros[Math.floor(Math.random() * intros.length)];
-
-  return `${persona}
-
-Write a clean, plain-text intro monologue.
-
-Start with a witty, observational remark about the UK weather:
-"${weatherSummary}"
-
-Then flow naturally into this Alan Turing quote:
-"${turingQuote}"
-
-Use the quote as a bridge into the episode’s introduction:
-"Tired of drowning in AI headlines? Ready for clarity, insight, and a direct line to the pulse of innovation? ${selectedIntro} I'm Jonathan Harris, your host, cutting through the noise to bring you the most critical AI developments, explained, analysed, and delivered straight to you. Let's ignite your understanding of AI, together."
-
-RULES:
-- Plain text only — no parenthetical notes, stage cues, or formatting.
-- Smooth weather → quote → tone transition.
-- Keep it conversational, concise, and authentic.`;
+function weekdayFromDateStr(dateStr) {
+  try {
+    if (!dateStr) return null;
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const date = new Date(Date.UTC(y, m - 1, d));
+    return date.toLocaleString("en-GB", { weekday: "long", timeZone: "Europe/London" });
+  } catch {
+    return null;
+  }
 }
 
-// ─────────────────────────────────────────────────────────────
-// 🧩 MAIN PROMPT (Dynamic Duration + Shared Tone)
-// ─────────────────────────────────────────────────────────────
-export async function getMainPrompt({ articles = [], sessionId }) {
-  const persona = buildPersona(sessionId);
+export function getIntroPrompt({ weatherSummary, turingQuote, sessionMeta }) {
+  const persona = buildPersona(sessionMeta);
+  const maybeWeekday = weekdayFromDateStr(sessionMeta?.date);
+  const weekdayLine = maybeWeekday ? ` If you mention a day, it must be "${maybeWeekday}".` : "";
 
-  const normalized = Array.isArray(articles)
-    ? articles.filter((a) => typeof a === "string" && a.trim().length > 0)
-    : typeof articles === "string"
-    ? [articles]
-    : [];
+  return `
+You are ${persona.host}, hosting the show "${persona.show}".
+Write a short, engaging INTRO for an AI news podcast.
+- Keep it ${persona.tone}.
+- Mention the current weather as: "${weatherSummary}" (do not add temperature).
+- Include a single Alan Turing quote: "${turingQuote}".
+- No music/stage cues. Plain text only.
+- Smoothly transition from the weather → to the quote → to welcoming the listener.${weekdayLine}
+`.trim();
+}
 
-  const articleCount = normalized.length;
-
-  // 🔄 Automatically calculate and normalize duration for MAIN
-  const { targetMins } = await calculateDuration(sessionId, "main");
-
-  console.log(
-    `🕒 Runtime target: ${targetMins} min for ${articleCount} article${
-      articleCount === 1 ? "" : "s"
-    }`
-  );
-
-  const articlePreview = normalized
-    .map((t, i) => `--- ARTICLE ${i + 1} ---\n${t.slice(0, 400)}...`)
+export function getMainPrompt({ sessionMeta, articles, mainSeconds }) {
+  const persona = buildPersona(sessionMeta);
+  const articlePreview = articles
+    .slice(0, Math.max(3, Math.min(6, articles.length)))
+    .map((a, i) => `${i + 1}. ${a.title}\n   ${a.summary || a.description || ""}\n   Source: ${a.link}`)
     .join("\n\n");
 
-  return `${persona}
-
-Create a single, continuous spoken monologue covering ${articleCount} AI stories.
-The listener should never detect where one story ends and another begins.
-
-TARGET LENGTH: ~${targetMins} minutes.
+  return `
+You are ${persona.host}, hosting "${persona.show}" with a ${persona.tone} style.
+Generate the MAIN section strictly from the provided articles below.
 
 RULES:
-- Plain text only (no lists, markdown, or formatting)
-- Maintain consistent tone for this entire episode
-- Use smooth, natural transitions (cause/effect, contrast, curiosity)
-- Never enumerate or label sections
+- Output plain text only.
+- No storytelling or fiction.
+- Summarize the most important developments clearly.
+- Attribute sources briefly in-line.
+- Keep this within ~${Math.round(mainSeconds / 60)} minutes of spoken delivery.
 
-Source material:
-${articlePreview}`;
+ARTICLES:
+${articlePreview}
+`.trim();
 }
 
-// ─────────────────────────────────────────────────────────────
-// 🧩 OUTRO PROMPT (Fixed Duration + Shared Tone)
-// ─────────────────────────────────────────────────────────────
-export async function getOutroPromptFull(sessionId) {
-  const persona = buildPersona(sessionId);
-  let book, title, url, cta;
+export async function getOutroPromptFull(sessionMeta) {
+  const persona = buildPersona(sessionMeta);
+  const { outroSeconds } = calculateDuration("outro", sessionMeta);
+  const book = await getSponsor().catch(() => null);
+  const title = book?.title || "AI in Manufacturing: Modernizing Operations and Maintenance";
+  const url = (book?.url || "https://jonathan-harris.online").replace(/^https?:\/\//, "");
+  const cta = generateCta({ title, url });
 
-  try {
-    book = await getSponsor();
-    title = book?.title || "Digital Diagnosis: How AI Is Revolutionizing Healthcare";
-    url = book?.url?.replace(/^https?:\/\//, "") || "jonathan-harris.online";
-    cta = await generateCta(book);
-  } catch (err) {
-    console.error("⚠️ Failed to load sponsor info:", err);
-    title = "Digital Diagnosis: How AI Is Revolutionizing Healthcare";
-    url = "jonathan-harris.online";
-    cta = "Explore my latest AI eBooks at jonathan-harris.online.";
-  }
-
-  const outros = [
-    "That’s all for this week’s Turing’s Torch. Keep that curiosity blazing, and I’ll see you next time. I’m Jonathan Harris—keep building the future.",
-    "And that wraps up this week’s Turing’s Torch. Stay curious, keep learning, and I’ll catch you next time. I’m Jonathan Harris—keep building the future.",
-  ];
-  const selectedOutro = outros[Math.floor(Math.random() * outros.length)];
-
-  return `${persona}
-
-Write a closing monologue that flows naturally from the main discussion.
-
-Include:
-1. A short reflection on the episode's main theme.
-2. A subtle personal call-to-action: "${cta}"
-3. Mention your book "${title}" and website "${url}"
-4. End with this paraphrased sign-off: "${selectedOutro}"
-
-RULES:
-- Plain text only (no cues, stage directions, or formatting)
-- Keep tone consistent with intro and main sections.
-- Speak URLs naturally using “dot” instead of punctuation.`;
+  return `
+You are ${persona.host}, closing "${persona.show}" in a ${persona.tone} style.
+Write a clean OUTRO (plain text only) that:
+- Thanks the listener, gives a brief recap.
+- Mentions "${title}" naturally, with the link "jonathan-harris dot online".
+- Includes: "${cta}"
+- No music cues, within ~${Math.round(outroSeconds / 60)} minute of spoken delivery.
+`.trim();
 }
 
-// ─────────────────────────────────────────────────────────────
-// 🧩 EXPORTS
-// ─────────────────────────────────────────────────────────────
-export default {
-  getIntroPrompt,
-  getMainPrompt,
-  getOutroPromptFull,
-};
+export default { getIntroPrompt, getMainPrompt, getOutroPromptFull };

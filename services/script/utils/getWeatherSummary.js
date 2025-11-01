@@ -2,6 +2,11 @@
 import fetch from "node-fetch";
 import { info, error } from "#logger.js";
 
+/**
+ * Returns a short, temperature-free weather line such as:
+ *   "light rain in London"
+ * If the API fails, returns a stable, safe fallback.
+ */
 export async function getWeatherSummary() {
   const apiKey = process.env.RAPIDAPI_KEY;
   const apiHost = process.env.RAPIDAPI_HOST || "weatherapi-com.p.rapidapi.com";
@@ -16,27 +21,22 @@ export async function getWeatherSummary() {
     const res = await fetch(url, {
       method: "GET",
       headers: {
-        "x-rapidapi-host": apiHost,
         "x-rapidapi-key": apiKey,
+        "x-rapidapi-host": apiHost,
       },
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Weather API error ${res.status}: ${text}`);
-    }
-
+    if (!res.ok) throw new Error(`Weather fetch failed: ${res.status} ${res.statusText}`);
     const data = await res.json();
-    const condition = data?.current?.condition?.text || "cloudy";
-    const temp = data?.current?.temp_c ?? 13;
 
-    const summary = `${condition.toLowerCase()} and ${temp}°C in London`;
+    const condition = (data?.current?.condition?.text || "overcast").toLowerCase().trim();
+    const summary = `${condition} in London`;
     info("weather.summary.success", { summary });
     return summary;
   } catch (err) {
     error("weather.summary.fail", { err: err.message });
-
-    // ✅ Never break the intro again
-    return "dreary grey skies and a hint of drizzle — classic London weather";
+    return "grey skies in London";
   }
 }
+
+export default getWeatherSummary;
