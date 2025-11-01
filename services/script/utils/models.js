@@ -1,4 +1,7 @@
-// services/script/utils/models.js
+// ============================================================
+// 🎧 services/script/utils/models.js — Clean Transcript Generator
+// ============================================================
+
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import {
   getIntroPrompt,
@@ -14,205 +17,128 @@ import { getAllParts } from "./sessionCache.js";
 import { getWeatherSummary } from "./getWeatherSummary.js";
 import { getTuringQuote } from "./getTuringQuote.js";
 
-// ─────────────────────────────────────────────────────────────
-// 🛠️ Helper: Normalize sessionId to string
-// ─────────────────────────────────────────────────────────────
 function normalizeSessionId(sessionId) {
-  if (typeof sessionId === "object" && sessionId !== null) {
-    return sessionId.id || sessionId.sessionId || String(sessionId);
-  }
-  return String(sessionId);
+  return typeof sessionId === "object" && sessionId
+    ? sessionId.id || sessionId.sessionId || String(sessionId)
+    : String(sessionId);
 }
 
-// ─────────────────────────────────────────────────────────────
-// 🧩 Intro Section (updated to use real utilities)
-// ─────────────────────────────────────────────────────────────
-export async function generateIntro(sessionId) {
-  try {
-    // Fetch dynamic data for intro
-    const weatherSummary = await getWeatherSummary();
-    const turingQuote = await getTuringQuote();
+// Clean any model output to guaranteed plain text
+function sanitizeOutput(text = "") {
+  return text
+    .replace(/\(.*?\)/g, "")
+    .replace(/\[.*?\]/g, "")
+    .replace(/[*_~`#<>]/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^\s+|\s+$/g, "")
+    .trim();
+}
 
-    // Build dynamic intro prompt
-    const prompt = getIntroPrompt({ weatherSummary, turingQuote });
+// 🧩 Intro
+export async function generateIntro(sessionId, targetMins = 45) {
+  const weatherSummary = await getWeatherSummary();
+  const turingQuote = await getTuringQuote();
+  const prompt = getIntroPrompt({ weatherSummary, turingQuote, targetMins });
 
-    if (!prompt || typeof prompt !== "string" || prompt.trim().length < 10) {
-      throw new Error("Invalid intro prompt generated");
-    }
-
-    // Enforce plain-text output
-    const systemPrompt = `
+  const systemPrompt = `
 ${prompt}
 
-IMPORTANT INSTRUCTIONS:
-- Produce a clean, plain text intro script only.
-- No stage directions, sound cues, or show notes.
-- Keep transitions smooth from weather → quote → main theme.
-- Maintain the existing persona tone.`;
+CRITICAL INSTRUCTIONS:
+- Output plain text only — no cues, brackets, or meta.
+- Maintain smooth weather → quote → tone progression.
+  `.trim();
 
-    return await resilientRequest("scriptIntro", {
-      sessionId,
-      section: "intro",
-      messages: [{ role: "system", content: systemPrompt }],
-    });
-  } catch (error) {
-    console.error(`[generateIntro] Failed for session ${sessionId}:`, error);
-    throw new Error(`Failed to generate intro: ${error.message}`);
-  }
+  const res = await resilientRequest("scriptIntro", {
+    sessionId,
+    section: "intro",
+    messages: [{ role: "system", content: systemPrompt }],
+  });
+
+  return sanitizeOutput(res);
 }
 
-// ─────────────────────────────────────────────────────────────
-// 🧩 Main Section
-// ─────────────────────────────────────────────────────────────
-export async function generateMain(sessionId) {
-  try {
-    const feedUrl = process.env.FEED_URL;
-    if (!feedUrl) {
-      throw new Error("FEED_URL environment variable not configured");
-    }
+// 🧩 Main
+export async function generateMain(sessionId, targetMins = 45) {
+  const feedUrl = process.env.FEED_URL;
+  if (!feedUrl) throw new Error("Missing FEED_URL env variable");
 
-    const articles = await fetchFeedArticles(feedUrl);
+  const articles = await fetchFeedArticles(feedUrl);
+  if (!articles?.length) throw new Error("No articles fetched");
 
-    if (!Array.isArray(articles) || articles.length === 0) {
-      throw new Error("No articles fetched from feed");
-    }
-
-    const prompt = getMainPrompt({ articles, targetDuration: 60 });
-
-    if (!prompt || typeof prompt !== "string") {
-      throw new Error("Invalid main prompt generated");
-    }
-
-    // Explicitly require plain text narrative
-    const systemPrompt = `
+  const prompt = getMainPrompt({ articles, targetDuration: targetMins });
+  const systemPrompt = `
 ${prompt}
 
-CRITICAL OUTPUT RULES:
-- Plain text only (no scene directions, music, or structural notes).
-- Natural human voice, continuous flow.`;
+OUTPUT REQUIREMENTS:
+- Produce continuous, plain-text narrative only.
+- Avoid meta, headings, or structural formatting.
+  `.trim();
 
-    return await resilientRequest("scriptMain", {
-      sessionId,
-      section: "main",
-      messages: [{ role: "system", content: systemPrompt }],
-    });
-  } catch (error) {
-    console.error(`[generateMain] Failed for session ${sessionId}:`, error);
-    throw new Error(`Failed to generate main section: ${error.message}`);
-  }
+  const res = await resilientRequest("scriptMain", {
+    sessionId,
+    section: "main",
+    messages: [{ role: "system", content: systemPrompt }],
+  });
+
+  return sanitizeOutput(res);
 }
 
-// ─────────────────────────────────────────────────────────────
-// 🧩 Outro Section
-// ─────────────────────────────────────────────────────────────
-export async function generateOutro(sessionId) {
-  try {
-    const prompt = await getOutroPromptFull();
-
-    if (!prompt || typeof prompt !== "string" || prompt.trim().length < 10) {
-      throw new Error("Invalid outro prompt — empty or malformed content");
-    }
-
-    const systemPrompt = `
+// 🧩 Outro
+export async function generateOutro(sessionId, targetMins = 45) {
+  const prompt = await getOutroPromptFull(targetMins);
+  const systemPrompt = `
 ${prompt}
 
-STRICT OUTPUT RULES:
-- Plain text only (no music, no production notes).
-- Maintain continuity and tone consistency from previous sections.`;
+OUTPUT RULES:
+- Plain text only.
+- Natural closing tone.
+- No sound cues or parentheticals.
+  `.trim();
 
-    return await resilientRequest("scriptOutro", {
-      sessionId,
-      section: "outro",
-      messages: [{ role: "system", content: systemPrompt }],
-    });
-  } catch (error) {
-    console.error(`[generateOutro] Failed for session ${sessionId}:`, error);
-    throw new Error(`Failed to generate outro: ${error.message}`);
-  }
+  const res = await resilientRequest("scriptOutro", {
+    sessionId,
+    section: "outro",
+    messages: [{ role: "system", content: systemPrompt }],
+  });
+
+  return sanitizeOutput(res);
 }
 
-// ─────────────────────────────────────────────────────────────
-// 🧩 Combine + Upload Transcript / Metadata
-// ─────────────────────────────────────────────────────────────
+// 🧩 Combine + Upload
 export async function finalizeAndUpload(sessionId) {
-  try {
-    const { intro, main, outro } = await getAllParts(sessionId);
+  const { intro, main, outro } = await getAllParts(sessionId);
+  if (!intro || !main || !outro)
+    throw new Error("Missing one or more transcript parts");
 
-    if (!intro || !main || !outro) {
-      throw new Error(
-        `Missing episode parts: intro=${!!intro}, main=${!!main}, outro=${!!outro}`
-      );
-    }
+  const fullTranscript = cleanTranscript(`${intro}\n\n${main}\n\n${outro}`);
+  const cleaned = sanitizeOutput(fullTranscript);
 
-    const normalizedSessionId = normalizeSessionId(sessionId);
+  const chunks = chunkText(cleaned);
+  const id = normalizeSessionId(sessionId);
 
-    // Combine and clean transcript
-    const fullTranscript = cleanTranscript(`${intro}\n\n${main}\n\n${outro}`);
+  await putText("transcript", `${id}.txt`, cleaned);
+  await Promise.all(
+    chunks.map((chunk, i) =>
+      putText("rawText", `${id}/chunk_${i + 1}.txt`, chunk)
+    )
+  );
 
-    if (!fullTranscript || fullTranscript.trim().length === 0) {
-      throw new Error("Generated transcript is empty after cleaning");
-    }
+  const metadata = await generateEpisodeMeta({ intro, main, outro });
+  await putJson("meta", `${id}.json`, metadata);
 
-    const chunks = chunkText(fullTranscript);
-
-    if (!Array.isArray(chunks) || chunks.length === 0) {
-      throw new Error("Failed to chunk transcript");
-    }
-
-    // Upload full transcript
-    await putText("transcript", `${normalizedSessionId}.txt`, fullTranscript);
-
-    // Upload each text chunk
-    const chunkPromises = chunks.map((chunk, index) =>
-      putText("rawText", `${normalizedSessionId}/chunk_${index + 1}.txt`, chunk)
-    );
-    await Promise.all(chunkPromises);
-
-    // Generate metadata
-    const metadata = await generateEpisodeMeta({ intro, main, outro });
-
-    if (!metadata || typeof metadata !== "object") {
-      throw new Error("Invalid metadata generated");
-    }
-
-    await putJson("meta", `${normalizedSessionId}.json`, metadata);
-
-    console.log(
-      `[finalizeAndUpload] Successfully processed session ${normalizedSessionId}: ${chunks.length} chunks`
-    );
-
-    return { fullTranscript, chunks, metadata };
-  } catch (error) {
-    console.error(`[finalizeAndUpload] Failed for session ${sessionId}:`, error);
-    throw new Error(`Failed to finalize and upload: ${error.message}`);
-  }
+  return { fullTranscript: cleaned, chunks, metadata };
 }
 
-// ─────────────────────────────────────────────────────────────
-// 🧩 Unified entry point for orchestrator
-// ─────────────────────────────────────────────────────────────
-export async function generateComposedEpisode(sessionId) {
-  try {
-    console.log(`[generateComposedEpisode] Starting episode generation for session ${sessionId}`);
+// 🧩 Orchestrator
+export async function generateComposedEpisode(sessionId, targetMins = 45) {
+  console.log(`🎙️ Starting ${targetMins}-minute episode for session ${sessionId}`);
 
-    const [intro, main, outro] = await Promise.all([
-      generateIntro(sessionId),
-      generateMain(sessionId),
-      generateOutro(sessionId),
-    ]);
+  const [intro, main, outro] = await Promise.all([
+    generateIntro(sessionId, targetMins),
+    generateMain(sessionId, targetMins),
+    generateOutro(sessionId, targetMins),
+  ]);
 
-    console.log(`[generateComposedEpisode] All sections generated, finalizing...`);
-
-    const result = await finalizeAndUpload(sessionId);
-
-    console.log(`[generateComposedEpisode] Episode generation complete for session ${sessionId}`);
-
-    return result;
-  } catch (error) {
-    console.error(
-      `[generateComposedEpisode] Fatal error for session ${sessionId}:`,
-      error
-    );
-    throw new Error(`Failed to generate composed episode: ${error.message}`);
-  }
-}
+  console.log("🧩 All sections generated — finalizing upload...");
+  return await finalizeAndUpload(sessionId);
+    }
