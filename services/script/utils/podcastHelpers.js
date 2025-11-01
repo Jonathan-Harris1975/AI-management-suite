@@ -1,15 +1,11 @@
 // ============================================================
-// 🎧 services/script/utils/podcastHelper.js  —  Gen-X Edition
+// 🎧 services/script/utils/podcastHelper.js — Gen X Editorial Edition
 // ============================================================
 //
-// Generates episode metadata (title, description, SEO keywords, artwork prompt)
-// using LLM routes defined in ai-config.  Outputs are stored to R2 meta bucket.
+// Generates podcast metadata (title, description, SEO keywords, artwork prompt)
+// using resilientRequest() + aiConfig routing. Outputs go to the meta bucket.
+// Tone: calm, wry, first-person Jonathan Harris style.
 //
-// Features:
-//  - ResilientRequest integration for fault tolerance
-//  - First-person Gen X editorial voice for descriptions
-//  - Nano-Banana artwork prompt logic
-//  - Console summary for transparency
 // ============================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
@@ -19,15 +15,15 @@ import aiConfig from "../../shared/utils/ai-config.js";
 import * as sessionCache from "./sessionCache.js";
 
 // ============================================================
-// 🧩 Utility: extract JSON safely
+// 🧩 Safe JSON extractor
 // ============================================================
 export function extractAndParseJson(text) {
   if (!text || typeof text !== "string") return null;
-  const startIndex = text.indexOf("{");
-  const endIndex = text.lastIndexOf("}");
-  if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) return null;
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) return null;
   try {
-    return JSON.parse(text.substring(startIndex, endIndex + 1));
+    return JSON.parse(text.substring(start, end + 1));
   } catch {
     return null;
   }
@@ -37,23 +33,27 @@ export function extractAndParseJson(text) {
 // 🧠 Prompt Builders
 // ============================================================
 
-// --- 1️⃣ Title + Description ---
+// --- 1️⃣ Title + Description — refined Gen X tone ---
 export function getTitleDescriptionPrompt(transcript) {
-  return `You are writing the official episode title and description for "Turing's Torch: AI Weekly" — a sharp, wry-minded podcast hosted by Jonathan Harris.
+  return `You are Jonathan Harris, host of "Turing’s Torch: AI Weekly" — an AI news podcast known for sharp insight, dry British wit, and clear-eyed commentary.
 
-Write in a calm, Gen X-style first-person editorial voice — thoughtful, dryly humorous, and sceptical of hype.
-Sound like a seasoned analyst speaking directly to the listener.
-Avoid phrases like "In this episode" or "Jonathan Harris discusses". Speak as the show's own voice.
+Write both a title and description in a confident first-person editorial voice.
+The description should feel conversational and grounded — thoughtful, engaging, and forward-looking.
+Sound like an analyst who’s lived through the tech hype cycles and now speaks with calm clarity.
 
-Produce:
-1️⃣ A concise, witty title (≤ 80 characters)
-2️⃣ A natural first-person description (≤ 250 words) that blends clarity with subtle personality.
-Keep it engaging, intelligent, and authentic.
+Guidelines:
+- No phrases like “In this episode” or “Jonathan Harris discusses.”
+- Speak *as Jonathan Harris*, addressing the listener directly.
+- Keep it between 160 and 260 words.
+- Title ≤ 80 characters, concise and punchy.
+- The description should read naturally, similar in rhythm and tone to:
 
-Return valid JSON only:
+“Join Jonathan Harris on this week’s Turing’s Torch as we delve into the critical intersections of AI, climate change, and urban development. From groundbreaking renewable-energy advancements to the importance of green spaces for mental health, we explore how technology is reshaping our world. Discover sustainable practices, the challenges facing global agriculture, and the need for robust cybersecurity in our digitised lives. Plus, a look at community-driven initiatives fostering resilience and engagement. Tune in for clarity amid the noise of AI headlines and ignite your understanding of the future.”
+
+Return **only valid JSON**:
 {
-  "title": "Punchy title",
-  "description": "Human, first-person summary with insight and tone."
+  "title": "Short, sharp title",
+  "description": "First-person narrative description."
 }
 
 Transcript:
@@ -68,25 +68,24 @@ ${description}`;
 
 // --- 3️⃣ Artwork Prompt (Nano Banana Optimised) ---
 export function getArtworkPrompt(description) {
-  return `Create an abstract, cinematic prompt for Google ImageFX / Gemini Nano Banana.
-Keep it atmospheric and modern — no people, no logos, no text.
-Focus on light, geometry, and motion that visually echoes this description:
+  return `Create an abstract, cinematic image prompt for Google ImageFX / Gemini Nano Banana.
+Avoid people, logos, or text. Focus on light, motion, and atmosphere that visually echo this description:
 ${description}`;
 }
 
 // ============================================================
-// 🚀 High-level Meta Orchestrator
+// 🚀 Meta Orchestrator
 // ============================================================
 export async function generateEpisodeMetaLLM({ intro, main, outro, sessionId }) {
   const transcript = `${intro}\n\n${main}\n\n${outro}`;
 
   try {
-    info("podcastHelper.meta.start", { service: "ai-podcast-suite", sessionId });
+    info("podcastHelper.meta.start", { sessionId });
 
     // --- Step 1: Title + Description ---
     const tdPrompt = getTitleDescriptionPrompt(transcript);
     const tdResponse = await resilientRequest("podcastHelper", tdPrompt, {
-      temperature: 0.8, // 👈 warmer tone for creativity
+      temperature: 0.8,
     });
     const tdJson = extractAndParseJson(tdResponse?.content || tdResponse);
     const title = tdJson?.title || "Untitled Episode";
@@ -103,7 +102,7 @@ export async function generateEpisodeMetaLLM({ intro, main, outro, sessionId }) 
     const artworkPrompt = getArtworkPrompt(description);
     await sessionCache.storeTempPart(sessionId, "artworkPrompt", artworkPrompt);
 
-    // --- Step 4: Build & Upload Metadata ---
+    // --- Step 4: Save Metadata ---
     const metaPayload = {
       session: { sessionId, date: new Date().toISOString().split("T")[0] },
       title,
@@ -115,23 +114,17 @@ export async function generateEpisodeMetaLLM({ intro, main, outro, sessionId }) 
     const metaKey = `meta-${sessionId}.json`;
     await r2Put("meta", metaKey, JSON.stringify(metaPayload, null, 2));
 
-    // --- Console Summary ---
+    // --- Logging Summary ---
     console.log("🪶 Meta tone: Gen X editorial (temp 0.8)");
     console.log("🧠 Episode Metadata Generated:");
     console.table({
       title,
-      description: `${description.slice(0, 80)}...`,
+      description: `${description.slice(0, 90)}...`,
       keywords: keywords.length,
       sessionId,
     });
 
-    info("podcastHelper.meta.complete", {
-      service: "ai-podcast-suite",
-      title,
-      keywordCount: keywords.length,
-      sessionId,
-    });
-
+    info("podcastHelper.meta.complete", { title, keywordCount: keywords.length, sessionId });
     return metaPayload;
   } catch (err) {
     error("podcastHelper.meta.fail", { message: err.message });
