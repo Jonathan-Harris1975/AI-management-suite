@@ -1,8 +1,6 @@
 // services/script/utils/fetchFeeds.js
 import Parser from "rss-parser";
 import fetch from "node-fetch";
-import { rotateDurations } from "./durationRotator.js";
-import { calculateDuration } from "./durationCalculator.js"; // ✅ fixed
 import { info, error } from "#logger.js";
 
 const parser = new Parser();
@@ -33,21 +31,28 @@ function calculateArticleScore(item) {
 // ─────────────────────────────────────────────────────────────
 // 🧩 Robust RSS / Atom / JSON Feed Parser
 // ─────────────────────────────────────────────────────────────
-export default async function fetchFeedArticles(feedUrl, targetDuration = 60) {
-  try {
-    info(`📡 Fetching RSS feed from: ${feedUrl}`);
-    const res = await fetch(feedUrl);
-    const text = await res.text();
-    let feed;
+export default async function fetchFeedArticles(feedUrlArg, targetDuration = 60) {
+  const feedUrl = feedUrlArg?.trim() || process.env.FEED_URL?.trim();
 
-    // Try normal RSS parse
+  if (!feedUrl) {
+    error("❌ No FEED_URL provided — check your environment variables or function call.");
+    return { items: [], feedUrl: null };
+  }
+
+  try {
+    info("📡 Fetching RSS feed", { feedUrl });
+
+    const res = await fetch(feedUrl);
+    if (!res.ok) throw new Error(`Fetch failed: ${res.status} ${res.statusText}`);
+    const text = await res.text();
+
+    let feed;
     try {
       feed = await parser.parseString(text);
     } catch {
-      // Fallback for Atom / malformed feeds
       if (text.includes("<feed")) {
-        const matchTitles = [...text.matchAll(/<title>(.*?)<\/title>/g)].map(m => m[1]);
-        const matchLinks = [...text.matchAll(/<link[^>]*href="([^"]+)"/g)].map(m => m[1]);
+        const matchTitles = [...text.matchAll(/<title>(.*?)<\/title>/g)].map((m) => m[1]);
+        const matchLinks = [...text.matchAll(/<link[^>]*href="([^"]+)"/g)].map((m) => m[1]);
         feed = {
           title: matchTitles[0] || "Untitled Feed",
           items: matchTitles.slice(1).map((t, i) => ({
@@ -57,7 +62,6 @@ export default async function fetchFeedArticles(feedUrl, targetDuration = 60) {
           })),
         };
       } else if (text.trim().startsWith("{")) {
-        // JSON Feed fallback
         const json = JSON.parse(text);
         feed = json?.items ? json : { title: "Invalid Feed", items: [] };
       } else {
@@ -65,16 +69,15 @@ export default async function fetchFeedArticles(feedUrl, targetDuration = 60) {
       }
     }
 
-    // Score + sort + limit
     const scoredItems = (feed.items || [])
-      .map(item => ({ ...item, score: calculateArticleScore(item) }))
+      .map((item) => ({ ...item, score: calculateArticleScore(item) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 10);
 
-    info(`✅ Parsed ${scoredItems.length} items from feed.`);
-    return scoredItems;
+    info(`✅ Parsed ${scoredItems.length} items from feed.`, { feedUrl });
+    return { items: scoredItems, feedUrl };
   } catch (err) {
-    error(`❌ Error fetching or parsing RSS feed: ${err.message}`);
-    return [];
+    error("❌ Error fetching or parsing RSS feed", { message: err.message, feedUrl });
+    return { items: [], feedUrl };
   }
 }
