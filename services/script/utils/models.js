@@ -111,7 +111,7 @@ export async function generateComposedEpisode(sessionIdLike) {
 
   const id = sessionMeta.sessionId || "episode";
 
-  await putText("raw-text", `${id}.txt`, edited);
+  await putText("rawtext", `${id}.txt`, edited);
   await putText("transcripts", `${id}.txt`, edited);
   await putJson("meta", `${id}.json`, {
     session: sessionMeta,
