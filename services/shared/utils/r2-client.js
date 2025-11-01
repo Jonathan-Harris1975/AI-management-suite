@@ -146,6 +146,7 @@ export const putJson = async (bucketKey, key, obj) =>
 export const putText = uploadText;
 export const putObject = uploadBuffer;
 export const getObject = getObjectAsText;
+export const r2Get = getObjectAsText;
 
 // Stream helper (for TTS merge, etc.)
 export async function getR2ReadStream(bucketKey, key) {
