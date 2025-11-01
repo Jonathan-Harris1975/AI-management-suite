@@ -2,17 +2,19 @@
 // 🎙️ services/script/utils/promptTemplates.js
 // ============================================================
 //
-// Clean, deterministic prompt templates.
-// Each episode has one consistent persona + tone.
+// Generates AI prompt templates for each podcast section.
+// - Shared persona and tone per episode
+// - Auto-rotating duration only for MAIN section
+// - Strict plain-text output, no cues or formatting
 // ============================================================
 
 import getSponsor from "./getSponsor.js";
 import generateCta from "./generateCta.js";
 import { buildPersona } from "./toneSetter.js";
-import * as DurationCalculator from "./durationCalculator.js";
+import { calculateDuration } from "./durationCalculator.js"; // ✅ fixed import
 
 // ─────────────────────────────────────────────────────────────
-// 🧩 INTRO PROMPT
+// 🧩 INTRO PROMPT (Fixed Duration)
 // ─────────────────────────────────────────────────────────────
 export function getIntroPrompt({ weatherSummary, turingQuote, sessionId }) {
   const persona = buildPersona(sessionId);
@@ -28,19 +30,19 @@ export function getIntroPrompt({ weatherSummary, turingQuote, sessionId }) {
 
 Write a clean, plain-text intro monologue.
 
-Start with a witty observation about the UK weather:
+Start with a witty, observational remark about the UK weather:
 "${weatherSummary}"
 
-Then naturally connect to this Alan Turing quote:
+Then flow naturally into this Alan Turing quote:
 "${turingQuote}"
 
-Use the quote as a thematic bridge into:
+Use the quote as a bridge into the episode’s introduction:
 "Tired of drowning in AI headlines? Ready for clarity, insight, and a direct line to the pulse of innovation? ${selectedIntro} I'm Jonathan Harris, your host, cutting through the noise to bring you the most critical AI developments, explained, analysed, and delivered straight to you. Let's ignite your understanding of AI, together."
 
 RULES:
-- Plain text only (no cues or formatting)
-- Smooth weather → quote → tone transition
-- Avoid repetition or filler language`;
+- Plain text only — no parenthetical notes, stage cues, or formatting.
+- Smooth weather → quote → tone transition.
+- Keep it conversational, concise, and authentic.`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -56,16 +58,14 @@ export async function getMainPrompt({ articles = [], sessionId }) {
     : [];
 
   const articleCount = normalized.length;
-  const { targetMins } = await DurationCalculator.calculateDuration(sessionId, "main");
-  const { targetChars, estimatedMinutes } = DurationCalculator.calculateArticleTargets(
-    targetMins,
-    articleCount
-  );
+
+  // 🔄 Automatically calculate and normalize duration for MAIN
+  const { targetMins } = await calculateDuration(sessionId, "main");
 
   console.log(
-    `🕒 Runtime target: ${targetMins} min (${estimatedMinutes.toFixed(
-      1
-    )} est) for ${articleCount} articles`
+    `🕒 Runtime target: ${targetMins} min for ${articleCount} article${
+      articleCount === 1 ? "" : "s"
+    }`
   );
 
   const articlePreview = normalized
@@ -75,23 +75,22 @@ export async function getMainPrompt({ articles = [], sessionId }) {
   return `${persona}
 
 Create a single, continuous spoken monologue covering ${articleCount} AI stories.
-The listener should never detect story boundaries.
+The listener should never detect where one story ends and another begins.
 
 TARGET LENGTH: ~${targetMins} minutes.
 
 RULES:
-- Plain text only (no lists or formatting)
-- Smooth logical transitions between stories
-- Keep tone ${buildPersona(sessionId)
-    .match(/persona is (.*?),/i)?.[1]
-    ?.toLowerCase() || "consistent"} throughout
+- Plain text only (no lists, markdown, or formatting)
+- Maintain consistent tone for this entire episode
+- Use smooth, natural transitions (cause/effect, contrast, curiosity)
+- Never enumerate or label sections
 
 Source material:
 ${articlePreview}`;
 }
 
 // ─────────────────────────────────────────────────────────────
-// 🧩 OUTRO PROMPT (Shared Tone)
+// 🧩 OUTRO PROMPT (Fixed Duration + Shared Tone)
 // ─────────────────────────────────────────────────────────────
 export async function getOutroPromptFull(sessionId) {
   const persona = buildPersona(sessionId);
@@ -102,7 +101,8 @@ export async function getOutroPromptFull(sessionId) {
     title = book?.title || "Digital Diagnosis: How AI Is Revolutionizing Healthcare";
     url = book?.url?.replace(/^https?:\/\//, "") || "jonathan-harris.online";
     cta = await generateCta(book);
-  } catch {
+  } catch (err) {
+    console.error("⚠️ Failed to load sponsor info:", err);
     title = "Digital Diagnosis: How AI Is Revolutionizing Healthcare";
     url = "jonathan-harris.online";
     cta = "Explore my latest AI eBooks at jonathan-harris.online.";
@@ -116,19 +116,23 @@ export async function getOutroPromptFull(sessionId) {
 
   return `${persona}
 
-Write a reflective closing monologue that flows naturally from the main discussion.
+Write a closing monologue that flows naturally from the main discussion.
 
 Include:
 1. A short reflection on the episode's main theme.
-2. A subtle call-to-action: "${cta}"
+2. A subtle personal call-to-action: "${cta}"
 3. Mention your book "${title}" and website "${url}"
-4. End with: "${selectedOutro}"
+4. End with this paraphrased sign-off: "${selectedOutro}"
 
 RULES:
-- Plain text only — no stage cues or formatting
-- Keep tone consistent with the intro and main sections`;
+- Plain text only (no cues, stage directions, or formatting)
+- Keep tone consistent with intro and main sections.
+- Speak URLs naturally using “dot” instead of punctuation.`;
 }
 
+// ─────────────────────────────────────────────────────────────
+// 🧩 EXPORTS
+// ─────────────────────────────────────────────────────────────
 export default {
   getIntroPrompt,
   getMainPrompt,
