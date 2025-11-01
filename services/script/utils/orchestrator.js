@@ -1,7 +1,7 @@
 // services/script/utils/orchestrator.js
 import { generateIntro, generateMain, generateOutro, generateComposedEpisode } from "./models.js";
 import * as sessionCache from "./sessionCache.js";
-import { info, error as logError } from "#logger.js"; // ✅ rename to avoid collision
+import { info, error as logError } from "#logger.js";
 
 export async function orchestrateEpisode(sessionId) {
   try {
@@ -20,8 +20,7 @@ export async function orchestrateEpisode(sessionId) {
 
     return result;
   } catch (err) {
-    // ✅ use renamed logger safely
-    logError("💥 Orchestration failed", { sessionId, message: err.message, stack: err.stack });
+    logError("💥 Orchestration failed", { sessionId, message: err?.message, stack: err?.stack });
     throw err;
   }
 }
