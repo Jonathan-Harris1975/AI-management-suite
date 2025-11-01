@@ -39,17 +39,20 @@ export async function generateFeed(bucket, rewrittenItems) {
           pubDate: buildDate,
           generator: "AI Podcast Suite – RSS Feed Creator",
           item: validItems.map((item) => {
-            const title =
-              item.shortTitle || item.title || "Untitled Article";
-            const link =
-              item.shortUrl || item.link || channelLink;
+            const title = item.shortTitle || item.title || "Untitled Article";
+            const link = item.shortUrl || item.link || channelLink;
             const pubDate = new Date(item.pubDate || now).toUTCString();
 
-            // 🔹 Build a branded GUID like ai-news-3f8j2l7k0x4b
-            const randomId = crypto.randomBytes(6).toString("base36");
+            // 🔹 Branded GUID like ai-news-4xjz93l7p8hd
+            const randomId = parseInt(
+              crypto.randomBytes(6).toString("hex"),
+              16
+            )
+              .toString(36)
+              .slice(0, 12);
             const guidText = `ai-news-${randomId}`;
 
-            // 🔹 Build CDATA with rewritten text and branded link
+            // 🔹 CDATA block with rewritten article + branded link
             const rewrittenText = item.rewritten || item.summary || "";
             const cdataHtml = `
 <strong>${escapeHtml(title)}</strong><br/><br/>
@@ -75,11 +78,10 @@ ${rewrittenText.trim()}<br/><br/>
     });
 
     const xmlString =
-      '<?xml version="1.0" encoding="UTF-8"?>\n' +
-      builder.build(feedObj);
-
+      '<?xml version="1.0" encoding="UTF-8"?>\n' + builder.build(feedObj);
     const jsonString = JSON.stringify(feedObj, null, 2);
 
+    // ✅ Upload to R2 as RSS XML + JSON mirror
     await r2Put(bucket, "feed.xml", xmlString, "application/rss+xml");
     await r2Put(bucket, "feed.json", jsonString, "application/json");
 
@@ -111,4 +113,4 @@ function escapeXml(str = "") {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
-}
+      }
