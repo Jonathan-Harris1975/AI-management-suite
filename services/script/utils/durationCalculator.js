@@ -13,18 +13,36 @@
  */
 function autoSelectTargetMins(sessionId) {
   const sequence = [30, 45, 60];
-  const seed = [...String(sessionId)].reduce((a, c) => a + c.charCodeAt(0), 0);
+  const normalized = normalizeSessionId(sessionId);
+  const seed = [...normalized].reduce((a, c) => a + c.charCodeAt(0), 0);
   const dayIndex = Math.floor(Date.now() / (1000 * 60 * 60 * 24)); // day-based shift
   const index = (seed + dayIndex) % sequence.length;
   return sequence[index];
 }
 
 /**
- * @param {string} sessionId  - podcast session identifier
+ * Normalize sessionId safely to ensure it's iterable
+ */
+function normalizeSessionId(sessionId) {
+  if (typeof sessionId === "string") return sessionId;
+  if (sessionId && typeof sessionId === "object") {
+    return (
+      sessionId.sessionId ||
+      sessionId.id ||
+      JSON.stringify(sessionId)
+    );
+  }
+  if (typeof sessionId === "number") return String(sessionId);
+  return "default-session";
+}
+
+/**
+ * @param {string|object|number} sessionId  - podcast session identifier
  * @param {string} section    - 'intro' | 'main' | 'outro'
  */
 export async function calculateDuration(sessionId, section) {
-  const targetMins = autoSelectTargetMins(sessionId);
+  const normalizedId = normalizeSessionId(sessionId);
+  const targetMins = autoSelectTargetMins(normalizedId);
   const totalSeconds = targetMins * 60;
 
   // Section distribution ratios: Intro=10%, Main=75%, Outro=15%
@@ -37,8 +55,8 @@ export async function calculateDuration(sessionId, section) {
   };
 
   // Small variation for realism
-  const hash = [...sessionId].reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  const offset = (hash % 60) - 30; // ±30s
+  const hash = [...normalizedId].reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const offset = (hash % 60) - 30; // ±30s variation
 
   switch (section) {
     case "intro":
