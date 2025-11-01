@@ -2,7 +2,7 @@
 import { info, error } from "#logger.js";
 import { rewriteRssFeedItems } from "./models.js";
 import { generateFeed } from "./utils/feedGenerator.js";
-import { fetchAndParseFeeds } from "./utils/sourceFeeds.js"; // whatever you use to load feeds
+import { fetchFeeds } from "./utils/fetchFeeds.js"; // whatever you use to load feeds
 
 // Choose the R2 bucket key from env (defaults to "rss" which exists in your r2-client)
 const RSS_BUCKET_KEY = process.env.RSS_BUCKET_KEY?.trim() || "rss";
@@ -12,7 +12,7 @@ export async function endToEndRewrite() {
     info("rss-feed-creator.pipeline.start");
 
     // 1) Pull raw items from your configured sources
-    const feedItems = await fetchAndParseFeeds();
+    const feedItems = await  fetchFeeds();
 
     if (!Array.isArray(feedItems) || feedItems.length === 0) {
       info("rss-feed-creator.pipeline.noItems");
