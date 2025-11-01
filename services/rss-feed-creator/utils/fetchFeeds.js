@@ -16,12 +16,28 @@ const parser = new Parser();
 const MAX_RSS_FEEDS_PER_RUN = Number(process.env.MAX_RSS_FEEDS_PER_RUN) || 5;
 const MAX_URL_FEEDS_PER_RUN = Number(process.env.MAX_URL_FEEDS_PER_RUN) || 1;
 const MAX_ITEMS_PER_FEED = Number(process.env.MAX_ITEMS_PER_FEED) || 20; // safety cap
+const FEED_CUTOFF_HOURS = Number(process.env.FEED_CUTOFF_HOURS) || 48; // default 48 hours
 
 function parseList(raw = "") {
   return raw
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith("#"));
+}
+
+function isWithinCutoff(pubDate) {
+  try {
+    const itemDate = new Date(pubDate);
+    if (isNaN(itemDate.getTime())) return false;
+    
+    const now = new Date();
+    const cutoffMs = FEED_CUTOFF_HOURS * 60 * 60 * 1000;
+    const ageMs = now - itemDate;
+    
+    return ageMs <= cutoffMs && ageMs >= 0; // Also reject future dates
+  } catch {
+    return false;
+  }
 }
 
 function toArticle(item) {
@@ -36,8 +52,11 @@ function toArticle(item) {
   let pubDate = item.isoDate || item.pubDate || item.date || "";
   try {
     const d = new Date(pubDate);
-    if (!isNaN(d)) pubDate = d.toISOString();
-    else pubDate = new Date().toISOString();
+    if (!isNaN(d.getTime())) {
+      pubDate = d.toISOString();
+    } else {
+      pubDate = new Date().toISOString();
+    }
   } catch {
     pubDate = new Date().toISOString();
   }
@@ -53,14 +72,22 @@ async function fetchAndParseOne(url) {
 
     // Filter out entries missing both title and summary
     const cleaned = mapped.filter((i) => i.title || i.summary);
+    
+    // Apply time window filter
+    const withinCutoff = cleaned.filter((i) => isWithinCutoff(i.pubDate));
+    
+    const filtered = withinCutoff.length;
+    const discarded = cleaned.length - filtered;
 
     info("rss.fetchFeeds.parsed", {
       url,
-      count: cleaned.length,
+      count: filtered,
       sourceItems: items.length,
+      discardedOld: discarded,
+      cutoffHours: FEED_CUTOFF_HOURS,
     });
 
-    return cleaned;
+    return withinCutoff;
   } catch (err) {
     error("rss.fetchFeeds.parse.fail", { url, err: err.message });
     return [];
@@ -106,6 +133,7 @@ export async function fetchAndParseFeeds() {
     rssFeeds: rssBatch.length,
     urlFeeds: urlBatch.length,
     selected: selected.length,
+    cutoffHours: FEED_CUTOFF_HOURS,
   });
 
   // 4) Parse each selected feed into article items
@@ -126,6 +154,7 @@ export async function fetchAndParseFeeds() {
   info("rss.fetchFeeds.items.ready", {
     parsedTotal: items.length,
     deduped: deduped.length,
+    cutoffHours: FEED_CUTOFF_HOURS,
   });
 
   return deduped;
