@@ -91,40 +91,77 @@ export async function generateOutro(sessionIdLike) {
   return cleaned;
 }
 
+
 export async function generateComposedEpisode(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
 
   const introCached = await sessionCache.getTempPart(sessionMeta, "intro");
-  const mainCached = await sessionCache.getTempPart(sessionMeta, "main");
+  const mainCached  = await sessionCache.getTempPart(sessionMeta, "main");
   const outroCached = await sessionCache.getTempPart(sessionMeta, "outro");
 
   const intro = introCached || await generateIntro(sessionMeta);
-  const main = mainCached || await generateMain(sessionMeta);
+  const main  = mainCached  || await generateMain(sessionMeta);
   const outro = outroCached || await generateOutro(sessionMeta);
 
   const rawTranscript = [intro, "", main, "", outro].join("\n");
-
   const edited = editAndFormat(rawTranscript);
 
-  const ttsChunks = chunkText(edited) || [];
-  const ttsMeta = ttsChunks.map((chunk, i) => ({ index: i + 1, length: chunk?.length || 0 }));
+  // Sentence-first, byte-aware chunking (already enforced in chunkText.js)
+  const maxBytes = Number(process.env.MAX_SSML_CHUNK_BYTES || 4200);
+  const byteLen = (s) => Buffer.byteLength(s, "utf8");
+  let ttsChunks = chunkText(edited, maxBytes);
+
+  // Safety net: if transcript exceeds one chunk but we still got 1 chunk, force split
+  if (ttsChunks.length <= 1 && byteLen(edited) > maxBytes) {
+    const hardByteSplit = (text, cap) => {
+      const out = [];
+      let remaining = text.trim();
+      while (Buffer.byteLength(remaining, "utf8") > cap) {
+        let approx = Math.max(1000, Math.floor(cap * 0.9));
+        let slice = remaining.slice(0, approx);
+        const back = slice.lastIndexOf(" ");
+        if (back > 200) slice = slice.slice(0, back);
+        out.push(slice.trim());
+        remaining = remaining.slice(slice.length).trim();
+      }
+      if (remaining) out.push(remaining);
+      return out;
+    };
+    ttsChunks = hardByteSplit(edited, maxBytes);
+  }
 
   const id = sessionMeta.sessionId || "episode";
 
-  await putText("rawtext", `${id}.txt`, edited);
+  // --- Save: full transcript ONLY to transcripts
   await putText("transcripts", `${id}.txt`, edited);
+
+  // --- Save: per-chunk files ONLY to rawtext (per current bucket map)
+  const files = [];
+  let totalBytes = 0;
+  for (let i = 0; i < ttsChunks.length; i++) {
+    const n = String(i + 1).padStart(2, "0");
+    const name = `${id}-tts-chunk-${n}.txt`;
+    const body = ttsChunks[i];
+    const bytes = byteLen(body);
+    totalBytes += bytes;
+    files.push({ name, bytes });
+    await putText("rawtext", name, body);
+  }
+
+  // --- Save: meta to meta bucket (with per-chunk sizes)
   await putJson("meta", `${id}.json`, {
     session: sessionMeta,
     createdAt: new Date().toISOString(),
-    ttsChunks: ttsMeta,
-    durations: {
-      ...calculateDuration("intro", sessionMeta),
-      ...calculateDuration("main", sessionMeta),
-      ...calculateDuration("outro", sessionMeta),
+    tts: {
+      bucket: "rawtext",
+      count: files.length,
+      maxBytes,
+      files,
+      totalBytes
     },
   });
 
-  return { transcript: edited, session: sessionMeta, ttsChunks: ttsMeta };
+  return { transcript: edited, chunks: files.map(f => f.name) };
 }
 
 export default {
