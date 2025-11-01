@@ -1,12 +1,21 @@
 // ============================================================
 // 🎙️ services/script/utils/promptTemplates.js
 // ============================================================
+//
+// - Weather mentions stay temperature-free
+// - Weekday correctness ensured
+// - Main section: strictly RSS-based summary
+// - Outro: safe sponsor fetch (sync or async) + CTA
+// ============================================================
 
 import getSponsor from "./getSponsor.js";
 import generateCta from "./generateCta.js";
 import { calculateDuration } from "./durationCalculator.js";
 import { buildPersona } from "./toneSetter.js";
 
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
 function weekdayFromDateStr(dateStr) {
   try {
     if (!dateStr) return null;
@@ -18,6 +27,9 @@ function weekdayFromDateStr(dateStr) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// INTRO
+// ─────────────────────────────────────────────────────────────
 export function getIntroPrompt({ weatherSummary, turingQuote, sessionMeta }) {
   const persona = buildPersona(sessionMeta);
   const maybeWeekday = weekdayFromDateStr(sessionMeta?.date);
@@ -34,6 +46,9 @@ Write a short, engaging INTRO for an AI news podcast.
 `.trim();
 }
 
+// ─────────────────────────────────────────────────────────────
+// MAIN
+// ─────────────────────────────────────────────────────────────
 export function getMainPrompt({ sessionMeta, articles, mainSeconds }) {
   const persona = buildPersona(sessionMeta);
   const articlePreview = articles
@@ -57,10 +72,22 @@ ${articlePreview}
 `.trim();
 }
 
+// ─────────────────────────────────────────────────────────────
+// OUTRO (Safe sponsor fetch + CTA)
+// ─────────────────────────────────────────────────────────────
 export async function getOutroPromptFull(sessionMeta) {
   const persona = buildPersona(sessionMeta);
   const { outroSeconds } = calculateDuration("outro", sessionMeta);
-  const book = await getSponsor().catch(() => null);
+
+  // ✅ Safe for both sync or async getSponsor implementations
+  let book = null;
+  try {
+    const maybe = getSponsor();
+    book = typeof maybe?.then === "function" ? await maybe : maybe;
+  } catch {
+    book = null;
+  }
+
   const title = book?.title || "AI in Manufacturing: Modernizing Operations and Maintenance";
   const url = (book?.url || "https://jonathan-harris.online").replace(/^https?:\/\//, "");
   const cta = generateCta({ title, url });
@@ -68,9 +95,9 @@ export async function getOutroPromptFull(sessionMeta) {
   return `
 You are ${persona.host}, closing "${persona.show}" in a ${persona.tone} style.
 Write a clean OUTRO (plain text only) that:
-- Thanks the listener, gives a brief recap.
+- Thanks the listener and provides a brief recap.
 - Mentions "${title}" naturally, with the link "jonathan-harris dot online".
-- Includes: "${cta}"
+- Includes: "${cta}".
 - No music cues, within ~${Math.round(outroSeconds / 60)} minute of spoken delivery.
 `.trim();
 }
