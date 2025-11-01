@@ -1,60 +1,23 @@
+// ============================================================
+// 🔄 Duration Rotator (Normalizes Long-form Episodes)
+// ============================================================
+//
+// Keeps total runtime equal to chosen target (30,45,60 min)
+// and proportionally scales sections for balance.
+// ============================================================
 
-import fs from 'fs';
-import path from 'path';
+export function rotateDurations(durations = {}, targetMins = 45) {
+  const targetSeconds = targetMins * 60;
+  const intro = durations.introSeconds || 300;
+  const main = durations.mainSeconds || 1800;
+  const outro = durations.outroSeconds || 600;
 
-class DurationRotator {
-  constructor() {
-    this.durations = [30, 60, 90];
-    this.currentIndex = 0;
-    this.stateFile = path.resolve('/mnt/data', 'duration-state.json');
-    this.loadState();
-  }
+  const currentTotal = intro + main + outro;
+  const scale = targetSeconds / currentTotal;
 
-  loadState() {
-    try {
-      if (fs.existsSync(this.stateFile)) {
-        const state = JSON.parse(fs.readFileSync(this.stateFile, 'utf-8'));
-        this.currentIndex = state.currentIndex || 0;
-      }
-    } catch (error) {
-      console.warn('Failed to load duration state, resetting:', error);
-      this.currentIndex = 0;
-    }
-  }
-
-  saveState() {
-    try {
-      fs.writeFileSync(
-        this.stateFile,
-        JSON.stringify({
-          currentIndex: this.currentIndex,
-          lastUpdated: new Date().toISOString(),
-        }),
-        'utf-8'
-      );
-    } catch (error) {
-      console.error('Failed to save duration state:', error);
-    }
-  }
-
-  getNextDuration() {
-    const duration = this.durations[this.currentIndex];
-
-    // Move to next duration, wrap around if needed
-    this.currentIndex = (this.currentIndex + 1) % this.durations.length;
-    this.saveState();
-
-    console.log(
-      `🔄 Duration rotation: ${duration} minutes (next: ${this.durations[this.currentIndex]}min)`
-    );
-    return duration;
-  }
-
-  // Optional: Get current duration without advancing
-  getCurrentDuration() {
-    return this.durations[this.currentIndex];
-  }
+  return {
+    introSeconds: Math.round(intro * scale),
+    mainSeconds: Math.round(main * scale),
+    outroSeconds: Math.round(outro * scale),
+  };
 }
-
-// Singleton instance
-export default new DurationRotator();
