@@ -1,64 +1,78 @@
-// ============================================================
-// 🎨 services/artwork/routes/generate.js
-// ============================================================
-//
-// Uses existing OpenRouter (Nano Banana) setup via ai-service.js
-// Generates a PNG based on the saved artwork prompt in sessionCache
-// and uploads it to the podcastart R2 bucket.
-//
-// ============================================================
-
+// services/artwork/routes/generateArtwork.js
 import express from "express";
-import { r2Put } from "../../shared/utils/r2-client.js";
+import fetch from "node-fetch";
+import { putObject, buildPublicUrl } from "../../shared/utils/r2-client.js";
 import * as sessionCache from "../../script/utils/sessionCache.js";
-import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { info, error } from "#logger.js";
 
 const router = express.Router();
 
-router.post("/generate", async (req, res) => {
-  const { sessionId } = req.body || {};
-  if (!sessionId) {
-    return res.status(400).json({ error: "Missing sessionId" });
+/**
+ * Generate an image using the Nano Banana model on OpenRouter.
+ */
+async function generateImageBase64(prompt) {
+  const url = "https://openrouter.ai/api/v1/images";
+  const headers = {
+    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+    "Content-Type": "application/json",
+    "HTTP-Referer": process.env.APP_URL || "https://jonathan-harris.online",
+    "X-Title": process.env.APP_TITLE || "Turing’s Torch: AI Weekly Artwork",
+  };
+  const body = JSON.stringify({
+    model: process.env.OPENROUTER_ART || "google/gemini-2.0-nano-banana",
+    prompt,
+    size: "1024x1024",
+    response_format: "b64_json",
+  });
+
+  const resp = await fetch(url, { method: "POST", headers, body });
+  if (!resp.ok) {
+    const msg = await resp.text();
+    throw new Error(`OpenRouter image generation failed: ${msg}`);
   }
+
+  const json = await resp.json();
+  const b64 = json?.data?.[0]?.b64_json;
+  if (!b64) throw new Error("No image data returned from OpenRouter.");
+  return b64;
+}
+
+/**
+ * POST /artwork/generate
+ * Body: { sessionId: "TT-2025-11-01" }
+ */
+router.post("/", async (req, res) => {
+  const { sessionId } = req.body || {};
+  if (!sessionId) return res.status(400).json({ error: "Missing sessionId" });
 
   try {
     info("artwork.generate.start", { sessionId });
 
-    // 🧠 1️⃣ Retrieve prompt from temporary memory
-    const artworkPrompt = await sessionCache.getTempPart(sessionId, "artworkPrompt");
-    if (!artworkPrompt) throw new Error("No artwork prompt found in temporary memory");
+    const prompt = await sessionCache.getTempPart(sessionId, "artworkPrompt");
+    if (!prompt) throw new Error("No artwork prompt in temporary memory.");
 
-    // 🧩 2️⃣ Generate image through existing OpenRouter route
-    const response = await resilientRequest("artwork", artworkPrompt, {
-      model: "google",
-      type: "image",
-      size: "1024x1024",
-      response_format: "b64_json",
-    });
+    const b64 = await generateImageBase64(prompt);
+    const buffer = Buffer.from(b64, "base64");
 
-    if (!response?.b64_json) throw new Error("No image data returned from Nano Banana");
-
-    const buffer = Buffer.from(response.b64_json, "base64");
-
-    // ☁️ 3️⃣ Upload to R2 (podcastart)
     const key = `${sessionId}.png`;
-    await r2Put("art", key, buffer, { contentType: "image/png" });
+    await putObject("art", key, buffer, "image/png");
+    const publicUrl = buildPublicUrl("art", key);
 
-    // 🧾 4️⃣ Log summary to console
-    console.log("\n🎨 Artwork Generated via Nano Banana:");
-    console.table({
-      sessionId,
-      bucket: "podcastart",
-      file: key,
-      sizeKB: (buffer.length / 1024).toFixed(1),
-    });
+    console.log(`
+🎨 Artwork Generated Successfully
+───────────────────────────────────────────────
+Session ID: ${sessionId}
+Bucket: podcastart
+Key: ${key}
+Size: ${(buffer.length / 1024).toFixed(1)} KB
+URL: ${publicUrl}
+───────────────────────────────────────────────
+`);
 
-    info("artwork.generate.success", { sessionId, bytes: buffer.length });
-    return res.json({ success: true, key, bytes: buffer.length });
+    return res.json({ ok: true, key, url: publicUrl });
   } catch (err) {
-    error("artwork.generate.fail", { message: err.message, sessionId });
-    return res.status(500).json({ error: err.message });
+    error("artwork.generate.fail", { sessionId, error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
