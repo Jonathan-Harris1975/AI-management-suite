@@ -23,3 +23,4 @@ https://towardsdatascience.com/feed
 https://machinelearningmastery.com/blog/feed
 https://www.kdnuggets.com/feed
 https://siliconangle.com/category/ai/feed
+https://www.safe.ai/blog-feed.xml
