@@ -1,16 +1,12 @@
 https://venturebeat.com/category/ai/feed
-https://syncedreview.com/feed
 https://the-decoder.com/feed
 https://www.aitrends.com/feed
 https://blogs.nvidia.com/feed
 https://thegradient.pub/rss
 https://mltechniques.com/feed
-http://artificiallawyer.com/feed
-https://hanhdbrown.com/ai/feed
 https://intelligence.org/blog/feed
 https://bair.berkeley.edu/blog/feed.xml
 https://chatbotsmagazine.com/feed
-https://arstechnica.com/tag/self-driving-cars/feed
 https://gizmodo.com/tech/artificial-intelligence/feed
 https://www.theverge.com/rss/index.xml
 https://www.aiandhealth.com/blog-feed.xml
