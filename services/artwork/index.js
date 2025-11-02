@@ -1,18 +1,10 @@
-// ============================================================
-// 🎨 services/artwork/index.js
-// ============================================================
-//
-// Entry point for the artwork generation module.
-// Mounts /generate endpoint that uses Nano Banana via OpenRouter.
-//
-// ============================================================
-
+// services/artwork/index.js
 import express from "express";
-import generateArtworkRoute from "./routes/generate.js";
+import routes from "./routes/index.js";
 
 const router = express.Router();
 
-// Mount /generate
-router.use("/generate", generateArtworkRoute);
+// mount all artwork subroutes (create, generate, etc.)
+router.use("/", routes);
 
 export default router;
