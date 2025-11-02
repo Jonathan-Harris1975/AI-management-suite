@@ -9,14 +9,6 @@ https://bair.berkeley.edu/blog/feed.xml
 https://chatbotsmagazine.com/feed
 https://gizmodo.com/tech/artificial-intelligence/feed
 https://www.theverge.com/rss/index.xml
-https://www.aiandhealth.com/blog-feed.xml
-https://savanamed.com/feed
-https://radiology.healthairegister.com/feed
-https://saiva.ai/resources/blogs/feed
-https://hackread.com/feed
-https://www.itsecurityguru.org/feed
-https://www.csoonline.com/feed
-https://grahamcluley.com/feed
 https://openai.com/blog/rss
 https://www.deepmind.com/blog/rss.xml
 https://blogs.microsoft.com/ai/feed
@@ -27,7 +19,6 @@ https://analyticsindiamag.com/feed
 https://aibusiness.com/rss.xml
 https://arxiv.org/rss/cs.AI
 https://research.google/blog/rss
-
 https://towardsdatascience.com/feed
 https://machinelearningmastery.com/blog/feed
 https://www.kdnuggets.com/feed
