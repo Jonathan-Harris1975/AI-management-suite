@@ -5,17 +5,16 @@ import { info, error } from "#logger.js";
 
 const router = express.Router();
 
-// was: router.post("/artwork/generate", ...)
 router.post("/", async (req, res) => {
   try {
     const payload = req.body || {};
-    const bucket = process.env.R2_BUCKET_ART || process.env.R2_BUCKET_META;
     const key = `artwork/requests/${Date.now()}.json`;
-    await putJson("art", key, payload); // use alias "art" if mapped, otherwise bucket
-    info("🎨 Artwork request stored", { bucket, key });
-    res.json({ ok: true, bucket, key });
+    await putJson("art", key, payload);
+
+    info("artwork.create.stored", { key });
+    res.json({ ok: true, key });
   } catch (err) {
-    error("💥 Artwork create failed", { error: err.message });
+    error("artwork.create.fail", { error: err.message });
     res.status(500).json({ ok: false, error: err.message });
   }
 });
