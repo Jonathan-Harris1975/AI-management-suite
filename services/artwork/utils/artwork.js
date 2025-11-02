@@ -14,7 +14,7 @@ if (!cfg.key) {
 
 const client = new OpenAI({ apiKey: cfg.key, baseURL: cfg.baseURL });
 
-export async function generateArtwork(prompt) {
+export async function generatePodcastArtwork(prompt) {
   const result = await client.chat.completions.create({
     model: cfg.model,
     messages: [
