@@ -4,7 +4,7 @@ import routes from "./routes/index.js";
 
 const router = express.Router();
 
-// mount all artwork subroutes (create, generate, etc.)
+// mount all subroutes (create, generate)
 router.use("/", routes);
 
 export default router;
