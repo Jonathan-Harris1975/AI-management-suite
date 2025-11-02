@@ -11,7 +11,7 @@ const router = express.Router();
  * Generate an image using the Nano Banana model on OpenRouter.
  */
 async function generateImageBase64(prompt) {
-  const url = "https://openrouter.ai/api/v1/images";
+  const url = "https://openrouter.ai/api/v1/chat/completions";
   const headers = {
     Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
     "Content-Type": "application/json",
