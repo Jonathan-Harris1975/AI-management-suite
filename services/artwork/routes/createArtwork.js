@@ -10,12 +10,11 @@ router.post("/", async (req, res) => {
     const payload = req.body || {};
     const key = `artwork/requests/${Date.now()}.json`;
     await putJson("art", key, payload);
-
     info("artwork.create.stored", { key });
-    res.json({ ok: true, key });
+    return res.json({ ok: true, key });
   } catch (err) {
-    error("artwork.create.fail", { error: err.message });
-    res.status(500).json({ ok: false, error: err.message });
+    error("artwork.create.fail", { message: err.message });
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 

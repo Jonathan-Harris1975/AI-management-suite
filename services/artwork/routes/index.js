@@ -5,7 +5,9 @@ import generateArtworkRouter from "./generateArtwork.js";
 
 const router = express.Router();
 
+// POST /artwork/create
 router.use("/create", createArtworkRouter);
+// POST /artwork/generate
 router.use("/generate", generateArtworkRouter);
 
 export default router;
