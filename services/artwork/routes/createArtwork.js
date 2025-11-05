@@ -1,21 +1,31 @@
-// services/artwork/routes/createArtwork.js
-import express from "express";
-import { putJson } from "../../shared/utils/r2-client.js";
+// services/artwork/createPodcastArtwork.js
 import { info, error } from "#logger.js";
+import { uploadBuffer } from "#shared/r2-client.js";
+import { generatePodcastArtwork } from "./utils/artwork.js"; // Fixed function name
 
-const router = express.Router();
+const R2_BUCKET_ART = process.env.R2_BUCKET_ART;
 
-router.post("/", async (req, res) => {
+export async function createPodcastArtwork({ sessionId, prompt }) {
+  const log = (stage, meta) => info(`artwork.${stage}`, { sessionId, ...meta });
+
   try {
-    const payload = req.body || {};
-    const key = `artwork/requests/${Date.now()}.json`;
-    await putJson("art", key, payload);
-    info("artwork.create.stored", { key });
-    return res.json({ ok: true, key });
-  } catch (err) {
-    error("artwork.create.fail", { message: err.message });
-    return res.status(500).json({ ok: false, error: err.message });
-  }
-});
+    log("start", {});
 
-export default router;
+    // 🖌️ Generate base64 PNG - fixed function name
+    const theme = prompt || `Podcast artwork for AI Weekly episode ${sessionId}`;
+    const base64Data = await generatePodcastArtwork(theme); // Fixed function name
+    const buffer = Buffer.from(base64Data, "base64");
+
+    // 🗂️ Save to R2
+    const key = `${sessionId}/cover.png`;
+    await uploadBuffer(R2_BUCKET_ART, key, buffer, "image/png");
+
+    const publicUrl = `${process.env.R2_PUBLIC_BASE_URL_ART}/${key}`;
+    log("done", { key, publicUrl });
+
+    return { ok: true, key, publicUrl };
+  } catch (err) {
+    error("artwork.fail", { sessionId, error: err.message });
+    return { ok: false, error: err.message };
+  }
+}
