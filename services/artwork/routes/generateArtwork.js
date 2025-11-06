@@ -21,7 +21,7 @@ async function generateImageBase64(prompt) {
   );
 
   const headers = {
-    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY_ART,
     "Content-Type": "application/json",
     "HTTP-Referer": process.env.APP_URL || "https://jonathan-harris.online",
     "X-Title": safeTitle,
