@@ -20,8 +20,6 @@ https://analyticsindiamag.com/feed
 https://aibusiness.com/rss.xml
 https://arxiv.org/rss/cs.AI
 https://research.google/blog/rss
-https://towardsdatascience.com/feed
 https://machinelearningmastery.com/blog/feed
-https://www.kdnuggets.com/feed
 https://siliconangle.com/category/ai/feed
-https://www.safe.ai/blog-feed.xml
+
