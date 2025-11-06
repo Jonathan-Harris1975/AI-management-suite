@@ -21,7 +21,7 @@ async function generateImageBase64(prompt) {
   );
 
   const headers = {
-    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY_ART,
+    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY_ART}`,
     "Content-Type": "application/json",
     "HTTP-Referer": process.env.APP_URL || "https://jonathan-harris.online",
     "X-Title": safeTitle,
@@ -29,17 +29,12 @@ async function generateImageBase64(prompt) {
 
   const body = JSON.stringify({
     model:
-      process.env.OPENROUTER_ART ||
-      "google/gemini-2.5-flash-image-preview",
+      process.env.OPENROUTER_ART_MODEL ||
+      "google/gemini-2.0-flash-exp:free",
     messages: [
       {
         role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: `Generate a detailed square image (3000x3000) illustrating: ${prompt}`,
-          },
-        ],
+        content: `Generate a detailed square image (3000x3000) illustrating: ${prompt}`,
       },
     ],
   });
@@ -58,13 +53,42 @@ async function generateImageBase64(prompt) {
   }
 
   const json = JSON.parse(text);
-  const b64 =
-    json?.choices?.[0]?.message?.content?.[0]?.data ||
-    json?.data?.[0]?.b64_json ||
-    json?.b64_json ||
-    null;
+  
+  // Extract base64 from various possible response structures
+  let b64 = null;
+  
+  // Check chat completion structure with content array
+  if (json?.choices?.[0]?.message?.content) {
+    const content = json.choices[0].message.content;
+    
+    // If content is an array with data field
+    if (Array.isArray(content) && content[0]?.data) {
+      b64 = content[0].data;
+    }
+    // If content is a string (base64)
+    else if (typeof content === 'string' && content.length > 100) {
+      b64 = content;
+    }
+  }
+  
+  // Fallback to direct data field
+  if (!b64 && json?.data?.[0]?.b64_json) {
+    b64 = json.data[0].b64_json;
+  }
+  
+  // Fallback to root b64_json field
+  if (!b64 && json?.b64_json) {
+    b64 = json.b64_json;
+  }
 
-  if (!b64) throw new Error("No base64 image returned from OpenRouter.");
+  if (!b64) {
+    throw new Error(
+      `No base64 image returned from OpenRouter. Response structure: ${JSON.stringify(
+        json
+      ).slice(0, 500)}`
+    );
+  }
+  
   return b64;
 }
 
@@ -79,10 +103,11 @@ router.post("/", async (req, res) => {
     info("artwork.generate.start", { sessionId });
 
     const prompt = await sessionCache.getTempPart(sessionId, "artworkPrompt");
-    if (!prompt)
+    if (!prompt) {
       throw new Error("No artwork prompt found in temporary memory");
+    }
 
-    // generate image base64
+    // Generate image base64
     const b64 = await generateImageBase64(prompt);
     const buffer = Buffer.from(b64, "base64");
 
