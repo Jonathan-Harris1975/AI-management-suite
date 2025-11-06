@@ -9,15 +9,24 @@ const router = express.Router();
 
 async function generateImageBase64(prompt) {
   const url = "https://openrouter.ai/api/v1/images";
+
+  // ✅ FIX: sanitize unsafe Unicode characters in X-Title header
+  const safeTitle =
+    encodeURIComponent(
+      process.env.APP_TITLE || "Turings Torch: AI Weekly Artwork"
+    );
+
   const headers = {
     Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
     "Content-Type": "application/json",
     "HTTP-Referer": process.env.APP_URL || "https://jonathan-harris.online",
-    "X-Title": process.env.APP_TITLE || "Turing’s Torch: AI Weekly Artwork",
+    "X-Title": safeTitle,
   };
 
   const body = JSON.stringify({
-    model: process.env.OPENROUTER_ART || "google/gemini-2.5-flash-image-preview",
+    model:
+      process.env.OPENROUTER_ART ||
+      "google/gemini-2.5-flash-image-preview",
     prompt,
     size: "3000x3000",
     response_format: "b64_json",
@@ -28,6 +37,7 @@ async function generateImageBase64(prompt) {
     const txt = await resp.text();
     throw new Error(`OpenRouter image generation failed: ${resp.status} ${txt}`);
   }
+
   const json = await resp.json();
   const b64 = json?.data?.[0]?.b64_json || json?.b64_json || null;
   if (!b64) throw new Error("No base64 image returned from OpenRouter.");
@@ -45,7 +55,8 @@ router.post("/", async (req, res) => {
     info("artwork.generate.start", { sessionId });
 
     const prompt = await sessionCache.getTempPart(sessionId, "artworkPrompt");
-    if (!prompt) throw new Error("No artwork prompt found in temporary memory");
+    if (!prompt)
+      throw new Error("No artwork prompt found in temporary memory");
 
     // generate image base64
     const b64 = await generateImageBase64(prompt);
@@ -64,11 +75,23 @@ router.post("/", async (req, res) => {
       key,
       sizeKB: (buffer.length / 1024).toFixed(1),
       url,
-      took_s: took
+      took_s: took,
     });
 
-    info("artwork.generate.success", { sessionId, key, bytes: buffer.length, took_s: took });
-    return res.json({ ok: true, key, url, bytes: buffer.length, took_s: took });
+    info("artwork.generate.success", {
+      sessionId,
+      key,
+      bytes: buffer.length,
+      took_s: took,
+    });
+
+    return res.json({
+      ok: true,
+      key,
+      url,
+      bytes: buffer.length,
+      took_s: took,
+    });
   } catch (err) {
     error("artwork.generate.fail", { sessionId, message: err.message });
     return res.status(500).json({ ok: false, error: err.message });
