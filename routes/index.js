@@ -2,11 +2,13 @@
 import express from "express";
 import { info, error } from "#logger.js";
 
-// SERVICES
+// ─────────────────────────────
+//  SERVICE ROUTES
+// ─────────────────────────────
 import rssRoutes from "../services/rss-feed-creator/routes/rewrite.js";
 import scriptRoutes from "../services/script/routes/index.js";
-import ttsRoutes from "../services/tts/routes/tts.js";
-import artworkRoutes from "../services/artwork/routes/createArtwork.js";
+import ttsRoutes from "../services/tts/index.js";
+import artworkRoutes from "../services/artwork/index.js";   // ✅ FIXED import
 import podcastRoutes from "./podcast.js";
 import podcastPipelineRoutes from "./podcast-pipeline.js";
 
@@ -15,7 +17,9 @@ const router = express.Router();
 info("🚀 Starting route registration...");
 
 try {
-  // --- HEALTH ENDPOINTS ---
+  // ─────────────────────────────
+  //  HEALTH ENDPOINTS
+  // ─────────────────────────────
   router.get("/api/rss/health", (_req, res) =>
     res.status(200).json({ status: "ok", service: "rss-feed-creator" })
   );
@@ -24,33 +28,43 @@ try {
     res.status(200).json({ status: "ok", service: "podcast" })
   );
 
-  // --- RSS FEED CREATOR ---
+  // ─────────────────────────────
+  //  RSS FEED CREATOR
+  // ─────────────────────────────
   // POST /rss/rewrite
   router.use("/rss", rssRoutes);
   info("📰 Mounted: /rss");
 
-  // --- SCRIPT GENERATION & ORCHESTRATION ---
-  // POST /script/intro
-  // POST /script/main
-  // POST /script/outro
-  // POST /script/compose
-  // POST /script/orchestrate
+  // ─────────────────────────────
+  //  SCRIPT GENERATION & ORCHESTRATION
+  // ─────────────────────────────
+  // POST /script/(intro|main|outro|compose|orchestrate)
   router.use("/script", scriptRoutes);
-  info("✍️ Mounted: /script (+ /script/orchestrate)");
+  info("✍️ Mounted: /script");
 
-  // --- TTS SERVICE ---
+  // ─────────────────────────────
+  //  TTS SERVICE
+  // ─────────────────────────────
+  // POST /tts/generate
   router.use("/tts", ttsRoutes);
   info("🔊 Mounted: /tts");
 
-  // --- ARTWORK CREATION ---
-  router.use("/artwork", artworkRoutes);
+  // ─────────────────────────────
+  //  ARTWORK CREATION
+  // ─────────────────────────────
+  // POST /artwork/(create|generate)
+  router.use("/artwork", artworkRoutes); // ✅ FIXED mount
   info("🎨 Mounted: /artwork");
 
-  // --- PODCAST GENERATION ---
+  // ─────────────────────────────
+  //  PODCAST GENERATION
+  // ─────────────────────────────
   router.use("/podcast", podcastRoutes);
   info("🎧 Mounted: /podcast");
 
-  // --- PODCAST PIPELINE ---
+  // ─────────────────────────────
+  //  PODCAST PIPELINE
+  // ─────────────────────────────
   router.use("/podcast/pipeline", podcastPipelineRoutes);
   info("🧵 Mounted: /podcast/pipeline");
 
