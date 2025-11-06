@@ -7,14 +7,18 @@ import { info, error } from "#logger.js";
 
 const router = express.Router();
 
+/**
+ * Generate artwork via OpenRouter (Gemini image model)
+ * - Uses /api/v1/chat/completions instead of the old /api/v1/images
+ * - Handles HTML responses safely
+ * - Sanitizes headers to prevent invalid character errors
+ */
 async function generateImageBase64(prompt) {
-  const url = "https://openrouter.ai/api/v1/images";
+  const url = "https://openrouter.ai/api/v1/chat/completions";
 
-  // ✅ FIX: sanitize unsafe Unicode characters in X-Title header
-  const safeTitle =
-    encodeURIComponent(
-      process.env.APP_TITLE || "Turings Torch: AI Weekly Artwork"
-    );
+  const safeTitle = encodeURIComponent(
+    process.env.APP_TITLE || "Turings Torch: AI Weekly Artwork"
+  );
 
   const headers = {
     Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
@@ -27,19 +31,39 @@ async function generateImageBase64(prompt) {
     model:
       process.env.OPENROUTER_ART ||
       "google/gemini-2.5-flash-image-preview",
-    prompt,
-    size: "3000x3000",
-    response_format: "b64_json",
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: `Generate a detailed square image (3000x3000) illustrating: ${prompt}`,
+          },
+        ],
+      },
+    ],
   });
 
   const resp = await fetch(url, { method: "POST", headers, body });
-  if (!resp.ok) {
-    const txt = await resp.text();
-    throw new Error(`OpenRouter image generation failed: ${resp.status} ${txt}`);
+  const text = await resp.text();
+
+  // Defensive: handle unexpected HTML / errors from OpenRouter
+  if (!resp.ok || text.trim().startsWith("<")) {
+    throw new Error(
+      `OpenRouter image generation failed (${resp.status}): ${text.slice(
+        0,
+        200
+      )}`
+    );
   }
 
-  const json = await resp.json();
-  const b64 = json?.data?.[0]?.b64_json || json?.b64_json || null;
+  const json = JSON.parse(text);
+  const b64 =
+    json?.choices?.[0]?.message?.content?.[0]?.data ||
+    json?.data?.[0]?.b64_json ||
+    json?.b64_json ||
+    null;
+
   if (!b64) throw new Error("No base64 image returned from OpenRouter.");
   return b64;
 }
@@ -63,12 +87,12 @@ router.post("/", async (req, res) => {
     const buffer = Buffer.from(b64, "base64");
 
     const key = `${sessionId}-artwork.png`;
-    // putObject expects (alias, key, buffer, contentType) in your r2-client mapping
+    // putObject expects (alias, key, buffer, contentType)
     await putObject("art", key, buffer, "image/png");
     const url = buildPublicUrl("art", key);
 
     const took = ((Date.now() - start) / 1000).toFixed(2);
-    console.log("\n🎨 Artwork Generated Successfully (Nano Banana)");
+    console.log("\n🎨 Artwork Generated Successfully");
     console.table({
       sessionId,
       bucket: "podcastart",
