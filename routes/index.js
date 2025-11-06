@@ -7,7 +7,7 @@ import { info, error } from "#logger.js";
 // ─────────────────────────────
 import rssRoutes from "../services/rss-feed-creator/routes/rewrite.js";
 import scriptRoutes from "../services/script/routes/index.js";
-import ttsRoutes from "../services/tts/index.js";
+import ttsRoutes from "../services/tts/routes/tts.js";
 import artworkRoutes from "../services/artwork/index.js";   // ✅ FIXED import
 import podcastRoutes from "./podcast.js";
 import podcastPipelineRoutes from "./podcast-pipeline.js";
