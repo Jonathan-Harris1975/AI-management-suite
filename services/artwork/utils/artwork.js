@@ -2,7 +2,7 @@
 import OpenAI from "openai";
 
 // Validate environment first
-const requiredEnv = ['OPENROUTER_API_KEY'];
+const requiredEnv = ['OPENROUTER_API_KEY_ART'];
 const missing = requiredEnv.filter(key => !process.env[key]);
 if (missing.length > 0) {
   throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
