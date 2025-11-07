@@ -1,7 +1,8 @@
 // ============================================================
-// ☁️ Cloudflare R2 Client — Direct Unsigned Fetch Version (Final)
+// ☁️ Cloudflare R2 Client — Hybrid Authenticated Write + Public Read (Final)
 // ============================================================
 
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { log } from "#logger.js";
 
 // ============================================================
@@ -9,6 +10,13 @@ import { log } from "#logger.js";
 // ============================================================
 
 const {
+  // Auth credentials + endpoint
+  R2_ACCESS_KEY_ID,
+  R2_SECRET_ACCESS_KEY,
+  R2_ENDPOINT,
+  R2_REGION,
+
+  // Buckets
   R2_BUCKET_PODCAST,
   R2_BUCKET_RAW,
   R2_BUCKET_RAW_TEXT,
@@ -19,6 +27,7 @@ const {
   R2_BUCKET_PODCAST_RSS_FEEDS,
   R2_BUCKET_TRANSCRIPTS,
 
+  // Public URLs
   R2_PUBLIC_BASE_URL_PODCAST,
   R2_PUBLIC_BASE_URL_RAW,
   R2_PUBLIC_BASE_URL_RAW_TEXT,
@@ -28,6 +37,19 @@ const {
   R2_PUBLIC_BASE_URL_RSS,
   R2_PUBLIC_BASE_URL_TRANSCRIPT,
 } = process.env;
+
+// ============================================================
+// 🧠 Authenticated S3 Client (for PUT / DELETE)
+// ============================================================
+
+export const s3 = new S3Client({
+  region: R2_REGION || "auto",
+  endpoint: R2_ENDPOINT,
+  credentials: {
+    accessKeyId: R2_ACCESS_KEY_ID,
+    secretAccessKey: R2_SECRET_ACCESS_KEY,
+  },
+});
 
 // ============================================================
 // 🪣 Bucket Registry
@@ -41,23 +63,21 @@ export const R2_BUCKETS = {
   merged: R2_BUCKET_MERGED,
   art: R2_BUCKET_ART,
   podcastart: R2_BUCKET_ART,
-
   rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
   podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS || R2_BUCKET_RSS_FEEDS || "rss-feeds",
   "rss-feeds": R2_BUCKET_RSS_FEEDS || "rss-feeds",
-
   transcripts: R2_BUCKET_TRANSCRIPTS,
   transcript: R2_BUCKET_TRANSCRIPTS,
 };
 
 // ============================================================
-// 🌍 Public URL Registry (normalized keys)
+// 🌍 Public URL Registry
 // ============================================================
 
 export const R2_PUBLIC_URLS = {
   podcast: R2_PUBLIC_BASE_URL_PODCAST,
   raw: R2_PUBLIC_BASE_URL_RAW,
-  rawtext: R2_PUBLIC_BASE_URL_RAW_TEXT, // ✅ fixed key
+  rawtext: R2_PUBLIC_BASE_URL_RAW_TEXT,
   meta: R2_PUBLIC_BASE_URL_META,
   merged: R2_PUBLIC_BASE_URL_MERGE,
   art: R2_PUBLIC_BASE_URL_ART,
@@ -80,37 +100,28 @@ export function ensureBucketKey(bucketKey) {
 
 export function buildPublicUrl(bucketKey, key) {
   const base = R2_PUBLIC_URLS[bucketKey];
-  if (!base) {
-    const available = Object.entries(R2_PUBLIC_URLS)
-      .filter(([_, v]) => v)
-      .map(([k]) => k)
-      .join(", ");
-    throw new Error(
-      `No public URL configured for bucket key: ${bucketKey}. Available: ${available || "none"}`
-    );
-  }
+  if (!base)
+    throw new Error(`No public URL configured for bucket key: ${bucketKey}`);
   return `${base.replace(/\/+$/, "")}/${encodeURIComponent(key)}`;
 }
 
 // ============================================================
-// ⚙️ Core Upload / Download (unsigned fetch)
+// ⚙️ Core Upload / Download
 // ============================================================
 
-export async function uploadBuffer(
-  bucketKey,
-  key,
-  buffer,
-  contentType = "application/octet-stream"
-) {
+// 🔒 Authenticated write (S3Client)
+export async function uploadBuffer(bucketKey, key, buffer, contentType = "application/octet-stream") {
+  const bucket = ensureBucketKey(bucketKey);
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType,
+    })
+  );
   const url = buildPublicUrl(bucketKey, key);
-  const res = await fetch(url, {
-    method: "PUT",
-    headers: { "Content-Type": contentType },
-    body: buffer,
-  });
-  if (!res.ok)
-    throw new Error(`R2 upload failed (${bucketKey}/${key}): ${res.status} ${res.statusText}`);
-  log.info({ bucketKey, key, url }, "💾 R2 object uploaded");
+  log.info({ bucketKey, key, url }, "💾 Uploaded to R2 via S3 endpoint");
   return url;
 }
 
@@ -118,18 +129,19 @@ export async function uploadText(bucketKey, key, text, contentType = "text/plain
   return uploadBuffer(bucketKey, key, Buffer.from(text, "utf-8"), contentType);
 }
 
+// 🌐 Unsigned public read (fetch)
 export async function getObjectAsText(bucketKey, key) {
   const url = buildPublicUrl(bucketKey, key);
   const res = await fetch(url);
   if (!res.ok)
     throw new Error(`R2 get failed (${bucketKey}/${key}): ${res.status} ${res.statusText}`);
   const text = await res.text();
-  log.info({ bucketKey, key, bytes: text.length }, "📥 R2 object retrieved");
+  log.info({ bucketKey, key, bytes: text.length }, "📥 R2 object read (public)");
   return text;
 }
 
 // ============================================================
-// 🔁 Aliases (for backward compatibility)
+// 🔁 Aliases (backward compatibility)
 // ============================================================
 
 export const r2Put = uploadBuffer;
@@ -141,19 +153,17 @@ export const getObject = getObjectAsText;
 export const r2Get = getObjectAsText;
 
 // ============================================================
-// 🧩 Delete / List (via public API)
+// 🧩 Delete / List
 // ============================================================
 
 export async function deleteObject(bucketKey, key) {
-  const url = buildPublicUrl(bucketKey, key);
-  const res = await fetch(url, { method: "DELETE" });
-  if (!res.ok)
-    throw new Error(`R2 delete failed (${bucketKey}/${key}): ${res.status} ${res.statusText}`);
-  log.info({ bucketKey, key }, "🗑️ R2 object deleted");
+  const bucket = ensureBucketKey(bucketKey);
+  await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  log.info({ bucketKey, key }, "🗑️ R2 object deleted via S3");
 }
 
 export async function listKeys() {
-  log.warn("⚠️ listKeys() not available for unsigned public fetch mode.");
+  log.warn("⚠️ listKeys() not available in hybrid mode (S3 write + public read).");
   return [];
 }
 
@@ -163,7 +173,8 @@ export async function listKeys() {
 
 log.info(
   {
-    mode: "unsigned-fetch",
+    mode: "hybrid",
+    endpoint: R2_ENDPOINT,
     buckets: Object.keys(R2_BUCKETS),
     publicURLs: Object.entries(R2_PUBLIC_URLS).filter(([_, v]) => !!v),
   },
