@@ -66,7 +66,7 @@ export const R2_BUCKETS = {
   podcastart: R2_BUCKET_ART,
   rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
   podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS || R2_BUCKET_RSS_FEEDS || "rss-feeds",
-  "rss-feeds": R2_BUCKET_RSS_FEEDS || "rss-feeds",
+  rssfeeds: R2_BUCKET_RSS_FEEDS ,
   transcripts: R2_BUCKET_TRANSCRIPTS,
   transcript: R2_BUCKET_TRANSCRIPTS,
 };
