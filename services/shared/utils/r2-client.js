@@ -1,26 +1,14 @@
 // ============================================================
-// ☁️ Cloudflare R2 Client — Stable Unsigned Version (Final)
+// ☁️ Cloudflare R2 Client — Direct Unsigned Fetch Version
 // ============================================================
 
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  ListObjectsV2Command,
-  DeleteObjectCommand,
-} from "@aws-sdk/client-s3";
 import { log } from "#logger.js";
 
 // ============================================================
-// 🔧 Environment Variables
+// 🔧 Environment
 // ============================================================
 
 const {
-  R2_ACCESS_KEY_ID,
-  R2_SECRET_ACCESS_KEY,
-  R2_ENDPOINT,
-  R2_REGION,
-
   R2_BUCKET_PODCAST,
   R2_BUCKET_RAW,
   R2_BUCKET_RAW_TEXT,
@@ -40,25 +28,6 @@ const {
   R2_PUBLIC_BASE_URL_RSS,
   R2_PUBLIC_BASE_URL_TRANSCRIPT,
 } = process.env;
-
-// ============================================================
-// 🧠 R2 Client Initialization
-// ============================================================
-
-const cleanEndpoint = (R2_ENDPOINT || "").replace(/\/+$/, "").trim();
-
-// ⚡ Critical change — disable AWS SigV4 and enforce R2 path-style mode
-export const s3 = new S3Client({
-  endpoint: cleanEndpoint,
-  region: "auto", // Cloudflare R2 ignores AWS regions
-  forcePathStyle: true, // required for R2 compatibility
-  signer: null, // 🚫 disables AWS request signing completely
-  credentials: {
-    accessKeyId: (R2_ACCESS_KEY_ID || "").trim(),
-    secretAccessKey: (R2_SECRET_ACCESS_KEY || "").trim(),
-  },
-});
-log.info({ endpoint: cleanEndpoint, region: "auto" }, "✅ R2 S3 client initialized (unsigned)");
 
 // ============================================================
 // 🪣 Bucket Registry
@@ -97,7 +66,7 @@ export const R2_PUBLIC_URLS = {
 };
 
 // ============================================================
-// 🧩 Bucket Validator
+// 🧩 Helpers
 // ============================================================
 
 export function ensureBucketKey(bucketKey) {
@@ -109,21 +78,25 @@ export function ensureBucketKey(bucketKey) {
   return bucket;
 }
 
+export function buildPublicUrl(bucketKey, key) {
+  const base = R2_PUBLIC_URLS[bucketKey];
+  if (!base) throw new Error(`No public URL configured for bucket key: ${bucketKey}`);
+  return `${base.replace(/\/+$/, "")}/${encodeURIComponent(key)}`;
+}
+
 // ============================================================
-// ⚙️ Core Functions
+// ⚙️ Core Upload / Download (unsigned fetch)
 // ============================================================
 
 export async function uploadBuffer(bucketKey, key, buffer, contentType = "application/octet-stream") {
-  const bucket = ensureBucketKey(bucketKey);
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: contentType,
-    })
-  );
-  return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
+  const url = buildPublicUrl(bucketKey, key);
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": contentType },
+    body: buffer,
+  });
+  if (!res.ok) throw new Error(`R2 upload failed: ${res.status} ${res.statusText}`);
+  return url;
 }
 
 export async function uploadText(bucketKey, key, text, contentType = "text/plain") {
@@ -131,15 +104,14 @@ export async function uploadText(bucketKey, key, text, contentType = "text/plain
 }
 
 export async function getObjectAsText(bucketKey, key) {
-  const bucket = ensureBucketKey(bucketKey);
-  const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-  const chunks = [];
-  for await (const chunk of response.Body) chunks.push(chunk);
-  return Buffer.concat(chunks).toString("utf-8");
+  const url = buildPublicUrl(bucketKey, key);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`R2 get failed: ${res.status} ${res.statusText}`);
+  return await res.text();
 }
 
 // ============================================================
-// 🔁 Aliases
+// 🔁 Aliases (for backward compatibility)
 // ============================================================
 
 export const r2Put = uploadBuffer;
@@ -151,53 +123,46 @@ export const getObject = getObjectAsText;
 export const r2Get = getObjectAsText;
 
 // ============================================================
-// 🧩 Utility Helpers
+// 🧩 Delete / List (via public API)
 // ============================================================
-
-export async function listKeys(bucketKey, prefix = "") {
-  const bucket = ensureBucketKey(bucketKey);
-  const { Contents } = await s3.send(
-    new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix })
-  );
-  return Contents ? Contents.map((c) => c.Key) : [];
-}
-
-export async function getR2ReadStream(bucketKey, key) {
-  const bucket = ensureBucketKey(bucketKey);
-  const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-  return response.Body;
-}
+// These work only if your bucket allows public listing/deletion.
 
 export async function deleteObject(bucketKey, key) {
-  const bucket = ensureBucketKey(bucketKey);
-  await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
-  log.info({ bucket, key }, "🗑️ Deleted R2 object");
+  const url = buildPublicUrl(bucketKey, key);
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) throw new Error(`R2 delete failed: ${res.status} ${res.statusText}`);
+  log.info({ bucketKey, key }, "🗑️ Deleted R2 object");
 }
 
-export function buildPublicUrl(bucketKey, key) {
-  return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
+export async function listKeys() {
+  log.warn("⚠️ listKeys() not available for unsigned public fetch mode.");
+  return [];
 }
 
 // ============================================================
-// 🧾 Default Export
+// 🧩 Startup Log
+// ============================================================
+
+log.info(
+  { buckets: Object.keys(R2_BUCKETS), urls: Object.values(R2_PUBLIC_URLS) },
+  "r2-client.initialized (unsigned fetch mode)"
+);
+
+// ============================================================
+// 📦 Default Export
 // ============================================================
 
 export default {
-  s3,
-  R2_BUCKETS,
-  R2_PUBLIC_URLS,
   uploadBuffer,
   uploadText,
   getObjectAsText,
   deleteObject,
   listKeys,
-  getR2ReadStream,
   buildPublicUrl,
-  // aliases
-  r2Put,
   putJson,
   putText,
   putObject,
   getObject,
+  r2Put,
   r2Get,
 };
