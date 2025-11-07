@@ -1,42 +1,60 @@
+// ============================================================
+// 🎙️ Podcast Pipeline Orchestrator (Full Flow)
+// ============================================================
+
 import { info, error } from "#logger.js";
-import { orchestrateEpisode } from "../script/utils/orchestrator.js";
+import { orchestrateScript } from "../script/utils/orchestrator.js";
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
-import { generatePodcastArtwork } from "../artwork/utils/artwork.js";
-import { putObject } from "#shared/r2-client.js";
+import { generateArtwork } from "../artwork/utils/generateArtwork.js";
+import { mergeAudio } from "../merge/utils/mergeAudio.js";
 
-export async function runPodcastPipeline(sessionId) {
-  info(`🎙️ Podcast pipeline starting for session: ${sessionId}`);
+// ------------------------------------------------------------
+// 🧩 Helper
+// ------------------------------------------------------------
 
-  if (!sessionId) throw new Error("sessionId is required");
+function normalizeSessionId(input) {
+  return typeof input === "object" && input.sessionId ? input.sessionId : input;
+}
+
+// ------------------------------------------------------------
+// 🧠 Main Pipeline
+// ------------------------------------------------------------
+
+export async function runPodcastPipeline(session) {
+  const sessionId = normalizeSessionId(session);
+  info({ sessionId }, "🎙️ Podcast pipeline starting");
 
   try {
-    // 1️⃣ Run script orchestration with explicit sessionId
-    const script = await orchestrateEpisode(sessionId);
-    info(`🧩 Script pipeline completed for ${sessionId}`);
+    // --------------------------------------------------------
+    // 1️⃣ Script generation + save to R2
+    // --------------------------------------------------------
+    info({ sessionId }, "🧩 Script orchestration started");
+    await orchestrateScript(sessionId);
 
-    // 2️⃣ Run TTS synthesis
-    const tts = await orchestrateTTS({ sessionId });
-    info(`🔊 TTS synthesis completed for ${sessionId}`);
+    // --------------------------------------------------------
+    // 2️⃣ TTS generation (Gemini / Google)
+    // --------------------------------------------------------
+    info({ sessionId }, "🔊 Starting TTS orchestration");
+    await orchestrateTTS(sessionId);
 
-    // 3️⃣ Generate artwork
-    const art = await generatePodcastArtwork(sessionId);
-    info(`🎨 Artwork generation completed for ${sessionId}`);
+    // --------------------------------------------------------
+    // 3️⃣ Artwork generation
+    // --------------------------------------------------------
+    info({ sessionId }, "🎨 Generating episode artwork");
+    await generateArtwork(sessionId);
 
-    // 4️⃣ Save metadata manifest (for quick reference)
-    const manifest = {
-      sessionId,
-      title: script?.meta?.title || "AI Weekly Episode",
-      timestamp: new Date().toISOString(),
-      status: "complete",
-    };
-    const metaKey = `${sessionId}.meta.json`;
-    await putObject(process.env.R2_META_BUCKET, metaKey, JSON.stringify(manifest));
-    info(`🧾 Manifest stored as ${metaKey}`);
+    // --------------------------------------------------------
+    // 4️⃣ Merge all audio parts
+    // --------------------------------------------------------
+    info({ sessionId }, "🎧 Starting audio merge");
+    await mergeAudio(sessionId);
 
-    info(`✅ Podcast pipeline complete for ${sessionId}`);
-    return { ok: true, sessionId, script, tts, art };
+    info({ sessionId }, "✅ Podcast pipeline completed successfully");
+    return { ok: true, sessionId };
   } catch (err) {
-    error("💥 Podcast pipeline failed", { error: err.message });
+    error({ sessionId, err: err.message }, "💥 Podcast pipeline failed");
     throw err;
   }
-                                             }
+}
+
+export default runPodcastPipeline;
