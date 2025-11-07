@@ -17,6 +17,9 @@ async function generateImageBase64(prompt) {
     process.env.APP_TITLE || "Turings Torch: AI Weekly Artwork"
   );
 
+  // Escape any stray `$` that might cause runtime interpolation
+  const safePrompt = String(prompt).replace(/\$/g, "\\$");
+
   const headers = {
     Authorization: `Bearer ${process.env.OPENROUTER_API_KEY_ART}`,
     "Content-Type": "application/json",
@@ -29,7 +32,7 @@ async function generateImageBase64(prompt) {
     messages: [
       {
         role: "user",
-        content: `Generate a detailed square image (3000x3000) illustrating: ${prompt}`,
+        content: `Generate a detailed square image (3000x3000) illustrating: ${safePrompt}`,
       },
     ],
   });
@@ -47,7 +50,9 @@ async function generateImageBase64(prompt) {
   try {
     json = JSON.parse(text);
   } catch {
-    throw new Error("Invalid JSON returned from OpenRouter (likely HTML or rate-limited response)");
+    throw new Error(
+      "Invalid JSON returned from OpenRouter (likely HTML or rate-limited response)"
+    );
   }
 
   const msg = json?.choices?.[0]?.message;
@@ -55,24 +60,36 @@ async function generateImageBase64(prompt) {
 
   // Primary: message.images
   if (msg?.images && Array.isArray(msg.images)) {
-    const imgItem = msg.images.find(i => i.image_url?.url?.startsWith("data:image/png;base64,"));
+    const imgItem = msg.images.find(i =>
+      i.image_url?.url?.startsWith("data:image/png;base64,")
+    );
     if (imgItem) b64 = imgItem.image_url.url.split(",")[1];
   }
 
   // Fallback: message.content array
   if (!b64 && Array.isArray(msg?.content)) {
-    const imgItem = msg.content.find(i => i.image_url?.url?.startsWith("data:image/png;base64,"));
+    const imgItem = msg.content.find(i =>
+      i.image_url?.url?.startsWith("data:image/png;base64,")
+    );
     if (imgItem) b64 = imgItem.image_url.url.split(",")[1];
   }
 
   // Fallback: string base64
-  if (!b64 && typeof msg?.content === "string" && msg.content.includes("data:image/png;base64,")) {
+  if (
+    !b64 &&
+    typeof msg?.content === "string" &&
+    msg.content.includes("data:image/png;base64,")
+  ) {
     b64 = msg.content.split("data:image/png;base64,")[1].split('"')[0];
   }
 
   if (!b64) {
     throw new Error(
-      `No base64 image returned. Structure: ${JSON.stringify(json, null, 2).slice(0, 400)}`
+      `No base64 image returned. Structure: ${JSON.stringify(
+        json,
+        null,
+        2
+      ).slice(0, 400)}`
     );
   }
 
@@ -83,7 +100,7 @@ router.post("/", async (req, res) => {
   try {
     let { prompt, sessionId } = req.body || {};
 
-    // ✅ Retrieve from temporary memory if not directly passed
+    // Recover prompt from temporary memory if not passed directly
     if (!prompt && sessionId) {
       const cachedPrompt = await sessionCache.getTempPart(sessionId, "artworkPrompt");
       if (cachedPrompt) {
