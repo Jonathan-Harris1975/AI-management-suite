@@ -1,26 +1,20 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "#shared/r2-client.js";
-// test-tts.js
-import { processTextToSpeechPipeline } from './utils/ttsProcessor.js';
+// test-tts.js – Gemini-only
+import { processTTS } from "./utils/ttsProcessor.js";
 
 async function runTest() {
   try {
-    const sessionId = process.argv[2]; // pass sessionId from CLI
+    const [sessionId, voiceName] = process.argv.slice(2);
     if (!sessionId) {
-      console.error("❌ Usage: node test-tts.js <sessionId>");
+      console.error("❌ Usage: node test-tts.js <sessionId> [voiceName]");
       process.exit(1);
     }
-
-    console.log(`▶️ Running TTS pipeline for sessionId: ${sessionId}`);
-
-    const uploadedKeys = await processTextToSpeechPipeline(sessionId);
-
+    console.log(`▶️ Running TTS pipeline for sessionId: ${sessionId} voice: ${voiceName || '(default)'}`);
+    const res = await processTTS(sessionId, { voiceName });
     console.log("✅ TTS pipeline completed.");
-    console.log("Uploaded chunk URLs:");
-    uploadedKeys.forEach((url, i) => console.log(` [${i}] ${url}`));
+    console.log(JSON.stringify(res, null, 2));
   } catch (err) {
-    console.error("❌ TTS pipeline failed:", err.message);
+    console.error("❌ TTS pipeline failed:", err.stack || err.message);
     process.exit(1);
   }
 }
-
 runTest();

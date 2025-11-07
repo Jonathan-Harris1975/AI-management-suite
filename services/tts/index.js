@@ -1,45 +1,59 @@
 // /services/tts/index.js
-// Gemini 2.5 TTS Integration — October 2025
-
+// Gemini 2.5 TTS – unified, REST-based, Gemini-only
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import fetch from "node-fetch";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) throw new Error("Missing GEMINI_API_KEY in environment");
+const API_KEY = process.env.GEMINI_API_KEY;
+if (!API_KEY) throw new Error("Missing GEMINI_API_KEY in environment");
 
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+export const DEFAULT_VOICE_NAME = process.env.GEMINI_TTS_VOICE || "Charon";
+const TTS_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent";
 
 /**
- * Generate speech from text using Gemini 2.5's TTS model.
- * @param {string} text - Text input to synthesize.
- * @param {object} [options]
- * @param {string} [options.voice="en-GB-Standard-D"] - Voice preset.
- * @param {string} [options.output="output.mp3"] - Output filename.
- * @returns {Promise<string>} Path to generated MP3.
+ * Generate speech for a single text payload and return a local PCM path.
+ * (Upstream code converts PCM to MP3 using ffmpeg if needed.)
+ * @param {string} text
+ * @param {{voiceName?: string, filename?: string}} options
  */
-export async function generateSpeech(text, options = {}) {
-  const voice = options.voice || "en-GB-Standard-D";
-  const output = options.output || `tts-${Date.now()}.mp3`;
-  const outputPath = path.join("/tmp", output);
+export async function generateSpeech(text, { voiceName = DEFAULT_VOICE_NAME, filename } = {}) {
+  if (!text || typeof text !== "string") throw new Error("text must be a non-empty string");
 
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-tts",
-  });
-
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts: [{ text }] }],
+  const payload = {
+    model: "gemini-2.5-flash-preview-tts",
+    contents: [{ parts: [{ text }] }],
     generationConfig: {
-      responseMimeType: "audio/mp3",
-      voiceConfig: { voice },
-    },
+      responseModalities: ["AUDIO"],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName }
+        }
+      }
+    }
+  };
+
+  const url = `${TTS_API_URL}?key=${encodeURIComponent(API_KEY)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
   });
 
-  const audioData = result.response.candidates?.[0]?.content?.parts?.[0]?.data;
-  if (!audioData) throw new Error("No audio data returned from Gemini TTS");
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`Gemini TTS error ${res.status}: ${msg.slice(0, 300)}`);
+  }
 
-  const buffer = Buffer.from(audioData, "base64");
-  await fs.writeFile(outputPath, buffer);
+  const json = await res.json();
+  const inline = json.candidates?.[0]?.content?.parts?.find(p => p.inline_data);
+  if (!inline?.inline_data?.data) throw new Error("No audio returned from Gemini TTS");
 
-  return outputPath;
+  // The API returns PCM; we store it to file as .pcm for upstream conversion when needed.
+  const data = Buffer.from(inline.inline_data.data, "base64");
+  const tmpPath = path.join(os.tmpdir(), filename || `tts-${Date.now()}.pcm`);
+  await fs.writeFile(tmpPath, data);
+  return tmpPath;
 }
+
+export default { generateSpeech, DEFAULT_VOICE_NAME };
