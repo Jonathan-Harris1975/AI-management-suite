@@ -1,4 +1,7 @@
-// services/artwork/routes/generateArtwork.js
+// ============================================================
+// 🎨 Artwork Generator — Express Router + Direct Function Export
+// ============================================================
+
 import express from "express";
 import fetch from "node-fetch";
 import { putObject } from "#shared/r2-client.js";
@@ -7,18 +10,15 @@ import { info, error } from "#logger.js";
 
 const router = express.Router();
 
-/**
- * Generate image base64 from OpenRouter
- */
-async function generateImageBase64(prompt) {
+// ============================================================
+// 🧠 Generate image base64 from OpenRouter
+// ============================================================
+export async function generateArtwork(sessionId, prompt) {
   const url = "https://openrouter.ai/api/v1/chat/completions";
 
   const safeTitle = encodeURIComponent(
-    process.env.APP_TITLE || "Turings Torch: AI Weekly Artwork"
+    process.env.APP_TITLE || "Turing's Torch: AI Weekly Artwork"
   );
-
-  // Escape `$` to prevent runtime issues
-  const safePrompt = String(prompt).replace(/\$/g, "\\$");
 
   const headers = {
     Authorization: `Bearer ${process.env.OPENROUTER_API_KEY_ART}`,
@@ -32,99 +32,53 @@ async function generateImageBase64(prompt) {
     messages: [
       {
         role: "user",
-        content: `Generate a detailed square image (3000x3000) illustrating: ${safePrompt}`,
+        content: [
+          {
+            type: "input_text",
+            text: prompt || `AI Weekly podcast artwork for session ${sessionId}`,
+          },
+        ],
       },
     ],
   });
 
-  const resp = await fetch(url, { method: "POST", headers, body });
-  const text = await resp.text();
-
-  if (!resp.ok || text.trim().startsWith("<")) {
-    throw new Error(
-      `OpenRouter image generation failed (${resp.status}): ${text.slice(0, 200)}`
-    );
-  }
-
-  let json;
   try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(
-      "Invalid JSON returned from OpenRouter (likely HTML or rate-limited response)"
-    );
-  }
+    const res = await fetch(url, { method: "POST", headers, body });
 
-  const msg = json?.choices?.[0]?.message;
-  let b64 = null;
-
-  // Primary: message.images
-  if (msg?.images && Array.isArray(msg.images)) {
-    const imgItem = msg.images.find(i =>
-      i.image_url?.url?.startsWith("data:image/png;base64,")
-    );
-    if (imgItem) b64 = imgItem.image_url.url.split(",")[1];
-  }
-
-  // Fallbacks
-  if (!b64 && Array.isArray(msg?.content)) {
-    const imgItem = msg.content.find(i =>
-      i.image_url?.url?.startsWith("data:image/png;base64,")
-    );
-    if (imgItem) b64 = imgItem.image_url.url.split(",")[1];
-  }
-
-  if (
-    !b64 &&
-    typeof msg?.content === "string" &&
-    msg.content.includes("data:image/png;base64,")
-  ) {
-    b64 = msg.content.split("data:image/png;base64,")[1].split('"')[0];
-  }
-
-  if (!b64) {
-    throw new Error(
-      `No base64 image returned. Structure: ${JSON.stringify(
-        json,
-        null,
-        2
-      ).slice(0, 400)}`
-    );
-  }
-
-  return b64;
-}
-
-router.post("/", async (req, res) => {
-  try {
-    let { prompt, sessionId } = req.body || {};
-
-    if (!prompt && sessionId) {
-      const cachedPrompt = await sessionCache.getTempPart(sessionId, "artworkPrompt");
-      if (cachedPrompt) {
-        prompt = cachedPrompt;
-        info("artwork.prompt.recovered", { sessionId });
-      }
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(`Artwork generation failed: ${msg.slice(0, 200)}`);
     }
 
-    if (!prompt) throw new Error("Prompt not found in body or session cache");
+    const json = await res.json();
+    const imageData = json?.choices?.[0]?.message?.content?.[0]?.image_data;
 
-    const b64 = await generateImageBase64(prompt);
-    const pngBuffer = Buffer.from(b64, "base64");
+    if (!imageData) throw new Error("No image data returned from OpenRouter.");
 
-    const bucket = process.env.R2_BUCKET_ART;
-    if (!bucket) throw new Error("R2_BUCKET_ART not set");
+    const buffer = Buffer.from(imageData, "base64");
+    const key = `${sessionId}.png`;
 
-    // ✅ Flat structure: use only sessionId as file name
-    const fileName = `${sessionId || Date.now()}.png`;
-    await putObject(bucket, fileName, pngBuffer, "image/png");
+    await putObject("art", key, buffer, "image/png");
 
-    const url = `${process.env.R2_PUBLIC_BASE_URL_ART.replace(/\\/+$, "")}/${fileName}`;
-    info("artwork.generate.success", { url, sessionId });
-
-    res.json({ ok: true, url, fileName });
+    info({ sessionId, key }, "🎨 Artwork saved to R2");
+    return `${process.env.R2_PUBLIC_BASE_URL_ART}/${encodeURIComponent(key)}`;
   } catch (err) {
-    error("artwork.generate.fail", { message: err.message });
+    error({ sessionId, error: err.message }, "💥 Artwork generation failed");
+    throw err;
+  }
+}
+
+// ============================================================
+// 🚀 Express Route Wrapper
+// ============================================================
+router.post("/generate", async (req, res) => {
+  const sessionId = req.body.sessionId || `art-${Date.now()}`;
+  const prompt = req.body.prompt || "Podcast cover art: abstract AI design";
+  try {
+    const url = await generateArtwork(sessionId, prompt);
+    res.json({ ok: true, sessionId, url });
+  } catch (err) {
+    error({ sessionId, error: err.message }, "💥 Artwork route failed");
     res.status(500).json({ ok: false, error: err.message });
   }
 });
