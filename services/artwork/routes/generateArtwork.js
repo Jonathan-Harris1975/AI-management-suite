@@ -1,18 +1,11 @@
 // services/artwork/routes/generateArtwork.js
 import express from "express";
 import fetch from "node-fetch";
-import * as sessionCache from "../../script/utils/sessionCache.js";
-import { putObject, buildPublicUrl } from "../../shared/utils/r2-client.js";
+import { putObject } from "#shared/r2-client.js";
 import { info, error } from "#logger.js";
 
 const router = express.Router();
 
-/**
- * Generate artwork via OpenRouter (Gemini image model)
- * - Uses /api/v1/chat/completions instead of the old /api/v1/images
- * - Handles HTML responses safely
- * - Sanitizes headers to prevent invalid character errors
- */
 async function generateImageBase64(prompt) {
   const url = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -28,9 +21,7 @@ async function generateImageBase64(prompt) {
   };
 
   const body = JSON.stringify({
-    model:
-      process.env.OPENROUTER_ART ||
-      "google/gemini-2.0-flash-exp:free",
+    model: process.env.OPENROUTER_ART || "google/gemini-2.5-flash-image",
     messages: [
       {
         role: "user",
@@ -42,108 +33,77 @@ async function generateImageBase64(prompt) {
   const resp = await fetch(url, { method: "POST", headers, body });
   const text = await resp.text();
 
-  // Defensive: handle unexpected HTML / errors from OpenRouter
+  // Handle OpenRouter errors (HTML or API failure)
   if (!resp.ok || text.trim().startsWith("<")) {
     throw new Error(
-      `OpenRouter image generation failed (${resp.status}): ${text.slice(
-        0,
-        200
-      )}`
+      `OpenRouter image generation failed (${resp.status}): ${text.slice(0, 200)}`
     );
   }
 
-  const json = JSON.parse(text);
-  
-  // Extract base64 from various possible response structures
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error("Invalid JSON returned from OpenRouter (likely HTML or rate-limited response)");
+  }
+
   let b64 = null;
-  
-  // Check chat completion structure with content array
-  if (json?.choices?.[0]?.message?.content) {
-    const content = json.choices[0].message.content;
-    
-    // If content is an array with data field
-    if (Array.isArray(content) && content[0]?.data) {
-      b64 = content[0].data;
-    }
-    // If content is a string (base64)
-    else if (typeof content === 'string' && content.length > 100) {
-      b64 = content;
-    }
+  const msg = json?.choices?.[0]?.message;
+
+  // ✅ 1. Primary — new structure: message.images
+  if (msg?.images && Array.isArray(msg.images)) {
+    const imgItem = msg.images.find(
+      i => i.image_url?.url?.startsWith("data:image/png;base64,")
+    );
+    if (imgItem) b64 = imgItem.image_url.url.split(",")[1];
   }
-  
-  // Fallback to direct data field
-  if (!b64 && json?.data?.[0]?.b64_json) {
-    b64 = json.data[0].b64_json;
+
+  // ✅ 2. Fallback — content array with image_url
+  if (!b64 && Array.isArray(msg?.content)) {
+    const imgItem = msg.content.find(
+      i => i.type === "image_url" && i.image_url?.url?.startsWith("data:image/png;base64,")
+    );
+    if (imgItem) b64 = imgItem.image_url.url.split(",")[1];
   }
-  
-  // Fallback to root b64_json field
-  if (!b64 && json?.b64_json) {
-    b64 = json.b64_json;
+
+  // ✅ 3. Fallback — direct content string
+  if (!b64 && typeof msg?.content === "string" && msg.content.includes("data:image/png;base64,")) {
+    b64 = msg.content.split("data:image/png;base64,")[1].split('"')[0];
   }
 
   if (!b64) {
     throw new Error(
       `No base64 image returned from OpenRouter. Response structure: ${JSON.stringify(
-        json
-      ).slice(0, 500)}`
+        json,
+        null,
+        2
+      ).slice(0, 400)}`
     );
   }
-  
+
   return b64;
 }
 
-// POST /artwork/generate
-// Body: { sessionId: "TT-2025-11-01" }
 router.post("/", async (req, res) => {
-  const { sessionId } = req.body || {};
-  if (!sessionId) return res.status(400).json({ error: "Missing sessionId" });
-
-  const start = Date.now();
   try {
-    info("artwork.generate.start", { sessionId });
+    const { prompt } = req.body;
+    if (!prompt) throw new Error("Missing 'prompt' in body");
 
-    const prompt = await sessionCache.getTempPart(sessionId, "artworkPrompt");
-    if (!prompt) {
-      throw new Error("No artwork prompt found in temporary memory");
-    }
-
-    // Generate image base64
     const b64 = await generateImageBase64(prompt);
-    const buffer = Buffer.from(b64, "base64");
+    const pngBuffer = Buffer.from(b64, "base64");
 
-    const key = `${sessionId}-artwork.png`;
-    // putObject expects (alias, key, buffer, contentType)
-    await putObject("art", key, buffer, "image/png");
-    const url = buildPublicUrl("art", key);
+    const bucket = process.env.R2_BUCKET_ART;
+    if (!bucket) throw new Error("R2_BUCKET_ART not set");
 
-    const took = ((Date.now() - start) / 1000).toFixed(2);
-    console.log("\n🎨 Artwork Generated Successfully");
-    console.table({
-      sessionId,
-      bucket: "podcastart",
-      key,
-      sizeKB: (buffer.length / 1024).toFixed(1),
-      url,
-      took_s: took,
-    });
+    const key = `artwork/generated/${Date.now()}.png`;
+    await putObject(bucket, key, pngBuffer, "image/png");
+    info("artwork.generate.uploaded", { bucket, key });
 
-    info("artwork.generate.success", {
-      sessionId,
-      key,
-      bytes: buffer.length,
-      took_s: took,
-    });
-
-    return res.json({
-      ok: true,
-      key,
-      url,
-      bytes: buffer.length,
-      took_s: took,
-    });
+    const url = `${process.env.R2_PUBLIC_BASE_URL_ART.replace(/\\/+$, "")}/${key}`;
+    res.json({ ok: true, url });
   } catch (err) {
-    error("artwork.generate.fail", { sessionId, message: err.message });
-    return res.status(500).json({ ok: false, error: err.message });
+    error("artwork.generate.fail", { message: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
