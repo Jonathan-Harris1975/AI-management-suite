@@ -1,5 +1,5 @@
 import { info, error } from "#logger.js";
-import { getObjectAsText, listKeys } from "#shared/utils/r2-client.js";
+import { getObjectAsText, listKeys } from "../../shared/utils/r2-client.js";
 import { processTTS } from "./ttsProcessor.js";
 import { splitTextIntoChunks } from "./textchunksR2.js";
 
