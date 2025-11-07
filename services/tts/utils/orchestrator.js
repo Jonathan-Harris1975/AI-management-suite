@@ -1,79 +1,65 @@
-import { info, error } from "#logger.js";
-import { getObjectAsText, listKeys } from "../../shared/utils/r2-client.js";
-import { processTTS } from "./ttsProcessor.js";
-import { splitTextIntoChunks } from "./textchunksR2.js";
+// ============================================================
+// 🔊 TTS Orchestrator (Hybrid R2 + Gemini / Google)
+// ============================================================
 
-/**
- * Fetch raw text chunks from R2 for the given sessionId
- */
-async function fetchRawTextChunks(sessionId) {
+import { info, error, warn } from "#logger.js";
+import { getObjectAsText, uploadBuffer, buildPublicUrl } from "#shared/r2-client.js";
+import { synthesizeTTS } from "../engine/ttsEngine.js";
+
+// ------------------------------------------------------------
+// 🧩 Helper
+// ------------------------------------------------------------
+
+function normalizeSessionId(input) {
+  return typeof input === "object" && input.sessionId ? input.sessionId : input;
+}
+
+// ------------------------------------------------------------
+// 🎙️ Main Orchestration
+// ------------------------------------------------------------
+
+export async function orchestrateTTS(session) {
+  const sessionId = normalizeSessionId(session);
+  info({ sessionId }, "🎙 Starting TTS orchestration");
+
   try {
-    const keys = await listKeys("rawtext", sessionId);
-    const matched = keys.filter((key) => key.startsWith(`${sessionId}`));
+    // --------------------------------------------------------
+    // 1️⃣ Fetch raw text for this episode
+    // --------------------------------------------------------
+    const key = `${sessionId}.txt`;
+    const url = buildPublicUrl("rawtext", key);
+    info({ key, url }, "🔍 Fetching raw text from R2");
 
-    if (!matched.length) {
-      throw new Error(`No raw text found for ${sessionId}`);
+    let text;
+    try {
+      text = await getObjectAsText("rawtext", key);
+    } catch (err) {
+      error({ key, err: err.message }, "💥 Failed to fetch raw text chunks");
+      throw new Error(`No raw text found for ${key}`);
     }
 
-    matched.sort((a, b) => a.localeCompare(b));
-
-    const chunks = [];
-    for (const key of matched) {
-      const content = await getObjectAsText("rawtext", key);
-      if (content) chunks.push(content);
+    if (!text || text.trim().length < 5) {
+      throw new Error(`Empty or invalid raw text for ${sessionId}`);
     }
 
-    if (!chunks.length) {
-      throw new Error(`No text chunks found for ${sessionId}`);
-    }
+    // --------------------------------------------------------
+    // 2️⃣ Send text to TTS synthesis engine
+    // --------------------------------------------------------
+    const audioBuffer = await synthesizeTTS(sessionId, text);
+    info({ sessionId, bytes: audioBuffer?.length || 0 }, "🔊 TTS synthesis complete");
 
-    info(`🧩 Loaded ${chunks.length} text chunk(s) from R2 for ${sessionId}`);
-    return chunks;
+    // --------------------------------------------------------
+    // 3️⃣ Upload synthesized audio to R2
+    // --------------------------------------------------------
+    const audioKey = `${sessionId}.mp3`;
+    const audioUrl = await uploadBuffer("podcast", audioKey, audioBuffer, "audio/mpeg");
+    info({ sessionId, audioUrl }, "💾 TTS audio uploaded to R2");
+
+    return { ok: true, audioUrl };
   } catch (err) {
-    error("💥 Failed to fetch raw text chunks", {
-      sessionId,
-      error: err.message,
-    });
+    error({ sessionId, error: err.message }, "💥 TTS orchestration failed");
     throw err;
   }
 }
 
-/**
- * Main TTS orchestration (Gemini / Google)
- */
-export async function orchestrateTTS(sessionId) {
-  try {
-    info("🎙 Starting TTS orchestration", { service: "ai-podcast-suite" });
-
-    const chunks = await fetchRawTextChunks(sessionId);
-    const expandedChunks = [];
-
-    for (const chunk of chunks) {
-      const subChunks = splitTextIntoChunks(chunk);
-      expandedChunks.push(...subChunks);
-    }
-
-    if (!expandedChunks.length) {
-      throw new Error("No usable text chunks after splitting");
-    }
-
-    const results = [];
-    for (let i = 0; i < expandedChunks.length; i++) {
-      const textPart = expandedChunks[i];
-      info(`🔊 Generating TTS for chunk ${i + 1}/${expandedChunks.length}`);
-      const audioUrl = await processTTS(textPart, sessionId, i + 1);
-      results.push(audioUrl);
-    }
-
-    info(`✅ TTS orchestration complete for ${sessionId}`, {
-      chunksProcessed: results.length,
-    });
-    return results;
-  } catch (err) {
-    error("💥 TTS orchestration failed", {
-      sessionId,
-      error: err.message,
-    });
-    throw err;
-  }
-}
+export default orchestrateTTS;
