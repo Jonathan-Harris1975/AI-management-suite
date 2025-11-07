@@ -5,14 +5,14 @@ const router = express.Router();
 
 /**
  * POST /tts/generate
- * Body: { text: string, voice?: string }
+ * Body: { text: string, voiceName?: string }
  */
 router.post("/generate", async (req, res) => {
   try {
-    const { text, voice } = req.body;
+    const { text, voiceName } = req.body;
     if (!text) return res.status(400).json({ error: "Missing 'text' field" });
 
-    const path = await generateSpeech(text, { voice });
+    const path = await generateSpeech(text, { voiceName });
     res.json({ ok: true, path });
   } catch (err) {
     console.error("TTS generation failed:", err);
