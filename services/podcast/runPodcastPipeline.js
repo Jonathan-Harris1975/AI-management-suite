@@ -1,22 +1,12 @@
 // services/podcast/runPodcastPipeline.js
-// ============================================================
-// 🎙️ AI Podcast Suite — Unified Podcast Pipeline (fixed imports)
-// ============================================================
-// Runs the podcast pipeline sequentially:
-// script → tts → artwork
-// ============================================================
-
-import { log } from "#logger.js";
-import { orchestrateEpisode } from "../script/utils/orchestrator.js";
-import { orchestrateTTS } from "../tts/utils/orchestrator.js";
-import { generatePodcastArtwork } from "../artwork/utils/artwork.js";
-
-export async function runPodcastPipeline({ sessionId }) {
+export async function runPodcastPipeline(sessionId) {
   log.info(`🎙️ Podcast pipeline starting for session: ${sessionId}`);
+
+  if (!sessionId) throw new Error("sessionId is required");
 
   try {
     // 1️⃣ Run the script pipeline (intro → main → outro → compose)
-    const script = await orchestrateEpisode;
+    const script = await orchestrateEpisode();
     log.info(`🧩 Script pipeline completed for ${sessionId}`);
 
     // 2️⃣ Run TTS synthesis
@@ -30,19 +20,9 @@ export async function runPodcastPipeline({ sessionId }) {
     const art = await generatePodcastArtwork(sessionId);
     log.info(`🎨 Artwork generation completed for ${sessionId}`);
 
-    // ✅ Final output summary
-    return {
-      sessionId,
-      script,
-      tts,
-      art,
-      status: "complete",
-    };
+    return { ok: true, sessionId, script, tts, art };
   } catch (err) {
-    log.error({ sessionId, error: err.message }, "💥 Podcast pipeline failed");
+    log.error("💥 Podcast pipeline failed", { error: err.message });
     throw err;
   }
 }
-
-// 👇 Ensure both default and named exports
-export default runPodcastPipeline;
