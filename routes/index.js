@@ -8,9 +8,11 @@ import { info, error } from "#logger.js";
 import rssRoutes from "../services/rss-feed-creator/routes/rewrite.js";
 import scriptRoutes from "../services/script/routes/index.js";
 import ttsRoutes from "../services/tts/routes/tts.js";
-import artworkRoutes from "../services/artwork/index.js";   // ✅ FIXED import
-import podcastRoutes from "./podcast.js";
-import podcastPipelineRoutes from "./podcast-pipeline.js";
+import artworkRoutes from "../services/artwork/index.js";
+
+// ✅ FIXED: Corrected import paths for podcast & pipeline
+import podcastRoutes from "../services/podcast/index.js";
+import podcastPipelineRoutes from "../services/podcast/runPodcastPipeline.js"; // adjust if you have a routes folder instead
 
 const router = express.Router();
 
@@ -31,29 +33,25 @@ try {
   // ─────────────────────────────
   //  RSS FEED CREATOR
   // ─────────────────────────────
-  // POST /rss/rewrite
   router.use("/rss", rssRoutes);
   info("📰 Mounted: /rss");
 
   // ─────────────────────────────
   //  SCRIPT GENERATION & ORCHESTRATION
   // ─────────────────────────────
-  // POST /script/(intro|main|outro|compose|orchestrate)
   router.use("/script", scriptRoutes);
   info("✍️ Mounted: /script");
 
   // ─────────────────────────────
   //  TTS SERVICE
   // ─────────────────────────────
-  // POST /tts/generate
   router.use("/tts", ttsRoutes);
   info("🔊 Mounted: /tts");
 
   // ─────────────────────────────
   //  ARTWORK CREATION
   // ─────────────────────────────
-  // POST /artwork/(create|generate)
-  router.use("/artwork", artworkRoutes); // ✅ FIXED mount
+  router.use("/artwork", artworkRoutes);
   info("🎨 Mounted: /artwork");
 
   // ─────────────────────────────
