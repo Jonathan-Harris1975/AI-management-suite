@@ -1,6 +1,12 @@
 // services/script/utils/orchestrator.js
 import { info, error } from "#logger.js";
-import { generateIntro, generateMain, generateOutro, composeEpisode } from "../routes/generators.js";
+
+// Import actual generator routes
+import { generateIntro } from "../routes/intro.js";
+import { generateMain } from "../routes/main.js";
+import { generateOutro } from "../routes/outro.js";
+import { composeEpisode } from "../routes/compose.js";
+
 import { saveRawText } from "./rawTextSaver.js";
 import { generateTranscript } from "./transcriptGenerator.js";
 import { generateMeta } from "./metaGenerator.js";
