@@ -8,7 +8,7 @@ import { info, error } from "#logger.js";
 const router = express.Router();
 
 /**
- * Generate image base64 string from OpenRouter
+ * Generate image base64 from OpenRouter
  */
 async function generateImageBase64(prompt) {
   const url = "https://openrouter.ai/api/v1/chat/completions";
@@ -50,26 +50,30 @@ async function generateImageBase64(prompt) {
     throw new Error("Invalid JSON returned from OpenRouter (likely HTML or rate-limited response)");
   }
 
-  // Extract base64 from multiple possible structures
   const msg = json?.choices?.[0]?.message;
   let b64 = null;
 
+  // Primary: message.images
   if (msg?.images && Array.isArray(msg.images)) {
     const imgItem = msg.images.find(i => i.image_url?.url?.startsWith("data:image/png;base64,"));
     if (imgItem) b64 = imgItem.image_url.url.split(",")[1];
   }
 
+  // Fallback: message.content array
   if (!b64 && Array.isArray(msg?.content)) {
     const imgItem = msg.content.find(i => i.image_url?.url?.startsWith("data:image/png;base64,"));
     if (imgItem) b64 = imgItem.image_url.url.split(",")[1];
   }
 
+  // Fallback: string base64
   if (!b64 && typeof msg?.content === "string" && msg.content.includes("data:image/png;base64,")) {
     b64 = msg.content.split("data:image/png;base64,")[1].split('"')[0];
   }
 
   if (!b64) {
-    throw new Error(`No base64 image returned. Structure: ${JSON.stringify(json, null, 2).slice(0, 400)}`);
+    throw new Error(
+      `No base64 image returned. Structure: ${JSON.stringify(json, null, 2).slice(0, 400)}`
+    );
   }
 
   return b64;
@@ -77,21 +81,18 @@ async function generateImageBase64(prompt) {
 
 router.post("/", async (req, res) => {
   try {
-    // Try direct body prompt
     let { prompt, sessionId } = req.body || {};
 
-    // Fallback: recover from temporary memory (sessionCache)
+    // ✅ Retrieve from temporary memory if not directly passed
     if (!prompt && sessionId) {
-      const cached = await sessionCache.get(sessionId);
-      if (cached?.prompt) {
-        prompt = cached.prompt;
+      const cachedPrompt = await sessionCache.getTempPart(sessionId, "artworkPrompt");
+      if (cachedPrompt) {
+        prompt = cachedPrompt;
         info("artwork.prompt.recovered", { sessionId });
       }
     }
 
-    if (!prompt) {
-      throw new Error("Prompt not found in request or session cache");
-    }
+    if (!prompt) throw new Error("Prompt not found in body or session cache");
 
     const b64 = await generateImageBase64(prompt);
     const pngBuffer = Buffer.from(b64, "base64");
@@ -103,9 +104,9 @@ router.post("/", async (req, res) => {
     await putObject(bucket, key, pngBuffer, "image/png");
 
     const url = `${process.env.R2_PUBLIC_BASE_URL_ART.replace(/\\/+$, "")}/${key}`;
-    info("artwork.generate.success", { url });
+    info("artwork.generate.success", { url, sessionId });
 
-    res.json({ ok: true, url, promptSource: prompt ? "recovered" : "body" });
+    res.json({ ok: true, url, source: prompt ? "recovered" : "body" });
   } catch (err) {
     error("artwork.generate.fail", { message: err.message });
     res.status(500).json({ ok: false, error: err.message });
