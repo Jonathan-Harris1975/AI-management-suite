@@ -1,6 +1,5 @@
-// services/shared/utils/r2-client.js
 // ============================================================
-// ☁️ Cloudflare R2 Client — Final Unified & Unsigned Version
+// ☁️ Cloudflare R2 Client — Stable Unsigned Version (Final)
 // ============================================================
 
 import {
@@ -13,7 +12,7 @@ import {
 import { log } from "#logger.js";
 
 // ============================================================
-// 🔧 Environment Setup
+// 🔧 Environment Variables
 // ============================================================
 
 const {
@@ -22,7 +21,6 @@ const {
   R2_ENDPOINT,
   R2_REGION,
 
-  // Buckets (validated by envBootstrap)
   R2_BUCKET_PODCAST,
   R2_BUCKET_RAW,
   R2_BUCKET_RAW_TEXT,
@@ -33,7 +31,6 @@ const {
   R2_BUCKET_PODCAST_RSS_FEEDS,
   R2_BUCKET_TRANSCRIPTS,
 
-  // Public URLs
   R2_PUBLIC_BASE_URL_PODCAST,
   R2_PUBLIC_BASE_URL_RAW,
   R2_PUBLIC_BASE_URL_RAW_TEXT,
@@ -45,24 +42,26 @@ const {
 } = process.env;
 
 // ============================================================
-// 🧠 Client Initialization (Unsigned Cloudflare R2)
+// 🧠 R2 Client Initialization
 // ============================================================
 
+const cleanEndpoint = (R2_ENDPOINT || "").replace(/\/+$/, "").trim();
+
+// ⚡ Critical change — disable AWS SigV4 and enforce R2 path-style mode
 export const s3 = new S3Client({
-  // Cloudflare requires literal "auto" as region
-  region: "auto",
-  // Strip any accidental trailing slashes to avoid signature mismatch
-  endpoint: (R2_ENDPOINT || "").replace(/\/+$/, ""),
-  // Force path-style requests to stay S3-compatible without AWS signing
-  forcePathStyle: true,
+  endpoint: cleanEndpoint,
+  region: "auto", // Cloudflare R2 ignores AWS regions
+  forcePathStyle: true, // required for R2 compatibility
+  signer: null, // 🚫 disables AWS request signing completely
   credentials: {
     accessKeyId: (R2_ACCESS_KEY_ID || "").trim(),
     secretAccessKey: (R2_SECRET_ACCESS_KEY || "").trim(),
   },
 });
+log.info({ endpoint: cleanEndpoint, region: "auto" }, "✅ R2 S3 client initialized (unsigned)");
 
 // ============================================================
-// 🪣 Bucket Registry (Complete, with Aliases)
+// 🪣 Bucket Registry
 // ============================================================
 
 export const R2_BUCKETS = {
@@ -74,12 +73,10 @@ export const R2_BUCKETS = {
   art: R2_BUCKET_ART,
   podcastart: R2_BUCKET_ART,
 
-  // ✅ RSS aliases
   rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
   podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS || R2_BUCKET_RSS_FEEDS || "rss-feeds",
   "rss-feeds": R2_BUCKET_RSS_FEEDS || "rss-feeds",
 
-  // ✅ Transcript aliases
   transcripts: R2_BUCKET_TRANSCRIPTS,
   transcript: R2_BUCKET_TRANSCRIPTS,
 };
@@ -113,15 +110,10 @@ export function ensureBucketKey(bucketKey) {
 }
 
 // ============================================================
-// ⚙️ Core Upload / Download Functions
+// ⚙️ Core Functions
 // ============================================================
 
-export async function uploadBuffer(
-  bucketKey,
-  key,
-  buffer,
-  contentType = "application/octet-stream"
-) {
+export async function uploadBuffer(bucketKey, key, buffer, contentType = "application/octet-stream") {
   const bucket = ensureBucketKey(bucketKey);
   await s3.send(
     new PutObjectCommand({
@@ -134,12 +126,7 @@ export async function uploadBuffer(
   return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
 }
 
-export async function uploadText(
-  bucketKey,
-  key,
-  text,
-  contentType = "text/plain"
-) {
+export async function uploadText(bucketKey, key, text, contentType = "text/plain") {
   return uploadBuffer(bucketKey, key, Buffer.from(text, "utf-8"), contentType);
 }
 
@@ -152,7 +139,7 @@ export async function getObjectAsText(bucketKey, key) {
 }
 
 // ============================================================
-// 🔁 Backward-Compatible Aliases
+// 🔁 Aliases
 // ============================================================
 
 export const r2Put = uploadBuffer;
@@ -164,7 +151,7 @@ export const getObject = getObjectAsText;
 export const r2Get = getObjectAsText;
 
 // ============================================================
-// 🔍 Listing, Streams, Deletion
+// 🧩 Utility Helpers
 // ============================================================
 
 export async function listKeys(bucketKey, prefix = "") {
@@ -184,28 +171,15 @@ export async function getR2ReadStream(bucketKey, key) {
 export async function deleteObject(bucketKey, key) {
   const bucket = ensureBucketKey(bucketKey);
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
-  log.info({ bucket, key }, "🗑️ R2 object deleted");
+  log.info({ bucket, key }, "🗑️ Deleted R2 object");
 }
-
-// ============================================================
-// 🌐 Public URL Builder
-// ============================================================
 
 export function buildPublicUrl(bucketKey, key) {
   return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
 }
 
 // ============================================================
-// 🧩 Startup Logging
-// ============================================================
-
-log.info(
-  { endpoint: R2_ENDPOINT, region: "auto", buckets: Object.values(R2_BUCKETS) },
-  "r2-client.initialized"
-);
-
-// ============================================================
-// 📦 Default Export
+// 🧾 Default Export
 // ============================================================
 
 export default {
@@ -219,7 +193,7 @@ export default {
   listKeys,
   getR2ReadStream,
   buildPublicUrl,
-  // Legacy aliases
+  // aliases
   r2Put,
   putJson,
   putText,
