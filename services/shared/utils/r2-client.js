@@ -1,6 +1,6 @@
 // services/shared/utils/r2-client.js
 // ============================================================
-// ☁️ Cloudflare R2 Client — Final Unified & Backward-Compatible Version
+// ☁️ Cloudflare R2 Client — Final Unified & Unsigned Version
 // ============================================================
 
 import {
@@ -45,15 +45,19 @@ const {
 } = process.env;
 
 // ============================================================
-// 🧠 Client Initialization
+// 🧠 Client Initialization (Unsigned Cloudflare R2)
 // ============================================================
 
 export const s3 = new S3Client({
-  region: R2_REGION || "auto",
-  endpoint: R2_ENDPOINT,
+  // Cloudflare requires literal "auto" as region
+  region: "auto",
+  // Strip any accidental trailing slashes to avoid signature mismatch
+  endpoint: (R2_ENDPOINT || "").replace(/\/+$/, ""),
+  // Force path-style requests to stay S3-compatible without AWS signing
+  forcePathStyle: true,
   credentials: {
-    accessKeyId: R2_ACCESS_KEY_ID,
-    secretAccessKey: R2_SECRET_ACCESS_KEY,
+    accessKeyId: (R2_ACCESS_KEY_ID || "").trim(),
+    secretAccessKey: (R2_SECRET_ACCESS_KEY || "").trim(),
   },
 });
 
@@ -112,7 +116,12 @@ export function ensureBucketKey(bucketKey) {
 // ⚙️ Core Upload / Download Functions
 // ============================================================
 
-export async function uploadBuffer(bucketKey, key, buffer, contentType = "application/octet-stream") {
+export async function uploadBuffer(
+  bucketKey,
+  key,
+  buffer,
+  contentType = "application/octet-stream"
+) {
   const bucket = ensureBucketKey(bucketKey);
   await s3.send(
     new PutObjectCommand({
@@ -125,7 +134,12 @@ export async function uploadBuffer(bucketKey, key, buffer, contentType = "applic
   return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
 }
 
-export async function uploadText(bucketKey, key, text, contentType = "text/plain") {
+export async function uploadText(
+  bucketKey,
+  key,
+  text,
+  contentType = "text/plain"
+) {
   return uploadBuffer(bucketKey, key, Buffer.from(text, "utf-8"), contentType);
 }
 
@@ -149,28 +163,34 @@ export const putObject = uploadBuffer;
 export const getObject = getObjectAsText;
 export const r2Get = getObjectAsText;
 
-// Stream helper (for TTS merge, etc.)
+// ============================================================
+// 🔍 Listing, Streams, Deletion
+// ============================================================
+
+export async function listKeys(bucketKey, prefix = "") {
+  const bucket = ensureBucketKey(bucketKey);
+  const { Contents } = await s3.send(
+    new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix })
+  );
+  return Contents ? Contents.map((c) => c.Key) : [];
+}
+
 export async function getR2ReadStream(bucketKey, key) {
   const bucket = ensureBucketKey(bucketKey);
   const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   return response.Body;
 }
 
-// List keys in bucket
-export async function listKeys(bucketKey, prefix = "") {
-  const bucket = ensureBucketKey(bucketKey);
-  const { Contents } = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix }));
-  return Contents ? Contents.map((c) => c.Key) : [];
-}
-
-// Delete object
 export async function deleteObject(bucketKey, key) {
   const bucket = ensureBucketKey(bucketKey);
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
   log.info({ bucket, key }, "🗑️ R2 object deleted");
 }
 
-// Build public URL
+// ============================================================
+// 🌐 Public URL Builder
+// ============================================================
+
 export function buildPublicUrl(bucketKey, key) {
   return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
 }
@@ -180,7 +200,7 @@ export function buildPublicUrl(bucketKey, key) {
 // ============================================================
 
 log.info(
-  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.values(R2_BUCKETS) },
+  { endpoint: R2_ENDPOINT, region: "auto", buckets: Object.values(R2_BUCKETS) },
   "r2-client.initialized"
 );
 
