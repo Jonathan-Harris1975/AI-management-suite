@@ -12,7 +12,7 @@ import { composeEpisode } from "../routes/compose.js";
 async function saveRawText(sessionId, text) {
   const key = `${sessionId}.txt`;
   try {
-    await putObject("raw-text", key, text);
+    await putObject("rawtext", key, text);
     info(`💾 Raw text saved to R2 as ${key}`);
   } catch (err) {
     error("💥 Failed to save raw text", { sessionId, error: err.message });
