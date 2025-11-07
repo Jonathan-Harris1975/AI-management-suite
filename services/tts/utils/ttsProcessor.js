@@ -1,6 +1,6 @@
 
 // /app/services/tts/utils/ttsProcessor.js
-import { s3, BUCKETS, uploadBuffer, listKeys, getObjectAsText } from "#shared/r2-client.js";
+import { s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText } from "#shared/r2-client.js";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -142,7 +142,7 @@ export async function processTTS(sessionId, { voiceName = DEFAULT_VOICE_NAME } =
         await synthesizeChunk(chunk, outMp3, i, voiceName);
         const buf = fs.readFileSync(outMp3);
         const key = `${sessionId}/chunk-${i}.mp3`;
-        await uploadBuffer({ bucket: BUCKETS.RAW, key, body: buf, contentType: "audio/mpeg" });
+        await uploadBuffer({ bucket: R2_BUCKETS.RAW, key, body: buf, contentType: "audio/mpeg" });
         outMp3s[i] = key;
       })
     )

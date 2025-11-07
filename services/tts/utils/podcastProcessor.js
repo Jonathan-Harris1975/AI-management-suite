@@ -1,4 +1,4 @@
-import {s3, R2_BUCKETS, uploadBuffer, listKeys, getR2ReadStream,getObjectAsText} from "#shared/r2-client.js";
+import {s3, R2_R2_BUCKETS, uploadBuffer, listKeys, getR2ReadStream,getObjectAsText} from "#shared/r2-client.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
