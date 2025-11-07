@@ -48,7 +48,7 @@ const CONFIG = {
  * Looks in the R2 raw-text bucket under `${sessionId}/`.
  */
 export async function getTextChunkUrls(sessionId) {
-  const bucket = R2_BUCKETS.RAW_TEXT || "raw-text";
+  const bucket = R2_BUCKETS.RAW_TEXT || "rawtext";
   const prefix = `${sessionId}/`;
 
   const keys = await listKeys(bucket, prefix);
