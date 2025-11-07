@@ -1,8 +1,3 @@
-// services/podcast/runPodcastPipeline.js
-// ============================================================
-// 🎙️ AI Podcast Suite — Unified Podcast Pipeline (sessionId-based naming)
-// ============================================================
-
 import { info, error } from "#logger.js";
 import { orchestrateEpisode } from "../script/utils/orchestrator.js";
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
@@ -15,8 +10,8 @@ export async function runPodcastPipeline(sessionId) {
   if (!sessionId) throw new Error("sessionId is required");
 
   try {
-    // 1️⃣ Run the script pipeline
-    const script = await orchestrateEpisode();
+    // 1️⃣ Run script orchestration with explicit sessionId
+    const script = await orchestrateEpisode(sessionId);
     info(`🧩 Script pipeline completed for ${sessionId}`);
 
     // 2️⃣ Run TTS synthesis
@@ -27,18 +22,16 @@ export async function runPodcastPipeline(sessionId) {
     const art = await generatePodcastArtwork(sessionId);
     info(`🎨 Artwork generation completed for ${sessionId}`);
 
-    // 4️⃣ Generate metadata JSON tied to sessionId
-    const metadata = {
+    // 4️⃣ Save metadata manifest (for quick reference)
+    const manifest = {
       sessionId,
-      title: script?.meta?.title || `AI Weekly Episode`,
-      date: new Date().toISOString(),
-      type: "podcast",
+      title: script?.meta?.title || "AI Weekly Episode",
+      timestamp: new Date().toISOString(),
       status: "complete",
     };
-
     const metaKey = `${sessionId}.meta.json`;
-    await putObject(process.env.R2_META_BUCKET, metaKey, JSON.stringify(metadata));
-    info(`🧾 Metadata stored as ${metaKey}`);
+    await putObject(process.env.R2_META_BUCKET, metaKey, JSON.stringify(manifest));
+    info(`🧾 Manifest stored as ${metaKey}`);
 
     info(`✅ Podcast pipeline complete for ${sessionId}`);
     return { ok: true, sessionId, script, tts, art };
@@ -46,4 +39,4 @@ export async function runPodcastPipeline(sessionId) {
     error("💥 Podcast pipeline failed", { error: err.message });
     throw err;
   }
-}
+                                             }
