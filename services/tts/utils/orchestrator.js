@@ -1,34 +1,65 @@
-// services/tts/utils/orchestrator.js
-// ============================================================
-// 🔊 TTS Orchestrator — Gemini-only, unified exports
-// ============================================================
-
-import { log } from "#logger.js";
-import { processTTS } from "./ttsProcessor.js";
+import { info, error } from "#logger.js";
+import { getObject, listObjects } from "#shared/r2-client.js";
+import { orchestrateGeminiTTS } from "./geminiTTS.js"; // ✅ Correct local path
 
 /**
- * Orchestrate TTS synthesis for a given session.
- * Compatible with Gemini 2.5 TTS pipeline.
- *
- * @param {object} params
- * @param {string} params.sessionId - Unique session ID.
- * @param {string} [params.voiceName] - Optional Gemini voice name override.
- * @returns {Promise<object>} TTS synthesis result metadata.
+ * Fetch raw text chunks from R2 for given sessionId
  */
-export async function orchestrateTTS({ sessionId, voiceName } = {}) {
-  if (!sessionId) throw new Error("sessionId is required");
+async function fetchRawTextChunks(sessionId) {
+  try {
+    const objects = await listObjects("rawtext");
+    const matched = objects.filter(obj => obj.key.startsWith(sessionId));
 
-  log.info({ sessionId, voiceName }, "🔊 Starting TTS orchestration (Gemini)");
+    if (!matched.length) {
+      throw new Error(`No raw text found for ${sessionId}`);
+    }
 
-  const result = await processTTS(sessionId, { voiceName });
+    matched.sort((a, b) => a.key.localeCompare(b.key));
+    const chunks = [];
 
-  log.info(
-    { sessionId, produced: result.produced },
-    "🔊 TTS orchestration complete"
-  );
+    for (const obj of matched) {
+      const content = await getObject("rawtext", obj.key);
+      if (content) chunks.push(content);
+    }
 
-  return result;
+    if (!chunks.length) throw new Error(`No text chunks found for ${sessionId}`);
+
+    info(`🧩 Loaded ${chunks.length} text chunk(s) from R2`);
+    return chunks;
+  } catch (err) {
+    error("💥 Failed to fetch raw text chunks", {
+      sessionId,
+      error: err.message,
+    });
+    throw err;
+  }
 }
 
-// Support both default and named imports
-export default orchestrateTTS;
+/**
+ * Main TTS orchestration (Gemini)
+ */
+export async function orchestrateTTS(sessionId) {
+  try {
+    info("🎙 Starting TTS", { service: "ai-podcast-suite" });
+
+    const chunks = await fetchRawTextChunks(sessionId);
+    if (!chunks || !chunks.length) throw new Error("No text chunks found");
+
+    const results = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const textPart = chunks[i];
+      info(`🔊 Generating TTS for chunk ${i + 1}/${chunks.length}`);
+      const audio = await orchestrateGeminiTTS(textPart, sessionId, i + 1);
+      results.push(audio);
+    }
+
+    info(`✅ TTS complete for ${sessionId}`);
+    return results;
+  } catch (err) {
+    error("💥 TTS orchestration failed", {
+      sessionId,
+      error: err.message,
+    });
+    throw err;
+  }
+         }
