@@ -47,7 +47,7 @@ async function generateMeta(sessionId, text) {
     timestamp: new Date().toISOString(),
   };
   try {
-    await putObject("podcast-meta", key, JSON.stringify(meta, null, 2));
+    await putObject("meta", key, JSON.stringify(meta, null, 2));
     info(`📄 Meta saved to R2 as ${key}`);
   } catch (err) {
     error("💥 Failed to save meta", { sessionId, error: err.message });
