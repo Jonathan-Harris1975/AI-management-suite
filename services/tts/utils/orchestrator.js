@@ -1,25 +1,25 @@
 import { info, error } from "#logger.js";
-import { getObject, listObjects } from "#shared/r2-client.js";
-import { processTTS } from "./ttsProcessor.js"; // ✅ existing file
-import { splitTextIntoChunks } from "./textchunksR2.js"; // ✅ existing file
+import { getObjectAsText, listKeys } from "#shared/utils/r2-client.js";
+import { processTTS } from "./ttsProcessor.js";
+import { splitTextIntoChunks } from "./textchunksR2.js";
 
 /**
  * Fetch raw text chunks from R2 for the given sessionId
  */
 async function fetchRawTextChunks(sessionId) {
   try {
-    const objects = await listObjects("rawtext");
-    const matched = objects.filter(obj => obj.key.startsWith(`${sessionId}`));
+    const keys = await listKeys("rawtext", sessionId);
+    const matched = keys.filter((key) => key.startsWith(`${sessionId}`));
 
     if (!matched.length) {
       throw new Error(`No raw text found for ${sessionId}`);
     }
 
-    matched.sort((a, b) => a.key.localeCompare(b.key));
+    matched.sort((a, b) => a.localeCompare(b));
 
     const chunks = [];
-    for (const obj of matched) {
-      const content = await getObject("rawtext", obj.key);
+    for (const key of matched) {
+      const content = await getObjectAsText("rawtext", key);
       if (content) chunks.push(content);
     }
 
@@ -45,11 +45,9 @@ export async function orchestrateTTS(sessionId) {
   try {
     info("🎙 Starting TTS orchestration", { service: "ai-podcast-suite" });
 
-    // Get all raw text chunks
     const chunks = await fetchRawTextChunks(sessionId);
-
-    // Safety: split large single chunk if needed
     const expandedChunks = [];
+
     for (const chunk of chunks) {
       const subChunks = splitTextIntoChunks(chunk);
       expandedChunks.push(...subChunks);
