@@ -9,7 +9,7 @@ if (missing.length > 0) {
 }
 
 const cfg = {
-  key: process.env.OPENROUTER_API_KEY,
+  key: process.env.OPENROUTER_API_KEY_ART,
   baseURL: "https://openrouter.ai/api/v1",
   model: process.env.OPENROUTER_ART || "google/gemini-2.5-flash-image-preview:exp",
 };
