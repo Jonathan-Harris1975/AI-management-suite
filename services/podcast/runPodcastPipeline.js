@@ -5,13 +5,12 @@
 import { info, error } from "#logger.js";
 import { orchestrateScript } from "../script/utils/orchestrator.js";
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
-import { generateArtwork } from "../artwork/utils/generateArtwork.js";
+import { generateArtwork } from "../artwork/routes/generateArtwork.js";
 import { mergeAudio } from "../merge/utils/mergeAudio.js";
 
 // ------------------------------------------------------------
-// 🧩 Helper
+// 🧩 Helper — normalize sessionId
 // ------------------------------------------------------------
-
 function normalizeSessionId(input) {
   return typeof input === "object" && input.sessionId ? input.sessionId : input;
 }
@@ -19,7 +18,6 @@ function normalizeSessionId(input) {
 // ------------------------------------------------------------
 // 🧠 Main Pipeline
 // ------------------------------------------------------------
-
 export async function runPodcastPipeline(session) {
   const sessionId = normalizeSessionId(session);
   info({ sessionId }, "🎙️ Podcast pipeline starting");
