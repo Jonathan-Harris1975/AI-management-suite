@@ -1,7 +1,7 @@
 import {R2_BUCKETS, listKeys, getObjectAsText, buildPublicUrl} from "#shared/r2-client.js";
 import { log } from "#logger.js";
 
-export async function getTextChunkUrls(sessionId) {
+export async function splitTextIntoChunks(sessionId) {
   const prefix = `${sessionId}/`;
   const keys = await listKeys({ bucket: R2_BUCKETS.RAW_TEXT, prefix });
   const chunkKeys = keys
