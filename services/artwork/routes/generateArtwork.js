@@ -29,7 +29,7 @@ async function generateImageBase64(prompt) {
 
   const body = JSON.stringify({
     model:
-      process.env.OPENROUTER_ART_MODEL ||
+      process.env.OPENROUTER_ART ||
       "google/gemini-2.0-flash-exp:free",
     messages: [
       {
