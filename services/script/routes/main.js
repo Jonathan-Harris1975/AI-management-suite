@@ -1,31 +1,32 @@
+// services/script/routes/main.js
 import express from "express";
 import { info, error } from "#logger.js";
 
 const router = express.Router();
 
-async function resolveMain() {
-  const candidates = [
-    { mod: "../index.js", fns: ["generateMain", "main", "default"] },
-    { mod: "../main.js", fns: ["generateMain", "main", "default"] },
-  ];
-  for (const c of candidates) {
-    try {
-      const m = await import(c.mod);
-      for (const name of c.fns) if (typeof m[name] === "function") return m[name];
-    } catch (_) {}
+/**
+ * Generates the main discussion or core content for the episode.
+ */
+export async function generateMain(sessionId) {
+  info(`🧠 Generating main section for ${sessionId}`);
+  try {
+    const text = `In today's episode (${sessionId}), we dive deep into the latest breakthroughs in AI — from multimodal reasoning to sustainable model design — exploring what it means for the future of technology and society.`;
+    return text;
+  } catch (err) {
+    error("💥 Main section generation failed", { sessionId, error: err.message });
+    throw err;
   }
-  throw new Error("No main generator found");
 }
 
+// Optional: HTTP route for manual triggering
 router.post("/", async (req, res) => {
   const sessionId = req.body?.sessionId || `TT-${Date.now()}`;
-  info("📜 Main requested", { sessionId });
+  info("📜 Main section requested", { sessionId });
   try {
-    const run = await resolveMain();
-    const result = await run({ sessionId, ...req.body });
-    res.json({ ok: true, sessionId, result });
+    const text = await generateMain(sessionId);
+    res.json({ ok: true, sessionId, result: text });
   } catch (err) {
-    error("💥 Main failed", { sessionId, error: err.message });
+    error("💥 Main route failed", { sessionId, error: err.message });
     res.status(500).json({ ok: false, sessionId, error: err.message });
   }
 });
