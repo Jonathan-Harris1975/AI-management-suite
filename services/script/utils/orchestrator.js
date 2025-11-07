@@ -6,7 +6,7 @@ import { info, error } from "#logger.js";
 import { generateIntro } from "../routes/generateIntro.js";
 import { generateMain } from "../routes/generateMain.js";
 import { generateOutro } from "../routes/generateOutro.js";
-import { composeScript } from "../routes/composeScript.js";
+import { composeEpisode } from "../routes/composeScript.js";
 import { uploadText } from "#shared/r2-client.js";
 
 // ------------------------------------------------------------
@@ -20,7 +20,7 @@ export async function orchestrateScript(sessionId) {
     const main = await generateMain(sessionId);
     const outro = await generateOutro(sessionId);
 
-    const composed = await composeScript(sessionId, { intro, main, outro });
+    const composed = await composeEpisode(sessionId, { intro, main, outro });
 
     // Save raw text to R2
     await uploadText(
