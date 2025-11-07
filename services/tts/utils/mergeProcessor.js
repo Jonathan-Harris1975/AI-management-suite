@@ -1,96 +1,63 @@
-import {s3, R2_R2_BUCKETS, uploadBuffer, listKeys, getR2ReadStream,getObjectAsText} from "#shared/r2-client.js";
-// utils/mergeProcessor.js
+// ============================================================
+// 🎧 TTS Merge Processor — Combine all chunk files into one MP3
+// ============================================================
+
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
-import fetch from "node-fetch";
+import { execSync } from "child_process";
+import { log } from "#logger.js";
+import { R2_BUCKETS, getObjectAsText, uploadBuffer } from "#shared/r2-client.js";
 
-import * as logger from "#logger.js";
+// ------------------------------------------------------------
+// 🧠 Helper: Local temp directory for merge operations
+// ------------------------------------------------------------
+const TMP_DIR = "/tmp/podcast_merge";
 
-const tempDir = "/tmp"; // Render ephemeral storage
+function ensureTmpDir() {
+  if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+  return TMP_DIR;
+}
 
-/**
- * Merge raw TTS chunks into a single MP3
- */
-export async function mergeChunks(sessionId) {
+// ------------------------------------------------------------
+// 🧩 Merge TTS Chunks
+// ------------------------------------------------------------
+export async function mergeProcessor(sessionId, chunkFiles = []) {
+  ensureTmpDir();
+
+  log.info({ sessionId }, "🎧 Starting mergeProcessor");
+
   try {
-    const sessionDir = path.join(tempDir, sessionId);
-    if (!fs.existsSync(sessionDir)) {
-      fs.mkdirSync(sessionDir);
+    // If chunkFiles not provided, list from R2 raw bucket
+    if (!chunkFiles || !chunkFiles.length) {
+      log.info({ sessionId }, "🔍 No chunk list passed — expecting orchestrator to supply it.");
+      throw new Error("mergeProcessor requires chunk list from TTS step.");
     }
 
-    logger.info(`🎼 Starting merge for session=${sessionId}`);
+    const concatListPath = path.join(TMP_DIR, `${sessionId}_list.txt`);
+    const outputFile = path.join(TMP_DIR, `${sessionId}_merged.mp3`);
 
-    // 1. List raw chunks from R2 - use listChunks from TTSr2 which queries the raw bucket
-    const chunkKeys = await listChunks(sessionId); // Just pass sessionId, not prefix
-    if (!chunkKeys || chunkKeys.length === 0) {
-      throw new Error(`No raw chunks found in R2 for session=${sessionId}`);
-    }
-
-    const chunkFiles = [];
-    for (const key of chunkKeys.sort()) {
-      if (key.endsWith(".mp3")) {
-        const chunkPath = path.join(sessionDir, path.basename(key));
-        const fileUrl = `${process.env.R2_PUBLIC_BASE_URL_RAW}/${key}`;
-
-        logger.debug(`⬇️ Downloading chunk: ${fileUrl}`);
-        const res = await fetch(fileUrl);
-        if (!res.ok) throw new Error(`Failed to fetch ${fileUrl}: ${res.status} ${res.statusText}`);
-
-        const fileStream = fs.createWriteStream(chunkPath);
-        await new Promise((resolve, reject) => {
-          res.body.pipe(fileStream);
-          res.body.on("error", reject);
-          fileStream.on("finish", resolve);
-        });
-
-        chunkFiles.push(chunkPath);
-      }
-    }
-
-    if (chunkFiles.length === 0) {
-      throw new Error(`No valid .mp3 raw chunks found for session=${sessionId}`);
-    }
-
-    logger.info(`⬇️ Downloaded ${chunkFiles.length} raw chunks for session=${sessionId}`);
-
-    // 2. Build concat list for ffmpeg
-    const listFilePath = path.join(sessionDir, "list.txt");
+    // Write ffmpeg concat list
     fs.writeFileSync(
-      listFilePath,
-      chunkFiles.map((f) => `file '${f}'`).join("\n")
+      concatListPath,
+      chunkFiles.map((f) => `file '${f}'`).join("\n"),
+      "utf8"
     );
 
-    // 3. Merge into single MP3
-    const mergedFile = path.join(sessionDir, `${sessionId}_merged.mp3`);
-    await new Promise((resolve, reject) => {
-      const ffmpeg = spawn("ffmpeg", [
-        "-f", "concat",
-        "-safe", "0",
-        "-i", listFilePath,
-        "-c", "copy",
-        mergedFile,
-      ]);
-
-      ffmpeg.stderr.on("data", (data) => logger.debug(`ffmpeg merge: ${data}`));
-      ffmpeg.on("close", (code) => {
-        if (code === 0) {
-          logger.info(`🔗 ffmpeg merge completed for session=${sessionId}`);
-          resolve();
-        } else {
-          reject(new Error(`ffmpeg merge failed with exit code ${code}`));
-        }
-      });
+    // Merge using ffmpeg
+    execSync(`ffmpeg -y -f concat -safe 0 -i ${concatListPath} -c copy ${outputFile}`, {
+      stdio: "ignore",
     });
 
-    // 4. Upload merged file back to merged bucket
-    const r2Key = `${sessionId}-merged.mp3`;
-    const finalUrl = await uploadMergedFile(mergedFile, r2Key); // ✅ Correct order: local path first, then key
+    const mergedBuffer = fs.readFileSync(outputFile);
+    const key = `${sessionId}_merged.mp3`;
 
-    logger.info(`✅ Merged file uploaded for session=${sessionId} at ${finalUrl}`);
-    return finalUrl;
+    // Upload to R2 merged bucket
+    await uploadBuffer("merged", key, mergedBuffer, "audio/mpeg");
+    log.info({ sessionId, key }, "💾 Uploaded merged MP3 to R2");
+
+    return outputFile;
   } catch (err) {
-    logger.error(`💥 Error merging chunks for session=${sessionId}: ${err.stack || err.message}`);
+    log.error({ sessionId, error: err.message }, "💥 mergeProcessor failed");
     throw err;
   }
-}
+  }
