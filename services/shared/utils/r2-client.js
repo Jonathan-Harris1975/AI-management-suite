@@ -1,5 +1,5 @@
 // ============================================================
-// ☁️ Cloudflare R2 Client — Hybrid Authenticated Write + Public Read (Final)
+// ☁️ Cloudflare R2 Client — Hybrid Authenticated Write + Public Read (Final Fixed)
 // ============================================================
 
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
@@ -36,6 +36,7 @@ const {
   R2_PUBLIC_BASE_URL_ART,
   R2_PUBLIC_BASE_URL_RSS,
   R2_PUBLIC_BASE_URL_TRANSCRIPT,
+  R2_PUBLIC_BASE_URL_TRANSCRIPTS, // optional fallback for plural
 } = process.env;
 
 // ============================================================
@@ -71,7 +72,7 @@ export const R2_BUCKETS = {
 };
 
 // ============================================================
-// 🌍 Public URL Registry
+// 🌍 Public URL Registry (with plural/singular alias fix)
 // ============================================================
 
 export const R2_PUBLIC_URLS = {
@@ -83,6 +84,7 @@ export const R2_PUBLIC_URLS = {
   art: R2_PUBLIC_BASE_URL_ART,
   rss: R2_PUBLIC_BASE_URL_RSS,
   transcript: R2_PUBLIC_BASE_URL_TRANSCRIPT,
+  transcripts: R2_PUBLIC_BASE_URL_TRANSCRIPTS || R2_PUBLIC_BASE_URL_TRANSCRIPT, // ✅ fixed alias
 };
 
 // ============================================================
