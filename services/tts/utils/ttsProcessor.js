@@ -1,20 +1,18 @@
-// services/tts/utils/ttsProcessor.js
 // ============================================================
-// 🔊 Gemini 2.5 Flash TTS Processor — permanent, R2-integrated version
+// 🔊 Gemini 2.5 Flash TTS Processor — hybrid R2-integrated version
 // ============================================================
 
 import {
-  R2_BUCKETS,
   listKeys,
   getObjectAsText,
   uploadBuffer,
+  R2_BUCKETS,
 } from "#shared/r2-client.js";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import pLimit from "p-limit";
 import fetch from "node-fetch";
-import ffmpeg from "fluent-ffmpeg";
 import { info, error } from "#logger.js";
 
 // ─────────────────────────────────────────────────────────────
@@ -33,6 +31,7 @@ const TTS_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent";
 const DEFAULT_VOICE_NAME = process.env.GEMINI_TTS_VOICE || "Charon";
 
+// Config — tuned for Gemini 2.5 Flash
 const CONFIG = {
   maxCharactersPerChunk: 4800,
   maxConcurrent: 1,
@@ -41,31 +40,26 @@ const CONFIG = {
 };
 
 // ─────────────────────────────────────────────────────────────
-//  R2 HELPER: GET TEXT CHUNK URLS
+//  R2 TEXT CHUNK FETCHING
 // ─────────────────────────────────────────────────────────────
-/**
- * Returns all public URLs of text chunks associated with a session.
- * Looks in the R2 raw-text bucket under `${sessionId}/`.
- */
 export async function getTextChunkUrls(sessionId) {
-  const bucket = R2_BUCKETS.RAW_TEXT || "rawtext";
   const prefix = `${sessionId}/`;
+  const keys = await listKeys("rawtext", prefix);
 
-  const keys = await listKeys(bucket, prefix);
   if (!keys || !keys.length) {
-    error(`❌ No text chunks found in ${bucket} for ${sessionId}`);
+    error({ sessionId }, `❌ No text chunks found in rawtext for ${sessionId}`);
     return [];
   }
 
   const baseUrl = process.env.R2_PUBLIC_BASE_URL_RAW_TEXT.replace(/\/$/, "");
   const urls = keys.map((k) => `${baseUrl}/${k}`);
 
-  info(`🧩 Retrieved ${urls.length} text chunk URLs for ${sessionId}`);
+  info({ sessionId, count: urls.length }, "🧩 Found text chunk URLs");
   return urls;
 }
 
 // ─────────────────────────────────────────────────────────────
-//  TEXT CLEANING AND CHUNKING
+//  TEXT CLEANING + CHUNKING
 // ─────────────────────────────────────────────────────────────
 function cleanText(text = "") {
   return text
@@ -94,10 +88,7 @@ function chunkText(text) {
 let lastRequestTime = 0;
 async function rateLimited(fn) {
   const now = Date.now();
-  const wait = Math.max(
-    0,
-    CONFIG.delayBetweenRequests - (now - lastRequestTime)
-  );
+  const wait = Math.max(0, CONFIG.delayBetweenRequests - (now - lastRequestTime));
   if (wait) await new Promise((r) => setTimeout(r, wait));
   lastRequestTime = Date.now();
   return fn();
@@ -106,34 +97,34 @@ async function rateLimited(fn) {
 // ─────────────────────────────────────────────────────────────
 //  MAIN PROCESSOR
 // ─────────────────────────────────────────────────────────────
-export async function processTTS(
-  sessionId,
-  { voiceName = DEFAULT_VOICE_NAME } = {}
-) {
-  info({ sessionId }, "🎙 Starting TTS");
+export async function ttsProcessor(sessionId, { voiceName = DEFAULT_VOICE_NAME } = {}) {
+  info({ sessionId }, "🎙 Starting TTS synthesis");
 
+  // Fetch all text chunks from rawtext bucket
   const urls = await getTextChunkUrls(sessionId);
-  if (!urls.length) throw new Error("No text chunks found");
+  if (!urls.length) throw new Error(`No text chunks found for ${sessionId}`);
 
-  // Combine text content from R2 chunks
+  // Combine all raw text from chunks
   let combined = "";
-  for (const u of urls) {
-    const res = await fetch(u);
-    if (res.ok) combined += (await res.text()) + "\n\n";
+  for (const url of urls) {
+    const res = await fetch(url);
+    if (res.ok) combined += (await res.text()) + "\n";
   }
 
   const chunks = chunkText(cleanText(combined));
-  info(
-    { sessionId, chunks: chunks.length },
-    `🧠 Split combined text into ${chunks.length} synthesis chunks`
-  );
+  info({ sessionId, totalChunks: chunks.length }, "🧠 Prepared TTS chunks");
 
   const limit = pLimit(CONFIG.maxConcurrent);
   const outputs = [];
 
+  // Create tmp folder for PCM buffers
+  const tmpDir = path.join(os.tmpdir(), `tts_${sessionId}`);
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
   for (let i = 0; i < chunks.length; i++) {
     const text = chunks[i];
     const filename = `${sessionId}-part-${i + 1}.pcm`;
+    const tmpPath = path.join(tmpDir, filename);
 
     await limit(async () => {
       await rateLimited(async () => {
@@ -143,9 +134,7 @@ export async function processTTS(
           generationConfig: {
             responseModalities: ["AUDIO"],
             speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName },
-              },
+              voiceConfig: { prebuiltVoiceConfig: { voiceName } },
             },
           },
         };
@@ -162,26 +151,23 @@ export async function processTTS(
         }
 
         const json = await res.json();
-        const inline = json.candidates?.[0]?.content?.parts?.find(
-          (p) => p.inline_data
-        );
+        const inline = json.candidates?.[0]?.content?.parts?.find((p) => p.inline_data);
 
         if (!inline?.inline_data?.data)
-          throw new Error("No audio returned from Gemini");
+          throw new Error(`No audio data returned for chunk ${i + 1}`);
 
         const data = Buffer.from(inline.inline_data.data, "base64");
-        const tmpPath = path.join(os.tmpdir(), filename);
         await fs.promises.writeFile(tmpPath, data);
 
-        // Upload to R2 (optional but useful)
-        await uploadBuffer(R2_BUCKETS.RAW, filename, data);
+        // Upload chunk to R2 raw bucket
+        await uploadBuffer("raw", filename, data, "audio/pcm");
 
-        outputs.push({ chunk: i + 1, path: tmpPath });
-        info(`🔊 Generated audio chunk ${i + 1}/${chunks.length}`);
+        info({ sessionId, part: i + 1 }, "🔊 TTS chunk uploaded to R2");
+        outputs.push(tmpPath);
       });
     });
   }
 
-  info({ sessionId, outputs: outputs.length }, "✅ All TTS chunks processed");
+  info({ sessionId, produced: outputs.length }, "✅ All TTS chunks synthesized");
   return { ok: true, sessionId, produced: outputs.length, outputs };
        }
