@@ -1,6 +1,6 @@
 
 // /app/services/tts/utils/ttsProcessor.js
-import { s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText } from "#shared/r2-client.js";
+import { s3, BUCKETS, uploadBuffer, listKeys, getObjectAsText } from "#shared/r2-client.js";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -9,11 +9,19 @@ import fetch from "node-fetch";
 import ffmpeg from "fluent-ffmpeg";
 import { log } from "#logger.js";
 
+// Minimal env validator
+function validateEnv(names){
+  for (const n of names){
+    if (!process.env[n]) throw new Error(`Missing required env: ${n}`);
+  }
+}
+
 // ✅ Ensure required env vars exist
 validateEnv(["GEMINI_API_KEY"]);
 
 const API_KEY = process.env.GEMINI_API_KEY;
 const TTS_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent";
+const DEFAULT_VOICE_NAME = process.env.GEMINI_TTS_VOICE || "Charon";
 
 const CONFIG = {
   maxCharactersPerChunk: 4800,
@@ -67,7 +75,7 @@ async function convertPcmToMp3(pcmFile, mp3File) {
   });
 }
 
-async function synthesizeChunk(text, outMp3, idx) {
+async function synthesizeChunk(text, outMp3, idx, voiceName) {
   const payload = {
     model: "gemini-2.5-flash-preview-tts",
     contents: [
@@ -79,7 +87,7 @@ async function synthesizeChunk(text, outMp3, idx) {
       responseModalities: ["AUDIO"],
       speechConfig: {
         voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: "Charon" },
+          prebuiltVoiceConfig: { voiceName },
         },
       },
     },
@@ -110,7 +118,7 @@ async function synthesizeChunk(text, outMp3, idx) {
   } catch {}
 }
 
-export async function processTTS(sessionId) {
+export async function processTTS(sessionId, { voiceName = DEFAULT_VOICE_NAME } = {}) {
   log.info({ sessionId }, "🎙 Starting TTS");
   if (typeof getTextChunkUrls !== "function") {
     throw new Error("getTextChunkUrls(sessionId) is not defined in this module's scope");
@@ -131,10 +139,10 @@ export async function processTTS(sessionId) {
     chunks.map((chunk, i) =>
       limit(async () => {
         const outMp3 = path.join(os.tmpdir(), `tts-chunk-${sessionId}-${i}.mp3`);
-        await synthesizeChunk(chunk, outMp3, i);
+        await synthesizeChunk(chunk, outMp3, i, voiceName);
         const buf = fs.readFileSync(outMp3);
         const key = `${sessionId}/chunk-${i}.mp3`;
-        await uploadBuffer({ bucket: R2_BUCKETS.RAW, key, body: buf, contentType: "audio/mpeg" });
+        await uploadBuffer({ bucket: BUCKETS.RAW, key, body: buf, contentType: "audio/mpeg" });
         outMp3s[i] = key;
       })
     )
