@@ -9,10 +9,7 @@ import rssRoutes from "../services/rss-feed-creator/routes/rewrite.js";
 import scriptRoutes from "../services/script/routes/index.js";
 import ttsRoutes from "../services/tts/routes/tts.js";
 import artworkRoutes from "../services/artwork/index.js";
-
-// ✅ FIXED: Corrected import paths for podcast & pipeline
-import podcastRoutes from "../services/podcast/index.js";
-import podcastPipelineRoutes from "../services/podcast/runPodcastPipeline.js"; // adjust if you have a routes folder instead
+import podcastRoutes from "../services/podcast/index.js"; // ✅ Correct route import
 
 const router = express.Router();
 
@@ -57,14 +54,9 @@ try {
   // ─────────────────────────────
   //  PODCAST GENERATION
   // ─────────────────────────────
+  // Includes both /podcast/run and /podcast/health
   router.use("/podcast", podcastRoutes);
   info("🎧 Mounted: /podcast");
-
-  // ─────────────────────────────
-  //  PODCAST PIPELINE
-  // ─────────────────────────────
-  router.use("/podcast/pipeline", podcastPipelineRoutes);
-  info("🧵 Mounted: /podcast/pipeline");
 
   info("✅ All routes mounted successfully.");
 } catch (err) {
