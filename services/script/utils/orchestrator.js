@@ -7,35 +7,64 @@ import { generateOutro } from "../routes/outro.js";
 import { composeEpisode } from "../routes/compose.js";
 
 /**
- * Save raw text to R2 using sessionId as filename
+ * Split long text into manageable chunks for TTS
+ */
+function splitTextIntoChunks(text, maxBytes = 4000) {
+  const chunks = [];
+  let buffer = "";
+  for (const line of text.split(/\n+/)) {
+    if (Buffer.byteLength(buffer + line, "utf8") > maxBytes) {
+      chunks.push(buffer.trim());
+      buffer = "";
+    }
+    buffer += line + "\n";
+  }
+  if (buffer.trim()) chunks.push(buffer.trim());
+  return chunks;
+}
+
+/**
+ * Save raw text chunks to R2 using sessionId as prefix
  */
 async function saveRawText(sessionId, text) {
-  const key = `${sessionId}.txt`;
   try {
-    await putObject("rawtext", key, text);
-    info(`💾 Raw text saved to R2 as ${key}`);
+    const chunks = splitTextIntoChunks(text);
+    const urls = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const key = chunks.length > 1
+        ? `${sessionId}_${i + 1}.txt`
+        : `${sessionId}.txt`;
+
+      await putObject("rawtext", key, chunks[i], {
+        "Content-Type": "text/plain; charset=utf-8",
+      });
+
+      const publicUrl = `${process.env.R2_PUBLIC_BASE_URL_RAW_TEXT}/${key}`;
+      urls.push(publicUrl);
+      info(`💾 Saved raw chunk ${i + 1}/${chunks.length} → ${key}`);
+    }
+
+    return urls;
   } catch (err) {
-    error("💥 Failed to save raw text", { sessionId, error: err.message });
+    error("💥 Failed to save raw text chunks", { sessionId, error: err.message });
     throw err;
   }
 }
 
 /**
- * Generate and upload transcript (plain .txt for now)
+ * Save transcript
  */
 async function generateTranscript(sessionId, text) {
   const key = `${sessionId}.transcript.txt`;
-  try {
-    await putObject("transcripts", key, text);
-    info(`🗒 Transcript saved to R2 as ${key}`);
-  } catch (err) {
-    error("💥 Failed to save transcript", { sessionId, error: err.message });
-    throw err;
-  }
+  await putObject("transcripts", key, text, {
+    "Content-Type": "text/plain; charset=utf-8",
+  });
+  info(`🗒 Transcript saved as ${key}`);
 }
 
 /**
- * Generate and upload metadata JSON for podcast episode
+ * Save meta
  */
 async function generateMeta(sessionId, text) {
   const key = `${sessionId}.meta.json`;
@@ -46,40 +75,32 @@ async function generateMeta(sessionId, text) {
     wordCount: text.split(/\s+/).length,
     timestamp: new Date().toISOString(),
   };
-  try {
-    await putObject("meta", key, JSON.stringify(meta, null, 2));
-    info(`📄 Meta saved to R2 as ${key}`);
-  } catch (err) {
-    error("💥 Failed to save meta", { sessionId, error: err.message });
-    throw err;
-  }
+  await putObject("meta", key, JSON.stringify(meta, null, 2), {
+    "Content-Type": "application/json",
+  });
+  info(`📄 Meta saved as ${key}`);
 }
 
 /**
- * Main Orchestration Entry
+ * Main Orchestration
  */
 export async function orchestrateEpisode(sessionId) {
   info(`🧩 Script orchestration started for ${sessionId}`);
-
   if (!sessionId) throw new Error("sessionId is required");
 
   try {
-    // 1️⃣ Generate script components
     const intro = await generateIntro(sessionId);
     const main = await generateMain(sessionId);
     const outro = await generateOutro(sessionId);
-
-    // 2️⃣ Combine text
     const composed = await composeEpisode({ intro, main, outro, sessionId });
     const fullText = composed?.fullText || [intro, main, outro].join("\n\n");
 
-    // 3️⃣ Upload all related files to R2
-    await saveRawText(sessionId, fullText);
+    const rawUrls = await saveRawText(sessionId, fullText);
     await generateTranscript(sessionId, fullText);
     await generateMeta(sessionId, fullText);
 
     info(`📜 Script pipeline completed for ${sessionId}`);
-    return { ok: true, sessionId, fullText };
+    return { ok: true, sessionId, fullText, rawUrls };
   } catch (err) {
     error("💥 Script orchestration failed", { sessionId, error: err.message });
     throw err;
