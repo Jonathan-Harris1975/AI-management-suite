@@ -17,7 +17,7 @@ async function generateImageBase64(prompt) {
     process.env.APP_TITLE || "Turings Torch: AI Weekly Artwork"
   );
 
-  // Escape any stray `$` that might cause runtime interpolation
+  // Escape `$` to prevent runtime issues
   const safePrompt = String(prompt).replace(/\$/g, "\\$");
 
   const headers = {
@@ -66,7 +66,7 @@ async function generateImageBase64(prompt) {
     if (imgItem) b64 = imgItem.image_url.url.split(",")[1];
   }
 
-  // Fallback: message.content array
+  // Fallbacks
   if (!b64 && Array.isArray(msg?.content)) {
     const imgItem = msg.content.find(i =>
       i.image_url?.url?.startsWith("data:image/png;base64,")
@@ -74,7 +74,6 @@ async function generateImageBase64(prompt) {
     if (imgItem) b64 = imgItem.image_url.url.split(",")[1];
   }
 
-  // Fallback: string base64
   if (
     !b64 &&
     typeof msg?.content === "string" &&
@@ -100,7 +99,6 @@ router.post("/", async (req, res) => {
   try {
     let { prompt, sessionId } = req.body || {};
 
-    // Recover prompt from temporary memory if not passed directly
     if (!prompt && sessionId) {
       const cachedPrompt = await sessionCache.getTempPart(sessionId, "artworkPrompt");
       if (cachedPrompt) {
@@ -117,13 +115,14 @@ router.post("/", async (req, res) => {
     const bucket = process.env.R2_BUCKET_ART;
     if (!bucket) throw new Error("R2_BUCKET_ART not set");
 
-    const key = `artwork/generated/${Date.now()}.png`;
-    await putObject(bucket, key, pngBuffer, "image/png");
+    // ✅ Flat structure: use only sessionId as file name
+    const fileName = `${sessionId || Date.now()}.png`;
+    await putObject(bucket, fileName, pngBuffer, "image/png");
 
-    const url = `${process.env.R2_PUBLIC_BASE_URL_ART.replace(/\\/+$, "")}/${key}`;
+    const url = `${process.env.R2_PUBLIC_BASE_URL_ART.replace(/\\/+$, "")}/${fileName}`;
     info("artwork.generate.success", { url, sessionId });
 
-    res.json({ ok: true, url, source: prompt ? "recovered" : "body" });
+    res.json({ ok: true, url, fileName });
   } catch (err) {
     error("artwork.generate.fail", { message: err.message });
     res.status(500).json({ ok: false, error: err.message });
