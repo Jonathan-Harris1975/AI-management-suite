@@ -1,92 +1,54 @@
-import {s3, R2_R2_BUCKETS, uploadBuffer, listKeys, getR2ReadStream,getObjectAsText} from "#shared/r2-client.js";
+// ============================================================
+// 🎵 Podcast Processor — Add Intro/Outro & Fades
+// ============================================================
+
 import fs from "fs";
 import path from "path";
-import os from "os";
-import { spawn } from "child_process";
-import fetch from "node-fetch";
+import { execSync } from "child_process";
+import { log } from "#logger.js";
+import { uploadBuffer } from "#shared/r2-client.js";
 
-import * as logger from "#logger.js";
+const TMP_DIR = "/tmp/podcast_final";
 
-const tempDir = os.tmpdir();
-
-/**
- * Download a remote file to /tmp
- */
-async function downloadFile(url, destPath) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.statusText}`);
-  const fileStream = fs.createWriteStream(destPath);
-  await new Promise((resolve, reject) => {
-    res.body.pipe(fileStream);
-    res.body.on("error", reject);
-    fileStream.on("finish", resolve);
-  });
+function ensureTmpDir() {
+  if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+  return TMP_DIR;
 }
 
-/**
- * Build the final podcast:
- *   intro (fade in) + edited main + outro (fade out)
- */
-export async function processPodcast(sessionId, editedPath) {
+export async function podcastProcessor(sessionId, mainAudioPath) {
+  ensureTmpDir();
+  log.info({ sessionId }, "🎵 Starting podcastProcessor");
+
   try {
-    logger.info(`🎙️ Building podcast for ${sessionId}`);
+    const introUrl = process.env.PODCAST_INTRO_URL;
+    const outroUrl = process.env.PODCAST_OUTRO_URL;
+    const intro = path.join(TMP_DIR, `${sessionId}_intro.mp3`);
+    const outro = path.join(TMP_DIR, `${sessionId}_outro.mp3`);
 
-    const introPath = path.join(tempDir, `${sessionId}-intro.mp3`);
-    const outroPath = path.join(tempDir, `${sessionId}-outro.mp3`);
-    const finalPath = path.join(tempDir, `${sessionId}-podcast.mp3`);
+    // Download intro/outro from R2 public URLs
+    fs.writeFileSync(intro, Buffer.from(await (await fetch(introUrl)).arrayBuffer()));
+    fs.writeFileSync(outro, Buffer.from(await (await fetch(outroUrl)).arrayBuffer()));
 
-    // 1. Download intro + outro from env URLs
-    await downloadFile(process.env.PODCAST_INTRO_URL, introPath);
-    await downloadFile(process.env.PODCAST_OUTRO_URL, outroPath);
+    const finalFile = path.join(TMP_DIR, `${sessionId}_final.mp3`);
 
-    // 2. Apply fade effects and concat
-    await runFFmpegConcat(introPath, editedPath, outroPath, finalPath);
+    const filterComplex =
+      "[0:a]afade=t=in:ss=0:d=3[a0];" + // fade-in
+      "[2:a]afade=t=out:st=0:d=3[a2];" + // fade-out
+      "[a0][1:a][a2]concat=n=3:v=0:a=1[aout]";
 
-    // 3. Upload final podcast to R2
-    const r2Key = await uploadPodcastToR2(sessionId, finalPath);
+    execSync(
+      `ffmpeg -y -i ${intro} -i ${mainAudioPath} -i ${outro} -filter_complex "${filterComplex}" -map "[aout]" ${finalFile}`,
+      { stdio: "ignore" }
+    );
 
-    logger.info(`✅ Podcast complete for ${sessionId}: ${r2Key}`);
-    return {
-      sessionId,
-      fileKey: r2Key,
-      status: "podcast-ready",
-    };
+    const buffer = fs.readFileSync(finalFile);
+    const key = `${sessionId}_final.mp3`;
+    await uploadBuffer("podcast", key, buffer, "audio/mpeg");
+
+    log.info({ sessionId, key }, "💾 Uploaded final podcast MP3 to R2");
+    return finalFile;
   } catch (err) {
-    logger.error(`❌ Podcast creation failed for ${sessionId}: ${err.message}`);
+    log.error({ sessionId, error: err.message }, "💥 podcastProcessor failed");
     throw err;
   }
-}
-
-/**
- * Run ffmpeg to fade intro/outro and concat all together
- */
-function runFFmpegConcat(introPath, mainPath, outroPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    // Complex filter: fade intro in over 15s, fade outro out over 15s
-    const ffmpeg = spawn("ffmpeg", [
-      "-y",
-      "-i", introPath,
-      "-i", mainPath,
-      "-i", outroPath,
-      "-filter_complex",
-      `
-      [0:a]afade=t=in:ss=0:d=15[intro];
-      [2:a]afade=t=out:st=0:d=15[outro];
-      [intro][1:a][outro]concat=n=3:v=0:a=1[a]
-      `,
-      "-map", "[a]",
-      "-ar", "44100",
-      "-b:a", "192k",
-      outputPath,
-    ]);
-
-    ffmpeg.stderr.on("data", (data) => {
-      logger.info(`FFmpeg: ${data}`);
-    });
-
-    ffmpeg.on("close", (code) => {
-      if (code === 0) resolve(outputPath);
-      else reject(new Error(`FFmpeg exited with code ${code}`));
-    });
-  });
-}
+                       }
