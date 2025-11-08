@@ -3,7 +3,7 @@ import { info, error } from "#logger.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 import { generatePodcastArtwork } from "./utils/artwork.js"; // Fixed function name
 
-const R2_BUCKET_ART = process.env.R2_BUCKET_ART;
+const R2_BUCKET_ART_KEY = 'art';
 
 export async function createPodcastArtwork({ sessionId, prompt }) {
   const log = (stage, meta) => info(`artwork.${stage}`, { sessionId, ...meta });
@@ -18,9 +18,7 @@ export async function createPodcastArtwork({ sessionId, prompt }) {
 
     // 🗂️ Save to R2
     const key = `${sessionId}/cover.png`;
-    await uploadBuffer(R2_BUCKET_ART, key, buffer, "image/png");
-
-    const publicUrl = `${process.env.R2_PUBLIC_BASE_URL_ART}/${key}`;
+    const publicUrl = await uploadBuffer(R2_BUCKET_ART_KEY, key, buffer, "image/png");
     log("done", { key, publicUrl });
 
     return { ok: true, key, publicUrl };
