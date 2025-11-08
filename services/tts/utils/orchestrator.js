@@ -1,78 +1,44 @@
+// ============================================================
+// 🔊 TTS Orchestrator — Full Audio Generation Pipeline
+// ============================================================
 
-// services/tts/utils/orchestrator.js
-// Production TTS orchestrator: load text from R2, chunk, TTS via Gemini, ffmpeg merge
-
-import fs from "fs";
-import os from "os";
-import path from "path";
-import { spawnSync } from "child_process";
 import { info, error } from "#logger.js";
-import { R2_BUCKETS, getObjectAsText, uploadBuffer, uploadText } from "#shared/r2-client.js";
-import { generateSpeech, DEFAULT_VOICE_NAME } from "../utils/gemini-tts.js";
+import { ttsProcessor } from "./ttsProcessor.js";
+import { mergeProcessor } from "./mergeProcessor.js";
+import { editingProcessor } from "./editingProcessor.js";
+import { podcastProcessor } from "./podcastProcessor.js";
+import { putObject } from "#shared/r2-client.js";
 
-function chunkText(txt, maxChars = 1800){
-  const paras = txt.split(/\n\s*\n/);
-  const chunks = [];
-  let buf = "";
-  for (const p of paras){
-    if ((buf + "\n\n" + p).length > maxChars){
-      if (buf) chunks.push(buf.trim());
-      buf = p;
-    } else {
-      buf = buf ? (buf + "\n\n" + p) : p;
-    }
-  }
-  if (buf) chunks.push(buf.trim());
-  return chunks;
-}
+// Normalize ID if called via object { sessionId: "..." }
+const normalize = (s) => (typeof s === "object" && s.sessionId ? s.sessionId : s);
 
-function pcmToMp3(pcmPath, mp3Path){
-  const res = spawnSync("ffmpeg", ["-y","-f","s16le","-ar","24000","-ac","1","-i", pcmPath, "-codec:a","libmp3lame","-b:a","128k", mp3Path], { stdio: "inherit" });
-  if (res.status !== 0) throw new Error("ffmpeg conversion failed");
-}
+export async function orchestrateTTS(session) {
+  const sessionId = normalize(session);
+  info({ sessionId }, "🎙 Starting full TTS orchestration pipeline");
 
-function concatMp3(files, outPath){
-  const listPath = path.join(os.tmpdir(), `concat-${Date.now()}.txt`);
-  fs.writeFileSync(listPath, files.map(f => `file '${f}'`).join("\n"));
-  const res = spawnSync("ffmpeg", ["-y","-f","concat","-safe","0","-i", listPath, "-c","copy", outPath], { stdio: "inherit" });
-  if (res.status !== 0) throw new Error("ffmpeg concat failed");
-}
-
-export async function orchestrateTTS(sessionId, { voiceName = DEFAULT_VOICE_NAME } = {}){
   try {
-    info({ sessionId }, "🔊 TTS orchestration start");
+    // 1️⃣ Generate TTS chunks
+    const ttsFiles = await ttsProcessor(sessionId);
+    info({ sessionId, count: ttsFiles?.length || 0 }, "✅ TTS chunks generated");
 
-    const text = await getObjectAsText(R2_BUCKETS.RAW_TEXT, `${sessionId}.txt`);
-    if (!text?.trim()) throw new Error("No script text found in R2");
+    // 2️⃣ Merge chunks → main voice file
+    const mergedPath = await mergeProcessor(sessionId, ttsFiles);
+    info({ sessionId, mergedPath }, "✅ Chunks merged successfully");
 
-    const chunks = chunkText(text);
-    info({ sessionId, chunks: chunks.length }, "🧩 Script chunked");
+    // 3️⃣ Apply audio editing → humanize tone, EQ, compression, etc.
+    const editedPath = await editingProcessor(sessionId, mergedPath);
+    info({ sessionId, editedPath }, "✅ Audio editing complete");
 
-    const pcmFiles = [];
-    for (let i=0;i<chunks.length;i++){
-      const pcm = await generateSpeech(chunks[i], { voiceName, filename: `${sessionId}-${i}.pcm` });
-      pcmFiles.push(pcm);
-    }
+    // 4️⃣ Combine intro/outro with processed voice track
+    const finalAudio = await podcastProcessor(sessionId, editedPath);
+    info({ sessionId, finalAudio }, "✅ Podcast mixdown complete");
 
-    const mp3Parts = [];
-    for (const pcm of pcmFiles){
-      const mp3 = path.join(os.tmpdir(), path.basename(pcm).replace(/\.pcm$/,".mp3"));
-      pcmToMp3(pcm, mp3);
-      mp3Parts.push(mp3);
-    }
+    // 5️⃣ Upload to R2
+    const key = `${sessionId}.mp3`;
+    await putObject("podcast", key, finalAudio, "audio/mpeg");
+    info({ sessionId, key }, "💾 Uploaded final podcast MP3 to R2");
 
-    const finalMp3 = path.join(os.tmpdir(), `${sessionId}.mp3`);
-    concatMp3(mp3Parts, finalMp3);
-
-    const buffer = fs.readFileSync(finalMp3);
-    await uploadBuffer(R2_BUCKETS.PODCAST, `${sessionId}.mp3`, buffer, "audio/mpeg");
-    info({ sessionId, bytes: buffer.length }, "✅ MP3 uploaded");
-
-    // Very simple VTT (timestamp placeholders)
-    const vtt = "WEBVTT\n\n00:00.000 --> 00:10.000\nPodcast episode\n";
-    await uploadText(R2_BUCKETS.TRANSCRIPTS, `${sessionId}.vtt`, vtt, "text/vtt");
-
-    return { ok: true, sessionId, file: `${sessionId}.mp3`, durationSec: 0 };
+    return { ok: true, sessionId, file: key };
   } catch (err) {
     error({ sessionId, error: err.message }, "💥 TTS orchestration failed");
     throw err;
