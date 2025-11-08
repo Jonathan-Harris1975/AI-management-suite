@@ -5,7 +5,7 @@
 import { log } from "#logger.js";
 import { orchestrateScript } from "../script/utils/orchestrator.js";
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
-import { generateArtwork } from "../artwork/routes/generateArtwork.js";
+import { createPodcastArtwork } from "../artwork/createPodcastArtwork.js";
 import { uploadText } from "#shared/r2-client.js";
 
 // ============================================================
@@ -27,11 +27,8 @@ export async function runPodcastPipeline(sessionId) {
     // 2️⃣ Generate Artwork
     // ─────────────────────────────────────────────
     log.info({ sessionId }, "🎨 Generating podcast artwork...");
-    const artUrl = await generateArtwork(
-      sessionId,
-      `Podcast cover for ${sessionId} — ${script.meta?.title || "AI Weekly"}`
-    );
-    log.info({ sessionId, artUrl }, "✅ Artwork generated and uploaded.");
+    const art = await createPodcastArtwork({ sessionId, prompt: `Podcast cover for ${sessionId} — ${script.meta?.title || 'AI Weekly'}` });
+    log.info({ sessionId, art }, "✅ Artwork generated and uploaded.");
 
     // ─────────────────────────────────────────────
     // 3️⃣ Text-to-Speech Pipeline (Full Orchestrator)
