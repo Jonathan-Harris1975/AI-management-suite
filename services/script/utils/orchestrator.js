@@ -1,30 +1,37 @@
-
-// services/script/utils/orchestrator.js
-// Real orchestrator: generate intro/main/outro, compose, and upload
+// ============================================================
+// 🧩 Script Orchestrator — Unified Script Generation for Podcast
+// ============================================================
 
 import { info, error } from "#logger.js";
 import { generateIntro } from "../routes/generateIntro.js";
 import { generateMain } from "../routes/generateMain.js";
 import { generateOutro } from "../routes/generateOutro.js";
 import { composeEpisode } from "../routes/composeScript.js";
-import { uploadText, R2_BUCKETS } from "#shared/r2-client.js";
+import { uploadText } from "#shared/r2-client.js";
 
-export async function orchestrateScript(sessionId, options = {}){
+// ------------------------------------------------------------
+// Main Orchestrator
+// ------------------------------------------------------------
+export async function orchestrateScript(sessionId) {
+  info({ sessionId }, "🧩 Starting Script Orchestration...");
+
   try {
-    info({ sessionId }, "🧩 Script orchestration start");
+    const intro = await generateIntro(sessionId);
+    const main = await generateMain(sessionId);
+    const outro = await generateOutro(sessionId);
 
-    const [intro, main, outro] = await Promise.all([
-      generateIntro(sessionId, options),
-      generateMain(sessionId, options),
-      generateOutro(sessionId, options),
-    ]);
+    const composed = await composeEpisode(sessionId, { intro, main, outro });
 
-    const composed = await composeEpisode({ intro, main, outro, sessionId, tone: options.tone || "neutral" });
-    const text = composed.fullText || [intro, main, outro].filter(Boolean).join("\n\n");
+    // Save raw text to R2
+    await uploadText(
+      "rawtext",
+      `${sessionId}.txt`,
+      composed.text || "",
+      "text/plain"
+    );
 
-    await uploadText(R2_BUCKETS.RAW_TEXT, `${sessionId}.txt`, text, "text/plain");
-    info({ sessionId, bytes: text.length }, "✅ Script saved to R2");
-    return { ok: true, sessionId, text, parts: { intro, main, outro }, meta: { tone: options.tone || "neutral" } };
+    info({ sessionId }, "✅ Script orchestration complete.");
+    return composed;
   } catch (err) {
     error({ sessionId, error: err.message }, "💥 Script orchestration failed");
     throw err;
