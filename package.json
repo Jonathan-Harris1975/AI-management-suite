@@ -3,16 +3,14 @@
   "version": "2.6.1",
   "type": "module",
   "main": "server.js",
-
   "scripts": {
     "start": "node server.js",
-    "build": "echo 'Skipping TypeScript build — pure ESM JS project'"
+    "build": "echo 'Skipping TypeScript build \u2014 pure ESM JS project'",
+    "pipeline": "node scripts/runLocalPipeline.js test-session"
   },
-
   "engines": {
     "node": ">=22 <25"
   },
-
   "dependencies": {
     "@aws-sdk/client-s3": "^3.663.0",
     "@google/generative-ai": "0.10.0",
@@ -34,16 +32,14 @@
     "xmlbuilder2": "^3.1.1",
     "zod": "^3.23.8"
   },
-
   "imports": {
     "#shared/*": "./services/shared/utils/*",
+    "#shared/r2-client.js": "./services/shared/utils/r2-client.js",
     "#logger.js": "./logger.js",
     "#routes/*": "./routes/*"
   },
-
   "devDependencies": {
     "supertest": "^7.0.0"
   },
-
   "private": true
 }
