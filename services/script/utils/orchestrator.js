@@ -1,22 +1,34 @@
 
-// 🧩 Script Orchestrator — Minimal Working Stub
-import { uploadText } from "#shared/r2-client.js";
+// services/script/utils/orchestrator.js
+// Real orchestrator: generate intro/main/outro, compose, and upload
+
+import { info, error } from "#logger.js";
+import { generateIntro } from "../routes/generateIntro.js";
+import { generateMain } from "../routes/generateMain.js";
+import { generateOutro } from "../routes/generateOutro.js";
+import { composeEpisode } from "../routes/composeScript.js";
+import { uploadText, R2_BUCKETS } from "#shared/r2-client.js";
 
 export async function orchestrateScript(sessionId, options = {}){
-  const intro = "Welcome to Turing's Torch — AI Weekly.";
-  const main = "This week we cover big moves in AI, responsibly and clearly.";
-  const outro = "Thanks for listening. Subscribe for more.";
+  try {
+    info({ sessionId }, "🧩 Script orchestration start");
 
-  const composed = {
-    ok: true,
-    sessionId,
-    text: [intro, "", main, "", outro].join("\n"),
-    parts: { intro, main, outro }
-  };
+    const [intro, main, outro] = await Promise.all([
+      generateIntro(sessionId, options),
+      generateMain(sessionId, options),
+      generateOutro(sessionId, options),
+    ]);
 
-  // Save to 'raw-text' for downstream steps
-  await uploadText("raw-text", `${sessionId}.txt`, composed.text, "text/plain");
-  return composed;
+    const composed = await composeEpisode({ intro, main, outro, sessionId, tone: options.tone || "neutral" });
+    const text = composed.fullText || [intro, main, outro].filter(Boolean).join("\n\n");
+
+    await uploadText(R2_BUCKETS.RAW_TEXT, `${sessionId}.txt`, text, "text/plain");
+    info({ sessionId, bytes: text.length }, "✅ Script saved to R2");
+    return { ok: true, sessionId, text, parts: { intro, main, outro }, meta: { tone: options.tone || "neutral" } };
+  } catch (err) {
+    error({ sessionId, error: err.message }, "💥 Script orchestration failed");
+    throw err;
+  }
 }
 
 export default orchestrateScript;
