@@ -8,7 +8,7 @@ import {
   generateOutro,
   generateComposedEpisode,
 } from "../utils/models.js";
-import { orchestrateScript } from "../utils/orchestrator.js";
+import { orchestrateEpisode } from "../utils/orchestrator.js";
 
 const router = express.Router();
 
