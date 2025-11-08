@@ -20,13 +20,13 @@ export async function orchestrateScript(sessionId) {
     const main = await generateMain(sessionId);
     const outro = await generateOutro(sessionId);
 
-    const composed = await composeEpisode(sessionId, { intro, main, outro });
+    const composed = await composeEpisode({ intro, main, outro, sessionId });
 
     // Save raw text to R2
     await uploadText(
       "rawtext",
       `${sessionId}.txt`,
-      composed.text || "",
+      composed.fullText || "",
       "text/plain"
     );
 
