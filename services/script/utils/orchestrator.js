@@ -24,7 +24,7 @@ export async function orchestrateScript(sessionId) {
 
     // Save raw text to R2
     await uploadText(
-      "rawtext",
+      "rawText",
       `${sessionId}.txt`,
       composed.fullText || "",
       "text/plain"
