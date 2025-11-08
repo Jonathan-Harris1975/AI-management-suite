@@ -1,17 +1,18 @@
-import {R2_BUCKETS, listKeys, getObjectAsText, buildPublicUrl} from "#shared/r2-client.js";
-import { log } from "#logger.js";
+import { listKeys, buildPublicUrl } from "#shared/r2-client.js";
 
-export async function splitTextIntoChunks(sessionId) {
+/**
+ * Fetch and return chunk file URLs for a given session.
+ */
+export async function getTextChunksFromR2(sessionId) {
   const prefix = `${sessionId}/`;
-  const keys = await listKeys("rawText", prefix);
-  const chunkKeys = keys
+  const keys = await listKeys("rawtext", prefix);
+  if (!keys?.length) return [];
+  return keys
     .filter(k => /chunk-\d+\.txt$/.test(k))
-    .sort((a,b) => {
-      const ai = parseInt(a.match(/chunk-(\d+)\.txt$/)[1],10);
-      const bi = parseInt(b.match(/chunk-(\d+)\.txt$/)[1],10);
+    .sort((a, b) => {
+      const ai = parseInt(a.match(/chunk-(\d+)\.txt$/)[1], 10);
+      const bi = parseInt(b.match(/chunk-(\d+)\.txt$/)[1], 10);
       return ai - bi;
-    });
-  const urls = chunkKeys.map(k => buildPublicUrl("rawText", k)).filter(Boolean);
-  log.info({ sessionId, count: urls.length }, "🧾 text chunk URLs");
-  return urls;
+    })
+    .map(k => buildPublicUrl("rawtext", k));
 }
