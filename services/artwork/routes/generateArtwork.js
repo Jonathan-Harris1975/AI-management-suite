@@ -12,8 +12,11 @@ const router = express.Router();
 // ------------------------------------------------------------
 // Generate Artwork Function
 // ------------------------------------------------------------
-export async function generateArtwork(sessionId, prompt) {
+export async function generateArtwork(sessionId, prompt = '') {
   const url = "https://openrouter.ai/api/v1/chat/completions";
+  if (!prompt || !prompt.trim()) {
+    prompt = `Podcast cover art for ${sessionId} — abstract AI-themed design, high-contrast, bold typography`;
+  }
 
   const safeTitle = encodeURIComponent(
     process.env.APP_TITLE || "Turing's Torch: AI Weekly Artwork"
