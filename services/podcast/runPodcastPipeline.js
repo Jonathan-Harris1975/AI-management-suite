@@ -3,7 +3,7 @@
 // ============================================================
 
 import { log } from "#logger.js";
-import { orchestrateScript } from "../script/utils/orchestrator.js";
+import { orchestrateScript } from "../script/index.js";
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
 import { createPodcastArtwork } from "../artwork/createPodcastArtwork.js";
 import { uploadText } from "#shared/r2-client.js";
