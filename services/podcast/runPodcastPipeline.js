@@ -21,6 +21,7 @@ export async function runPodcastPipeline(sessionId) {
     // ─────────────────────────────────────────────
     log.info({ sessionId }, "🧩 Generating podcast script...");
     const script = await orchestrateScript(sessionId);
+    log.info({ sessionId, hasText: !!script.fullText, length: script.fullText?.length }, "🧠 Script composed summary");
     log.info({ sessionId }, "✅ Script generation complete.");
 
     // ─────────────────────────────────────────────
