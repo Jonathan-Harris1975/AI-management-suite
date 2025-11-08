@@ -13,7 +13,8 @@ export async function composeEpisode({ intro, main, outro, sessionId, tone = "ne
   try {
     const fullText = [intro, main, outro].filter(Boolean).join("\n\n");
     info(`🧠 Composed episode text for ${sessionId}`);
-    return { fullText, sessionId, tone };
+    const title = (intro?.split('\n')[0] || `AI Weekly ${sessionId}`).toString().slice(0,120);
+    return { fullText, sessionId, tone, meta: { title, tone } };
   } catch (err) {
     error("💥 Compose episode failed", { sessionId, error: err.message });
     throw err;
