@@ -44,9 +44,9 @@ const CONFIG = {
 // ─────────────────────────────────────────────────────────────
 //  R2 TEXT CHUNK FETCHING
 // ─────────────────────────────────────────────────────────────
-export async async function getTextChunkUrls(sessionId) {
+export async async async function getTextChunkUrls(sessionId) {
   const prefix = `${sessionId}/`;
-  let keys = await listKeys("rawText", prefix);
+  let keys = await listKeys("rawtext", prefix);
   keys = (keys || []).filter(k => /chunk-\d+\.txt$/.test(k)).sort((a,b)=>{
     const ai = parseInt(a.match(/chunk-(\d+)\.txt$/)[1],10);
     const bi = parseInt(b.match(/chunk-(\d+)\.txt$/)[1],10);
@@ -54,32 +54,22 @@ export async async function getTextChunkUrls(sessionId) {
   });
   if (!keys.length) {
     const fullKey = `${sessionId}.txt`;
-    try {
-      const full = await getObjectAsText("rawText", fullKey);
-      if (full && full.trim().length) {
-        const parts = chunkText(full);
-        for (let i=0;i<parts.length;i++) {
-          await uploadText("rawText", `${sessionId}/chunk-${i+1}.txt`, parts[i], "text/plain");
-        }
-        keys = parts.map((_,i)=>`${sessionId}/chunk-${i+1}.txt`);
-        info({ sessionId, produced: parts.length }, "🧩 Generated chunk files from transcript fallback");
+    let full = "";
+    try { full = await getObjectAsText("rawtext", fullKey); } catch {}
+    if (!full || !full.trim().length) {
+      try { full = await getObjectAsText("transcripts", fullKey); } catch {}
+    }
+    if (full && full.trim().length) {
+      const parts = chunkText(full);
+      for (let i=0;i<parts.length;i++) {
+        await uploadText("rawtext", `${sessionId}/chunk-${i+1}.txt`, parts[i], "text/plain");
       }
-    } catch (e) {
-      try {
-        const full = await getObjectAsText("transcript", fullKey);
-        if (full && full.trim().length) {
-          const parts = chunkText(full);
-          for (let i=0;i<parts.length;i++) {
-            await uploadText("rawText", `${sessionId}/chunk-${i+1}.txt`, parts[i], "text/plain");
-          }
-          keys = parts.map((_,i)=>`${sessionId}/chunk-${i+1}.txt`);
-          info({ sessionId, produced: parts.length }, "🧩 Generated chunk files from transcript bucket");
-        }
-      } catch {}
+      keys = parts.map((_,i)=>`${sessionId}/chunk-${i+1}.txt`);
+      info({ sessionId, produced: parts.length }, "🧩 Generated chunk files from transcript fallback");
     }
   }
   if (!keys.length) {
-    error({ sessionId }, `❌ No text chunks found in raw-text for ${sessionId}`);
+    error({ sessionId }, `❌ No text chunks found in rawtext for ${sessionId}`);
     return [];
   }
   const baseUrl = (process.env.R2_PUBLIC_BASE_URL_RAW_TEXT || "").replace(/\/$/, "");
@@ -87,6 +77,7 @@ export async async function getTextChunkUrls(sessionId) {
   info({ sessionId, count: urls.length }, "🧾 text chunk URLs");
   return urls;
 }
+
 
 
 // ─────────────────────────────────────────────────────────────
