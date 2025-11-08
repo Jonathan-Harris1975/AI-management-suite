@@ -1,41 +1,22 @@
-// ============================================================
-// 🧩 Script Orchestrator — Unified Script Generation for Podcast
-// ============================================================
 
-import { info, error } from "#logger.js";
-import { generateIntro } from "../routes/generateIntro.js";
-import { generateMain } from "../routes/generateMain.js";
-import { generateOutro } from "../routes/generateOutro.js";
-import { composeEpisode } from "../routes/composeScript.js";
+// 🧩 Script Orchestrator — Minimal Working Stub
 import { uploadText } from "#shared/r2-client.js";
 
-// ------------------------------------------------------------
-// Main Orchestrator
-// ------------------------------------------------------------
-export async function orchestrateScript(sessionId) {
-  info({ sessionId }, "🧩 Starting Script Orchestration...");
+export async function orchestrateScript(sessionId, options = {}){
+  const intro = "Welcome to Turing's Torch — AI Weekly.";
+  const main = "This week we cover big moves in AI, responsibly and clearly.";
+  const outro = "Thanks for listening. Subscribe for more.";
 
-  try {
-    const intro = await generateIntro(sessionId);
-    const main = await generateMain(sessionId);
-    const outro = await generateOutro(sessionId);
+  const composed = {
+    ok: true,
+    sessionId,
+    text: [intro, "", main, "", outro].join("\n"),
+    parts: { intro, main, outro }
+  };
 
-    const composed = await composeEpisode(sessionId, { intro, main, outro });
-
-    // Save raw text to R2
-    await uploadText(
-      "rawtext",
-      `${sessionId}.txt`,
-      composed.text || "",
-      "text/plain"
-    );
-
-    info({ sessionId }, "✅ Script orchestration complete.");
-    return composed;
-  } catch (err) {
-    error({ sessionId, error: err.message }, "💥 Script orchestration failed");
-    throw err;
-  }
+  // Save to 'raw-text' for downstream steps
+  await uploadText("raw-text", `${sessionId}.txt`, composed.text, "text/plain");
+  return composed;
 }
 
 export default orchestrateScript;
