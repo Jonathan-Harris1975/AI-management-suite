@@ -1,46 +1,66 @@
+// ============================================================
+// 🎙 AI Podcast Pipeline — Unified Orchestrator
+// ============================================================
 
-// 🎙 AI Podcast Pipeline — Working Orchestrator
-import { info, error } from "#logger.js";
+import { log } from "#logger.js";
 import { orchestrateScript } from "../script/utils/orchestrator.js";
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
 import { generateArtwork } from "../artwork/routes/generateArtwork.js";
 import { uploadText } from "#shared/r2-client.js";
 
-export async function runPodcastPipeline(sessionId, options = {}){
-  info({ sessionId }, "🎧 Starting AI Podcast Pipeline...");
-  if(!sessionId) throw new Error("sessionId is required");
+// ============================================================
+// 🚀 Main Pipeline Entry Point
+// ============================================================
 
-  // 1) Script
-  const script = await orchestrateScript(sessionId, options.script || {});
+export async function runPodcastPipeline(sessionId) {
+  log.info({ sessionId }, "🎧 Starting AI Podcast Pipeline...");
 
-  // 2) TTS
-  const tts = await orchestrateTTS(sessionId, { scriptText: script.text, ...(options.tts||{}) });
+  try {
+    // ─────────────────────────────────────────────
+    // 1️⃣ Generate the Script (Intro/Main/Outro)
+    // ─────────────────────────────────────────────
+    log.info({ sessionId }, "🧩 Generating podcast script...");
+    const script = await orchestrateScript(sessionId);
+    log.info({ sessionId }, "✅ Script generation complete.");
 
-  // 3) Artwork
-  const art = await generateArtwork(sessionId, options.artwork || {});
+    // ─────────────────────────────────────────────
+    // 2️⃣ Generate Artwork
+    // ─────────────────────────────────────────────
+    log.info({ sessionId }, "🎨 Generating podcast artwork...");
+    const artUrl = await generateArtwork(
+      sessionId,
+      `Podcast cover for ${sessionId} — ${script.meta?.title || "AI Weekly"}`
+    );
+    log.info({ sessionId, artUrl }, "✅ Artwork generated and uploaded.");
 
-  // 4) Metadata
-  const metadata = {
-    sessionId,
-    createdAt: new Date().toISOString(),
-    script: { bytes: script.text.length },
-    tts: { file: tts.file, durationSec: tts.durationSec },
-    artwork: { key: art.key }
-  };
-  await uploadText("meta", `${sessionId}.meta.json`, JSON.stringify(metadata,null,2), "application/json");
+    // ─────────────────────────────────────────────
+    // 3️⃣ Text-to-Speech Pipeline (Full Orchestrator)
+    // ─────────────────────────────────────────────
+    log.info({ sessionId }, "🎙 Launching TTS pipeline...");
+    const ttsResult = await orchestrateTTS(sessionId);
+    log.info({ sessionId, produced: ttsResult.produced }, "✅ TTS pipeline complete.");
 
-  return { ok: true, sessionId, metadata };
-}
+    // ─────────────────────────────────────────────
+    // 4️⃣ Save Metadata to R2
+    // ─────────────────────────────────────────────
+    const metadata = {
+      sessionId,
+      title: script.meta?.title || "Untitled Episode",
+      artwork: artUrl,
+      ttsChunks: ttsResult.produced,
+      createdAt: new Date().toISOString(),
+    };
 
-// Simple CLI for local dev: `node services/podcast/runPodcastPipeline.js SESSION123`
-if (import.meta.url === `file://${process.argv[1]}`){
-  const sessionId = process.argv[2] || `session-${Date.now()}`;
-  runPodcastPipeline(sessionId).then(r=>{
-    console.log("Pipeline OK:", r);
-  }).catch(e=>{
-    console.error("Pipeline failed:", e);
-    process.exit(1);
-  });
-}
+    await uploadText("meta", `${sessionId}.meta.json`, JSON.stringify(metadata, null, 2), "application/json");
+    log.info({ sessionId }, "💾 Metadata saved to R2.");
 
-export default runPodcastPipeline;
+    // ─────────────────────────────────────────────
+    // ✅ Done
+    // ─────────────────────────────────────────────
+    log.info({ sessionId }, "🎉 Podcast pipeline completed successfully.");
+    return { ok: true, sessionId, metadata };
+  } catch (err) {
+    log.error({ sessionId, error: err.message }, "💥 Podcast pipeline failed");
+    throw err;
+  }
+      }
