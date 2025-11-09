@@ -8,7 +8,6 @@ import { generateMain } from "../routes/generateMain.js";
 import { generateOutro } from "../routes/generateOutro.js";
 import { composeEpisode } from "../routes/composeScript.js";
 import { uploadText } from "#shared/r2-client.js";
-import chunkText from "../utils/chunkText.js";
 
 // ------------------------------------------------------------
 // Main Orchestrator
@@ -17,15 +16,17 @@ export async function orchestrateScript(sessionId) {
   info({ sessionId }, "🧩 Starting Script Orchestration...");
 
   try {
+    // 1️⃣ Generate intro, main, outro
     const intro = await generateIntro(sessionId);
     const main = await generateMain(sessionId);
     const outro = await generateOutro(sessionId);
 
+    // 2️⃣ Compose unified episode text
     const composed = await composeEpisode({ intro, main, outro, sessionId });
 
-    // Save raw text to R2
+    // 3️⃣ Save composed text to R2 (correct bucket)
     await uploadText(
-      "rawText",
+      "raw-text",
       `${sessionId}.txt`,
       composed.fullText || "",
       "text/plain"
