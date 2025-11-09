@@ -7,7 +7,7 @@ import { generateIntro } from "../routes/generateIntro.js";
 import { generateMain } from "../routes/generateMain.js";
 import { generateOutro } from "../routes/generateOutro.js";
 import { composeEpisode } from "../routes/composeScript.js";
-import { uploadText, uploadToR2 } from "#shared/r2-client.js";
+import { uploadText} from "#shared/r2-client.js";
 import chunkText from "../utils/chunkText.js";
 
 // ------------------------------------------------------------
