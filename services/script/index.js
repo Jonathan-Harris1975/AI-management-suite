@@ -1,14 +1,14 @@
 // services/script/index.js
 
-import orchestrateScript, { orchestrateScript as _namedOrchestrateScript } from "./utils/orchestrator.js";
+import orchestrateScriptDefault from "./utils/orchestrator.js";
 
-// Keep the current API
-export { _namedOrchestrateScript as orchestrateScript };
+// Create named alias for backward compatibility
+export const orchestrateScript = orchestrateScriptDefault;
 
-// Backward-compatible shim for older pipelines
+// Backward-compatible shim for older pipelines (uses orchestrateEpisode name)
 export async function orchestrateEpisode(sessionId) {
-  return orchestrateScript(sessionId);
+  return orchestrateScriptDefault(sessionId);
 }
 
 // Default export maintained for convenience
-export default orchestrateScript;
+export default orchestrateScriptDefault;
