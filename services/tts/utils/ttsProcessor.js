@@ -47,7 +47,7 @@ const CONFIG = {
  * Returns all public URLs of text chunks associated with a session.
  * Looks in the R2 raw-text bucket under `${sessionId}/`.
  */
-export async function getTextChunkUrls(sessionId) {
+export async function ttsProcessor(sessionId) {
   const bucket = R2_BUCKETS.RAW_TEXT || "rawtext";
   const prefix = `${sessionId}/`;
 
@@ -112,7 +112,7 @@ export async function processTTS(
 ) {
   info({ sessionId }, "🎙 Starting TTS");
 
-  const urls = await getTextChunkUrls(sessionId);
+  const urls = await ttsProcessor(sessionId);
   if (!urls.length) throw new Error("No text chunks found");
 
   // Combine text content from R2 chunks
