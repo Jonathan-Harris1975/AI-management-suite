@@ -4,9 +4,9 @@
 // ============================================================
 
 import { info, error } from "#logger.js";
-import { generateIntro } from "../routes/generateIntro.js";
-import { generateMain } from "../routes/generateMain.js";
-import { generateOutro } from "../routes/generateOutro.js";
+import { intro } from "../routes/intro.js";
+import { main } from "../routes/main.js";
+import { outro } from "../routes/outro.js";
 import { composeEpisode } from "../routes/composeScript.js";
 import { uploadText } from "#shared/r2-client.js";
 import chunkText from "../utils/chunkText.js";
