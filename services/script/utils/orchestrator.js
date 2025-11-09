@@ -12,7 +12,7 @@ import chunkText from "../utils/chunkText.js";
 // ------------------------------------------------------------
 // Main Orchestrator
 // ------------------------------------------------------------
-export async function orchestrateScript(sessionId) {
+export async function orchestrateEpisode(sessionId) {
   const sid = sessionId || `TT-${Date.now()}`;
   info({ sessionId: sid }, "🧠 Orchestrate Script: start");
 
@@ -69,4 +69,4 @@ export async function orchestrateScript(sessionId) {
   }
 }
 
-export default orchestrateScript;
+export default orchestrateEpisode;
