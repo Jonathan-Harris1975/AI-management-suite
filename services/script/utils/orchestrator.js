@@ -49,7 +49,7 @@ export async function orchestrateEpisode(sessionId) {
     const uploadedChunks = [];
     for (let i = 0; i < chunks.length; i++) {
       const key = `${sid}/chunks/chunk-${String(i + 1).padStart(3, "0")}.txt`;
-      await uploadText("podcast-chunks", key, chunks[i], "text/plain");
+      await uploadText("rawtext", key, chunks[i], "text/plain");
       uploadedChunks.push(key);
       info({ sessionId: sid, index: i + 1, key }, "⬆️ Chunk uploaded");
     }
