@@ -3,7 +3,7 @@ import { generateIntro, generateMain, generateOutro, generateComposedEpisode } f
 import * as sessionCache from "./sessionCache.js";
 import { info, error as logError } from "#logger.js";
 
-export async function runFullScriptPipeline(sessionId) {
+export async function orchestrateEpisode(sessionId) {
   try {
     info("🚀 Starting orchestration", { sessionId });
 
