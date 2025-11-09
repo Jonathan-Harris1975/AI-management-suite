@@ -55,7 +55,7 @@ export async function orchestrateEpisode(sessionId) {
     }
 
     // 5️⃣ Upload the full composed script (useful for debugging/traceability)
-    await uploadText("rawtext", `${sid}.txt`, fullText, "text/plain");
+    await uploadText("transcript", `${sid}.txt`, fullText, "text/plain");
     info({ sessionId: sid }, "⬆️ Full script uploaded");
 
     // 6️⃣ Return composed data for pipeline continuity
