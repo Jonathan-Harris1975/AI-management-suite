@@ -2,7 +2,7 @@
 
 import express from 'express';
 import crypto from 'crypto';
-import { runFullScriptPipeline } from '../utils/orchestrator.js';
+import { orchestrateEpisode } from '../utils/orchestrator.js';
 
 const router = express.Router();
 
