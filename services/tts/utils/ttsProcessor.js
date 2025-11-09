@@ -75,7 +75,7 @@ export async function ttsProcessor(sessionId) {
 
           const audioBuffer = Buffer.from(audioBase64, "base64");
           const key = `${sessionId}/tts/chunk_${idx + 1}.mp3`;
-          await uploadBuffer("podcast-chunks", key, audioBuffer, "audio/mpeg");
+          await uploadBuffer("raw", key, audioBuffer, "audio/mpeg");
 
           audioUrls.push(
             `${process.env.R2_PUBLIC_BASE_URL_RAW.replace(/\/$/, "")}/${key}`
