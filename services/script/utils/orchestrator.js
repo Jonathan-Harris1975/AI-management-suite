@@ -11,7 +11,7 @@ import chunkText from "../utils/chunkText.js";
 import { generateEpisodeMetaLLM } from "../utils/podcastHelper.js";
 
 // ------------------------------------------------------------
-// Main Orchestrator
+// Core Orchestrator Function
 // ------------------------------------------------------------
 export async function orchestrateScript(sessionId) {
   const sid = sessionId || `TT-${Date.now()}`;
@@ -31,7 +31,7 @@ export async function orchestrateScript(sessionId) {
     if (!outro || typeof outro !== "string") throw new Error("Outro generation returned no text");
     info({ sessionId: sid, size: outro.length }, "✍️ Outro generated");
 
-    // 2️⃣ Compose the complete episode script
+    // 2️⃣ Compose the full episode
     const composed = await composeEpisode({ sessionId: sid, intro, main, outro });
     const fullText = composed?.fullText ?? [intro, main, outro].join("\n\n");
     info({ sessionId: sid, size: fullText.length }, "🧩 Episode composed");
@@ -40,7 +40,7 @@ export async function orchestrateScript(sessionId) {
     const chunks = chunkText(fullText);
     info({ sessionId: sid, chunks: chunks.length }, "🔪 Text chunked for TTS");
 
-    // 4️⃣ Upload chunks for downstream TTS
+    // 4️⃣ Upload chunks
     const uploadedChunks = [];
     for (let i = 0; i < chunks.length; i++) {
       const key = `${sid}/chunks/chunk-${String(i + 1).padStart(3, "0")}.txt`;
@@ -49,22 +49,21 @@ export async function orchestrateScript(sessionId) {
       info({ sessionId: sid, index: i + 1, key }, "⬆️ Chunk uploaded");
     }
 
-    // 5️⃣ Upload the full composed script (for transcripts/debug)
+    // 5️⃣ Upload full transcript
     await uploadText("raw-text", `${sid}.txt`, fullText, "text/plain");
     info({ sessionId: sid }, "⬆️ Full transcript uploaded");
 
     // 6️⃣ Generate + upload metadata
     info({ sessionId: sid }, "⚙️ Generating episode metadata...");
-    const meta = await generateEpisodeMetaLLM(fullText, sid); // from podcastHelper.js
+    const meta = await generateEpisodeMetaLLM(fullText, sid);
     if (meta) {
-      const metaKey = `${sid}.json`; // ensure flat path (no nested folders)
+      const metaKey = `${sid}.json`;
       await uploadText("podcast-meta", metaKey, JSON.stringify(meta, null, 2), "application/json");
       info({ sessionId: sid, metaKey }, "🧾 Metadata saved to podcast-meta");
     } else {
-      info({ sessionId: sid }, "⚠️ Metadata generation returned null or empty response");
+      info({ sessionId: sid }, "⚠️ Metadata generation returned null");
     }
 
-    // 7️⃣ Return composed data for pipeline continuity
     info({ sessionId: sid }, "✅ Script orchestration complete");
     return { ...composed, fullText, chunks: uploadedChunks, metadata: meta || {} };
   } catch (err) {
@@ -73,4 +72,10 @@ export async function orchestrateScript(sessionId) {
   }
 }
 
-export default orchestrateEpisode;
+// ------------------------------------------------------------
+// Backward-compatible alias for routes that expect orchestrateEpisode
+// ------------------------------------------------------------
+export const orchestrateEpisode = orchestrateScript;
+
+// Default export
+export default orchestrateScript;
