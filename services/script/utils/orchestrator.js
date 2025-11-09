@@ -36,7 +36,7 @@ export async function orchestrateScript(sessionId) {
     const meta = await generateEpisodeMetaLLM(fullText, sid);
     if (meta) {
       const metaKey = `${sid}.json`;
-      await uploadText("podcast-meta", metaKey, JSON.stringify(meta, null, 2), "application/json");
+      await uploadText("meta", metaKey, JSON.stringify(meta, null, 2), "application/json");
     }
 
     info({ sessionId: sid }, "✅ Script orchestration complete");
