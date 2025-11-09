@@ -5,12 +5,10 @@
 import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
-import { log } from "#logger.js";
-import { R2_BUCKETS, getObjectAsText, uploadBuffer } from "#shared/r2-client.js";
+import fetch from "node-fetch";
+import { info, error } from "#logger.js";
+import { uploadBuffer } from "#shared/r2-client.js";
 
-// ------------------------------------------------------------
-// 🧠 Helper: Local temp directory for merge operations
-// ------------------------------------------------------------
 const TMP_DIR = "/tmp/podcast_merge";
 
 function ensureTmpDir() {
@@ -19,45 +17,54 @@ function ensureTmpDir() {
 }
 
 // ------------------------------------------------------------
-// 🧩 Merge TTS Chunks
+// 🧩 Merge TTS Chunks (downloads remote R2 files before merging)
 // ------------------------------------------------------------
 export async function mergeProcessor(sessionId, chunkFiles = []) {
   ensureTmpDir();
-
-  log.info({ sessionId }, "🎧 Starting mergeProcessor");
+  info({ sessionId }, "🎧 Starting mergeProcessor");
 
   try {
-    // If chunkFiles not provided, list from R2 raw bucket
-    if (!chunkFiles || !chunkFiles.length) {
-      log.info({ sessionId }, "🔍 No chunk list passed — expecting orchestrator to supply it.");
-      throw new Error("mergeProcessor requires chunk list from TTS step.");
+    if (!chunkFiles?.length) {
+      throw new Error("mergeProcessor requires local or remote chunk list.");
+    }
+
+    // Download all remote MP3s to local /tmp
+    const localPaths = [];
+    for (let i = 0; i < chunkFiles.length; i++) {
+      const url = chunkFiles[i];
+      const localPath = path.join(TMP_DIR, `${sessionId}_chunk_${i + 1}.mp3`);
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Failed to fetch chunk ${url}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      fs.writeFileSync(localPath, buf);
+      localPaths.push(localPath);
     }
 
     const concatListPath = path.join(TMP_DIR, `${sessionId}_list.txt`);
     const outputFile = path.join(TMP_DIR, `${sessionId}_merged.mp3`);
 
-    // Write ffmpeg concat list
+    // Write ffmpeg concat list with LOCAL paths
     fs.writeFileSync(
       concatListPath,
-      chunkFiles.map((f) => `file '${f}'`).join("\n"),
+      localPaths.map((f) => `file '${f}'`).join("\n"),
       "utf8"
     );
 
-    // Merge using ffmpeg
+    // Merge locally downloaded files
     execSync(`ffmpeg -y -f concat -safe 0 -i ${concatListPath} -c copy ${outputFile}`, {
-      stdio: "ignore",
+      stdio: "pipe",
     });
 
     const mergedBuffer = fs.readFileSync(outputFile);
     const key = `${sessionId}_merged.mp3`;
 
-    // Upload to R2 merged bucket
     await uploadBuffer("merged", key, mergedBuffer, "audio/mpeg");
-    log.info({ sessionId, key }, "💾 Uploaded merged MP3 to R2");
+    info({ sessionId, key }, "💾 Uploaded merged MP3 to R2");
 
     return outputFile;
   } catch (err) {
-    log.error({ sessionId, error: err.message }, "💥 mergeProcessor failed");
+    error({ sessionId, error: err.message }, "💥 mergeProcessor failed");
     throw err;
   }
-  }
+}
