@@ -73,4 +73,4 @@ export async function orchestrateScript(sessionId) {
   }
 }
 
-export default orchestrateScript;
+export default orchestrateEpisode;
