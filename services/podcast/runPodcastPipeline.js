@@ -16,49 +16,56 @@ export async function runPodcastPipeline(sessionId) {
   log.info({ sessionId }, "🎧 Starting AI Podcast Pipeline...");
 
   try {
-    // ─────────────────────────────────────────────
-    // 1️⃣ Generate the Script (Intro/Main/Outro)
-    // ─────────────────────────────────────────────
+    // 1️⃣ Generate Script (Intro, Main, Outro)
     log.info({ sessionId }, "🧩 Generating podcast script...");
     const script = await orchestrateScript(sessionId);
-    log.info({ sessionId, hasText: !!script.fullText, length: script.fullText?.length }, "🧠 Script composed summary");
-    log.info({ sessionId }, "✅ Script generation complete.");
+    log.info({ sessionId, length: script.fullText?.length }, "✅ Script complete.");
 
-    // ─────────────────────────────────────────────
     // 2️⃣ Generate Artwork
-    // ─────────────────────────────────────────────
-    log.info({ sessionId }, "🎨 Generating podcast artwork...");
-    const art = await createPodcastArtwork({ sessionId, prompt: `Podcast cover for ${sessionId} — ${script.meta?.title || 'AI Weekly'}` });
-    log.info({ sessionId, art }, "✅ Artwork generated and uploaded.");
-
-    // ─────────────────────────────────────────────
-    // 3️⃣ Text-to-Speech Pipeline (Full Orchestrator)
-    // ─────────────────────────────────────────────
-    log.info({ sessionId }, "🎙 Launching TTS pipeline...");
-    const ttsResult = await orchestrateTTS(sessionId);
-    log.info({ sessionId, produced: ttsResult.produced }, "✅ TTS pipeline complete.");
-
-    // ─────────────────────────────────────────────
-    // 4️⃣ Save Metadata to R2
-    // ─────────────────────────────────────────────
-    const metadata = {
+    log.info({ sessionId }, "🎨 Creating podcast artwork...");
+    const artwork = await createPodcastArtwork({
       sessionId,
-      title: script.meta?.title || "Untitled Episode",
-      artwork: artUrl,
-      ttsChunks: ttsResult.produced,
-      createdAt: new Date().toISOString(),
+      prompt: `Podcast cover for ${script.meta?.title || "AI Weekly"}`
+    });
+    log.info({ sessionId, artwork }, "✅ Artwork ready.");
+
+    // 3️⃣ Run TTS (Intro/Main/Outro synthesis)
+    log.info({ sessionId }, "🎙 Launching TTS pipeline...");
+    const tts = await orchestrateTTS(sessionId);
+    log.info({ sessionId, produced: tts.produced }, "✅ TTS complete.");
+
+    // 4️⃣ Upload Transcript
+    if (script.fullText) {
+      await uploadText(
+        "transcripts",
+        `${sessionId}.txt`,
+        script.fullText,
+        "text/plain"
+      );
+      log.info({ sessionId }, "📤 Transcript uploaded to R2.");
+    }
+
+    // 5️⃣ Summary Metadata
+    const summary = {
+      sessionId,
+      title: script.meta?.title || "AI Weekly",
+      artworkUrl: artwork?.url,
+      ttsProduced: tts?.produced || false,
+      transcriptUrl: `https://pub-7a098297d4ef4011a01077c72929753c.r2.dev/${sessionId}.txt`,
+      duration: tts?.duration || null,
+      createdAt: new Date().toISOString()
     };
 
-    await uploadText("meta", `${sessionId}.meta.json`, JSON.stringify(metadata, null, 2), "application/json");
-    log.info({ sessionId }, "💾 Metadata saved to R2.");
+    await uploadText("podcast-meta", `${sessionId}.json`, JSON.stringify(summary), "application/json");
+    log.info({ sessionId }, "✅ Metadata saved.");
 
-    // ─────────────────────────────────────────────
-    // ✅ Done
-    // ─────────────────────────────────────────────
-    log.info({ sessionId }, "🎉 Podcast pipeline completed successfully.");
-    return { ok: true, sessionId, metadata };
+    log.info({ sessionId }, "🏁 Podcast pipeline complete.");
+    return summary;
+
   } catch (err) {
-    log.error({ sessionId, error: err.message }, "💥 Podcast pipeline failed");
+    log.error({ sessionId, error: err.message }, "💥 Podcast pipeline failed.");
     throw err;
   }
-      }
+}
+
+export default runPodcastPipeline;
