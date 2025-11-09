@@ -1,1 +1,4 @@
-export { orchestrateScript } from "./utils/orchestrator.js";
+// services/script/index.js
+
+import app from './app.js';
+export default app;
