@@ -29,7 +29,7 @@ export async function ttsProcessor(sessionId) {
   fs.mkdirSync(tmpDir, { recursive: true });
 
   try {
-    const bucket = "raw-text";
+    const bucket = "rawtext";
     const keys = await listKeys(bucket, `${sessionId}/`);
     if (!keys?.length) throw new Error("No text chunks found in R2.");
 
