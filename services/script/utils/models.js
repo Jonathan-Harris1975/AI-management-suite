@@ -1,13 +1,13 @@
 // services/script/utils/models.js
-// Compose flow: build intro/main/outro to cache, edit + chunk for TTS,
-// then save FULL transcript to transcripts and per-chunk files to rawtext,
-// write TTS meta, then generate podcast metadata (title, description, SEO) and save to meta bucket.
-// Artwork prompt is cached in memory only.
+// ============================================================
+// ✨ Generates Intro/Main/Outro → edits → chunked text files
+//   stored in raw-text bucket with public URLs for TTS
+// ============================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
 import fetchFeedArticles from "./fetchFeeds.js";
-import { putText, putJson } from "../../shared/utils/r2-client.js";
+import { putText, putJson, buildPublicUrl } from "../../shared/utils/r2-client.js";
 import { cleanTranscript } from "./textHelpers.js";
 import { calculateDuration } from "./durationCalculator.js";
 import { getWeatherSummary } from "./getWeatherSummary.js";
@@ -17,7 +17,7 @@ import chunkText from "./chunkText.js";
 import { generateMainLongform } from "./mainChunker.js";
 import * as sessionCache from "./sessionCache.js";
 import { generateEpisodeMetaLLM } from "./podcastHelper.js";
-import { info } from "#logger.js";
+import { info, error } from "#logger.js";
 
 function toPlainText(s) {
   if (!s) return "";
@@ -64,13 +64,15 @@ export async function generateIntro(sessionIdLike) {
 
 export async function generateMain(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
-
   const { items, feedUrl } = await fetchFeedArticles();
-  const articles = (items || []).map((it) => ({
-    title: it?.title?.trim() || "",
-    summary: it?.summary?.trim() || it?.contentSnippet?.trim() || it?.description?.trim() || "",
-    link: it?.link || it?.url || "",
-  })).filter(a => a.title || a.summary);
+
+  const articles = (items || [])
+    .map((it) => ({
+      title: it?.title?.trim() || "",
+      summary: it?.summary?.trim() || it?.contentSnippet?.trim() || it?.description?.trim() || "",
+      link: it?.link || it?.url || "",
+    }))
+    .filter((a) => a.title || a.summary);
 
   const { mainSeconds, targetMins } = calculateDuration("main", sessionMeta, articles.length);
   info("script.main.runtimeTarget", { targetMins, mainSeconds, articleCount: articles.length, feedUrl });
@@ -97,83 +99,52 @@ export async function generateOutro(sessionIdLike) {
 
 export async function generateComposedEpisode(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
+  const id = sessionMeta.sessionId || `TT-${Date.now()}`;
 
-  const introCached = await sessionCache.getTempPart(sessionMeta, "intro");
-  const mainCached  = await sessionCache.getTempPart(sessionMeta, "main");
-  const outroCached = await sessionCache.getTempPart(sessionMeta, "outro");
-
-  const intro = introCached || await generateIntro(sessionMeta);
-  const main  = mainCached  || await generateMain(sessionMeta);
-  const outro = outroCached || await generateOutro(sessionMeta);
+  const intro = (await sessionCache.getTempPart(sessionMeta, "intro")) || await generateIntro(sessionMeta);
+  const main = (await sessionCache.getTempPart(sessionMeta, "main")) || await generateMain(sessionMeta);
+  const outro = (await sessionCache.getTempPart(sessionMeta, "outro")) || await generateOutro(sessionMeta);
 
   const rawTranscript = [intro, "", main, "", outro].join("\n");
   const edited = editAndFormat(rawTranscript);
 
-  // Create TTS chunks (sentence-first, byte-aware)
   const maxBytes = Number(process.env.MAX_SSML_CHUNK_BYTES || 4200);
   const byteLen = (s) => Buffer.byteLength(s, "utf8");
   let ttsChunks = chunkText(edited, maxBytes);
-
-  // Safety net: if the transcript exceeds one chunk but we still got only one chunk -> force byte split
   if (ttsChunks.length <= 1 && byteLen(edited) > maxBytes) {
-    info("tts.chunk.forceSplit", { reason: "single-chunk-too-large", editedBytes: byteLen(edited), maxBytes });
-    const hardByteSplit = (text, cap) => {
-      const out = [];
-      let remaining = text.trim();
-      while (Buffer.byteLength(remaining, "utf8") > cap) {
-        let approx = Math.max(1000, Math.floor(cap * 0.9));
-        let slice = remaining.slice(0, approx);
-        const back = slice.lastIndexOf(" ");
-        if (back > 200) slice = slice.slice(0, back);
-        out.push(slice.trim());
-        remaining = remaining.slice(slice.length).trim();
-      }
-      if (remaining) out.push(remaining);
-      return out;
-    };
-    ttsChunks = hardByteSplit(edited, maxBytes);
+    info("tts.chunk.forceSplit", { reason: "single-chunk-too-large" });
+    const out = [];
+    let remaining = edited.trim();
+    while (Buffer.byteLength(remaining, "utf8") > maxBytes) {
+      const approx = Math.floor(maxBytes * 0.9);
+      const slice = remaining.slice(0, approx);
+      const cut = slice.lastIndexOf(" ");
+      const chunk = slice.slice(0, cut > 200 ? cut : approx);
+      out.push(chunk.trim());
+      remaining = remaining.slice(chunk.length).trim();
+    }
+    if (remaining) out.push(remaining);
+    ttsChunks = out;
   }
 
-  const id = sessionMeta.sessionId || "episode";
-
-  // --- Save: full transcript ONLY to transcripts
   await putText("transcripts", `${id}.txt`, edited);
-  info("transcript.saved", { bucket: "transcripts", key: `${id}.txt` });
 
-  // --- Save: per-chunk files ONLY to rawtext (key name per r2-client mapping)
   const files = [];
-  let totalBytes = 0;
   for (let i = 0; i < ttsChunks.length; i++) {
-    const n = String(i + 1).padStart(2, "0");
-    const name = `${id}-tts-chunk-${n}.txt`;
+    const name = `${id}/chunk-${String(i + 1).padStart(3, "0")}.txt`;
     const body = ttsChunks[i];
-    const bytes = byteLen(body);
-    totalBytes += bytes;
-    files.push({ name, bytes });
     await putText("rawtext", name, body);
+    const url = buildPublicUrl("rawtext", name);
+    files.push({ index: i + 1, bytes: byteLen(body), url });
   }
-  info("tts.upload.summary", { bucket: "rawtext", chunks: files.length, totalBytes });
 
-  // --- Save: TTS meta to meta bucket
-  await putJson("meta", `${id}.json`, {
-    session: sessionMeta,
-    createdAt: new Date().toISOString(),
-    tts: {
-      bucket: "rawtext",
-      count: files.length,
-      maxBytes,
-      files,
-      totalBytes
-    },
-  });
-  info("meta.saved", { bucket: "meta", key: `${id}.json` });
+  await putJson("meta", `${id}-tts.json`, { chunks: files, total: files.length });
 
-  // --- Generate PodcastHelper metadata (title, description, keywords). Artwork cached only.
   const meta = await generateEpisodeMetaLLM(edited, sessionMeta);
   await putJson("meta", `${id}-meta.json`, meta);
-  info("meta.generated", { title: meta.title, keywords: meta.keywords?.length || 0, key: `${id}-meta.json` });
 
-  return { transcript: edited, chunks: files.map(f => f.name), meta };
+  info({ sessionId: id, chunks: files.length }, "✅ Script orchestration complete");
+  return { transcript: edited, chunks: files, meta };
 }
 
 export default { generateIntro, generateMain, generateOutro, generateComposedEpisode };
