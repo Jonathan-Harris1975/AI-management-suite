@@ -8,9 +8,10 @@ import { mergeProcessor } from "./utils/mergeProcessor.js";
 import { editingProcessor } from "./utils/editingProcessor.js";
 import { podcastProcessor } from "./utils/podcastProcessor.js";
 import { putObject } from "#shared/r2-client.js";
-import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
+import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js"; // alias maps to services/shared/utils/heartbeat.js
+
 // Normalize ID if called via object { sessionId: "..." }
-const normalize = (s) => (typeof s === "object" && s.sessionId ? s.sessionId : s);
+const normalize = (s) => (typeof s === "object" && s?.sessionId ? s.sessionId : s);
 
 /**
  * Orchestrates the entire TTS pipeline:
@@ -24,37 +25,37 @@ export async function orchestrateTTS(session) {
   const sessionId = normalize(session);
   info({ sessionId }, "🎙 Starting full TTS orchestration pipeline");
 
-  // 🫀 Keep container alive while long TTS runs
+  // 🫀 Keep container alive while long TTS runs (prevents Shipher idle restart)
   startHeartbeat(`TTS-${sessionId}`, 25000);
 
   try {
-    // 1️⃣ Generate TTS chunks
+    // 1) TTS chunks
     const ttsFiles = await ttsProcessor(sessionId);
     info({ sessionId, count: ttsFiles?.length || 0 }, "✅ TTS chunks generated");
 
-    // 2️⃣ Merge chunks → single track
+    // 2) Merge → single track
     const mergedPath = await mergeProcessor(sessionId, ttsFiles);
     info({ sessionId, mergedPath }, "✅ Chunks merged successfully");
 
-    // 3️⃣ Apply audio processing (EQ, compression, normalization)
+    // 3) Audio polish
     const editedPath = await editingProcessor(sessionId, mergedPath);
     info({ sessionId, editedPath }, "✅ Audio editing complete");
 
-    // 4️⃣ Combine with intro/outro and render final mix
+    // 4) Final mix (intro/outro)
     const finalAudio = await podcastProcessor(sessionId, editedPath);
     info({ sessionId, finalAudio }, "✅ Podcast mixdown complete");
 
-    // 5️⃣ Upload finished podcast to R2
+    // 5) Upload finished MP3
     const key = `${sessionId}.mp3`;
     await putObject("podcast", key, finalAudio, "audio/mpeg");
     info({ sessionId, key }, "💾 Uploaded final podcast MP3 to R2");
 
-    stopHeartbeat();
     return { ok: true, sessionId, file: key };
   } catch (err) {
     error({ sessionId, error: err.message }, "💥 TTS orchestration failed");
-    stopHeartbeat();
     throw err;
+  } finally {
+    stopHeartbeat();
   }
 }
 
