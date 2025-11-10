@@ -26,7 +26,7 @@ export async function orchestrateScript(sessionId) {
     const uploadedChunks = [];
 
     for (let i = 0; i < chunks.length; i++) {
-      const key = `${sid}/chunks/chunk-${String(i + 1).padStart(3, "0")}.txt`;
+      const key = `${sid}/chunk-${String(i + 1).padStart(3, "0")}.txt`;
       await uploadText("rawtext", key, chunks[i], "text/plain");
       uploadedChunks.push(key);
     }
