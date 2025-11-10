@@ -1,45 +1,33 @@
 // services/tts/utils/ttsProcessor.js
 // ============================================================
-// 🔊 Amazon Polly TTS Processor — UK "Brian" Voice Edition
+// 🔊 Amazon Polly TTS Processor — UK "Brian" Voice Edition (Fixed)
 // ============================================================
 // - Uses AWS Polly Neural TTS
 // - Reads text from raw-text/<sid>/chunk-*.txt
-// - Produces MP3s stored in podcast-chunks/<sid>/tts/
+// - Produces MP3s in podcast-chunks/<sid>/tts/
 // - Includes per-chunk timeout, heartbeat, and detailed logs
 // ============================================================
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 import fs from "fs";
-import path from "path";
 import pLimit from "p-limit";
 import { info, error } from "#logger.js";
 import { listKeys, uploadBuffer, buildPublicUrl } from "#shared/r2-client.js";
 import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
 
-// ============================================================
-// ⚙️ Polly Configuration
-// ============================================================
 const REGION = process.env.AWS_REGION || "eu-west-2"; // London
 const VOICE_ID = process.env.POLLY_VOICE_ID || "Brian";
 const CONCURRENCY = Number(process.env.TTS_CONCURRENCY || 2);
-const TMP_DIR = "/tmp/polly_tts";
-
-if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
 const polly = new PollyClient({ region: REGION });
 
-// ============================================================
-// 🧩 Helper: Per-Chunk Timeout Controller
-// ============================================================
+// timeout helper
 function abortableTimeout(ms) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   return { controller, timer };
 }
 
-// ============================================================
-// 🧠 Main Processor
-// ============================================================
 export async function ttsProcessor(sessionId) {
   startHeartbeat(`ttsProcessor:${sessionId}`, 25_000);
   info({ sessionId, voice: VOICE_ID, region: REGION, concurrency: CONCURRENCY }, "🎙 TTS processor start");
@@ -60,7 +48,7 @@ export async function ttsProcessor(sessionId) {
       textKeys.map((key, idx) =>
         limit(async () => {
           const i = idx + 1;
-          const { controller, timer } = abortableTimeout(60_000); // 60s per chunk
+          const { controller, timer } = abortableTimeout(60_000);
           try {
             const textUrl = buildPublicUrl("rawtext", key);
             const res = await fetch(textUrl);
@@ -72,13 +60,12 @@ export async function ttsProcessor(sessionId) {
               Engine: "neural",
               LanguageCode: "en-GB",
               VoiceId: VOICE_ID,
-              Text: text,
+              Text: text
             });
 
             const response = await polly.send(command, { signal: controller.signal });
             clearTimeout(timer);
 
-            // Stream to buffer
             const chunks = [];
             for await (const chunk of response.AudioStream) chunks.push(chunk);
             const buf = Buffer.concat(chunks);
