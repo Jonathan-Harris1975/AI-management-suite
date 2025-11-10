@@ -87,12 +87,14 @@ export const R2_BUCKETS = {
 export const R2_PUBLIC_URLS = {
   podcast: R2_PUBLIC_BASE_URL_PODCAST,
   raw: R2_PUBLIC_BASE_URL_RAW,
+  rawtext: R2_PUBLIC_BASE_URL_RAW_TEXT,
   rawText: R2_PUBLIC_BASE_URL_RAW_TEXT,
   meta: R2_PUBLIC_BASE_URL_META,
   merged: R2_PUBLIC_BASE_URL_MERGE,
   art: R2_PUBLIC_BASE_URL_ART,
   rss: R2_PUBLIC_BASE_URL_RSS,
   transcript: R2_PUBLIC_BASE_URL_TRANSCRIPT,
+  transcripts: R2_PUBLIC_BASE_URL_TRANSCRIPT,
 };
 
 // ============================================================
@@ -114,15 +116,17 @@ export function ensureBucketKey(bucketKey) {
 
 export async function uploadBuffer(bucketKey, key, buffer, contentType = "application/octet-stream") {
   const bucket = ensureBucketKey(bucketKey);
+  const cleanKey = key.startsWith("/") ? key.slice(1) : key;
   await s3.send(
     new PutObjectCommand({
       Bucket: bucket,
-      Key: key,
+      Key: cleanKey,
       Body: buffer,
       ContentType: contentType,
     })
   );
-  return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
+  const base = R2_PUBLIC_URLS[bucketKey];
+  return base ? `${base}/${encodeURIComponent(cleanKey)}` : `${R2_ENDPOINT}/${bucket}/${encodeURIComponent(cleanKey)}`;
 }
 
 export async function uploadText(bucketKey, key, text, contentType = "text/plain") {
@@ -131,7 +135,8 @@ export async function uploadText(bucketKey, key, text, contentType = "text/plain
 
 export async function getObjectAsText(bucketKey, key) {
   const bucket = ensureBucketKey(bucketKey);
-  const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const cleanKey = key.startsWith("/") ? key.slice(1) : key;
+  const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: cleanKey }));
   const chunks = [];
   for await (const chunk of response.Body) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf-8");
@@ -149,30 +154,35 @@ export const putObject = uploadBuffer;
 export const getObject = getObjectAsText;
 export const r2Get = getObjectAsText;
 
-// Stream helper (for TTS merge, etc.)
+// Stream helper
 export async function getR2ReadStream(bucketKey, key) {
   const bucket = ensureBucketKey(bucketKey);
-  const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const cleanKey = key.startsWith("/") ? key.slice(1) : key;
+  const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: cleanKey }));
   return response.Body;
 }
 
 // List keys in bucket
 export async function listKeys(bucketKey, prefix = "") {
   const bucket = ensureBucketKey(bucketKey);
-  const { Contents } = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix }));
+  const cleanPrefix = prefix.startsWith("/") ? prefix.slice(1) : prefix;
+  const { Contents } = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: cleanPrefix }));
   return Contents ? Contents.map((c) => c.Key) : [];
 }
 
 // Delete object
 export async function deleteObject(bucketKey, key) {
   const bucket = ensureBucketKey(bucketKey);
-  await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
-  log.info({ bucket, key }, "🗑️ R2 object deleted");
+  const cleanKey = key.startsWith("/") ? key.slice(1) : key;
+  await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: cleanKey }));
+  log.info({ bucket, key: cleanKey }, "🗑️ R2 object deleted");
 }
 
 // Build public URL
 export function buildPublicUrl(bucketKey, key) {
-  return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
+  const cleanKey = key.startsWith("/") ? key.slice(1) : key;
+  const base = R2_PUBLIC_URLS[bucketKey];
+  return base ? `${base}/${encodeURIComponent(cleanKey)}` : `${R2_ENDPOINT}/${ensureBucketKey(bucketKey)}/${encodeURIComponent(cleanKey)}`;
 }
 
 // ============================================================
@@ -180,7 +190,7 @@ export function buildPublicUrl(bucketKey, key) {
 // ============================================================
 
 log.info(
-  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.values(R2_BUCKETS) },
+  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: R2_BUCKETS },
   "r2-client.initialized"
 );
 
