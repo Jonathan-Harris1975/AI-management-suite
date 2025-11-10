@@ -1,99 +1,77 @@
-// services/utils/ttsProcessor.js
+// services/tts/utils/ttsProcessor.js
 // ============================================================
-// 🔊 Amazon Polly TTS Processor — UK "Brian" Voice Edition (Fixed)
-// ============================================================
-// - Uses AWS Polly Neural TTS
-// - Reads text from raw-text/<sid>/chunk-*.txt
-// - Produces MP3s in podcast-chunks/<sid>/
-// - Includes per-chunk timeout, heartbeat, and detailed logs
+// 🎙 Amazon Polly TTS Processor (Public URL Mode)
+//   - Fetches text chunks from public R2 URLs
+//   - Synthesizes audio with Amazon Polly (Neural)
+//   - Logs full summary + heartbeat
 // ============================================================
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
-import fs from "fs";
-import pLimit from "p-limit";
 import { info, error } from "#logger.js";
-import { listKeys, uploadBuffer, buildPublicUrl } from "#shared/r2-client.js";
+import fetch from "node-fetch";
+import fs from "fs/promises";
+import path from "path";
 import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
 
-const REGION = process.env.AWS_REGION || "eu-west-2"; // London
-const VOICE_ID = process.env.POLLY_VOICE_ID || "Brian";
-const CONCURRENCY = Number(process.env.TTS_CONCURRENCY || 2);
+const REGION = process.env.AWS_REGION || "eu-west-2";
+const VOICE = process.env.POLLY_VOICE_ID || "Brian";
+const MODEL = "Amazon Polly (Neural)";
+const TMP_DIR = "/tmp/tts";
+await fs.mkdir(TMP_DIR, { recursive: true });
 
 const polly = new PollyClient({ region: REGION });
 
-// timeout helper
-function abortableTimeout(ms) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  return { controller, timer };
+// ------------------------------------------------------------
+// 🎧 synthesizeChunk()
+// ------------------------------------------------------------
+async function synthesizeChunk(sessionId, text, index) {
+  const outFile = path.join(TMP_DIR, `${sessionId}-chunk-${String(index).padStart(3, "0")}.mp3`);
+  const command = new SynthesizeSpeechCommand({
+    OutputFormat: "mp3",
+    Engine: "neural",
+    Text: text,
+    VoiceId: VOICE,
+  });
+  const res = await polly.send(command);
+  const chunks = [];
+  for await (const c of res.AudioStream) chunks.push(c);
+  await fs.writeFile(outFile, Buffer.concat(chunks));
+  return outFile;
 }
 
-export async function ttsProcessor(sessionId) {
-  startHeartbeat(`ttsProcessor:${sessionId}`, 25_000);
-  info({ sessionId, voice: VOICE_ID, region: REGION, concurrency: CONCURRENCY }, "🎙 TTS processor start");
+// ------------------------------------------------------------
+// 🧠 processTTS()
+// ------------------------------------------------------------
+export async function processTTS({ sessionId, chunks }) {
+  const started = Date.now();
+  info({ sessionId, model: MODEL, voice: VOICE, region: REGION }, "🎙 TTS Processor Start");
+  startHeartbeat(`ttsProcessor:${sessionId}`);
 
-  try {
-    const prefix = `${sessionId}/`;
-    const textKeys = (await listKeys("rawtext", prefix))
-      .filter(k => /chunk-\d+\.txt$/i.test(k))
-      .sort((a, b) => parseInt(a.match(/\d+/)) - parseInt(b.match(/\d+/)));
+  let success = 0;
+  let fail = 0;
+  let totalBytes = 0;
 
-    if (!textKeys.length) throw new Error(`No text chunks found in rawtext:${prefix}`);
-    info({ sessionId, count: textKeys.length }, "📝 Text chunks discovered");
-
-    const limit = pLimit(CONCURRENCY);
-    const outputs = [];
-
-    await Promise.all(
-      textKeys.map((key, idx) =>
-        limit(async () => {
-          const i = idx + 1;
-          const { controller, timer } = abortableTimeout(60_000);
-          try {
-            const textUrl = buildPublicUrl("rawtext", key);
-            const res = await fetch(textUrl);
-            const text = (await res.text()).trim();
-            if (!text) throw new Error(`Empty text in ${key}`);
-
-            const command = new SynthesizeSpeechCommand({
-              OutputFormat: "mp3",
-              Engine: "neural",
-              LanguageCode: "en-GB",
-              VoiceId: VOICE_ID,
-              Text: text
-            });
-
-            const response = await polly.send(command, { signal: controller.signal });
-            clearTimeout(timer);
-
-            const chunks = [];
-            for await (const chunk of response.AudioStream) chunks.push(chunk);
-            const buf = Buffer.concat(chunks);
-
-            const outKey = `${sessionId}/chunk_${i}.mp3`;
-            await uploadBuffer("raw", outKey, buf, "audio/mpeg");
-            const publicUrl = buildPublicUrl("raw", outKey);
-            outputs.push(publicUrl);
-
-            info({ sessionId, index: i, bytes: buf.length }, "tts.chunk.done");
-          } catch (e) {
-            clearTimeout(timer);
-            error({ sessionId, index: i, error: e?.message || String(e) }, "tts.chunk.failed");
-          }
-        })
-      )
-    );
-
-    stopHeartbeat();
-
-    if (!outputs.length) throw new Error("No TTS chunks were produced");
-    info({ sessionId, chunks: outputs.length }, "✅ TTS chunks generated");
-    return outputs;
-  } catch (err) {
-    error({ sessionId, error: err?.stack || err?.message }, "💥 TTS processor failed");
-    stopHeartbeat();
-    throw err;
+  for (const chunk of chunks) {
+    try {
+      const res = await fetch(chunk.url);
+      const text = await res.text();
+      totalBytes += Buffer.byteLength(text, "utf8");
+      const out = await synthesizeChunk(sessionId, text, chunk.index);
+      const stats = await fs.stat(out);
+      success++;
+      info({ index: chunk.index, bytes: stats.size, url: chunk.url }, "✅ Chunk synthesized");
+    } catch (err) {
+      fail++;
+      error({ sessionId, url: chunk.url, error: err.message }, "❌ TTS Chunk Failure");
+    }
   }
+
+  const elapsed = ((Date.now() - started) / 1000).toFixed(1) + "s";
+  info(
+    { sessionId, model: MODEL, voice: VOICE, region: REGION, chunksProcessed: chunks.length, success, failed: fail, totalBytes, elapsed },
+    "🎧 TTS Summary"
+  );
+  stopHeartbeat(`ttsProcessor:${sessionId}`);
 }
 
-export default ttsProcessor;
+export default processTTS;
