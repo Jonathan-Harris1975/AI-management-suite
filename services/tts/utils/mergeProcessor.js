@@ -1,5 +1,9 @@
+// services/tts/utils/mergeProcessor.js
 // ============================================================
-// 🎧 TTS Merge Processor — Combine all chunk files into one MP3
+// 🎧 Merge Processor — downloads remote chunk URLs to /tmp then merges via ffmpeg
+// - Accepts an array of PUBLIC HTTPS URLs (from ttsProcessor)
+// - Writes concat list with LOCAL paths
+// - Uploads merged MP3 to R2 (podcast-merged/<sessionId>.mp3)
 // ============================================================
 
 import fs from "fs";
@@ -10,61 +14,53 @@ import { info, error } from "#logger.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 
 const TMP_DIR = "/tmp/podcast_merge";
+const MERGED_BUCKET = "merged";
 
 function ensureTmpDir() {
   if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
-  return TMP_DIR;
 }
 
-// ------------------------------------------------------------
-// 🧩 Merge TTS Chunks (downloads remote R2 files before merging)
-// ------------------------------------------------------------
-export async function mergeProcessor(sessionId, chunkFiles = []) {
+export async function mergeProcessor(sessionId, chunkUrls = []) {
+  const sid = sessionId || `TT-${Date.now()}`;
   ensureTmpDir();
-  info({ sessionId }, "🎧 Starting mergeProcessor");
+  info({ sessionId: sid }, "🎧 Starting mergeProcessor");
 
   try {
-    if (!chunkFiles?.length) {
-      throw new Error("mergeProcessor requires local or remote chunk list.");
-    }
+    if (!chunkUrls?.length) throw new Error("mergeProcessor requires non-empty array of chunk URLs.");
 
-    // Download all remote MP3s to local /tmp
+    // 1) Download each remote MP3 to /tmp
     const localPaths = [];
-    for (let i = 0; i < chunkFiles.length; i++) {
-      const url = chunkFiles[i];
-      const localPath = path.join(TMP_DIR, `${sessionId}_chunk_${i + 1}.mp3`);
-
+    for (let i = 0; i < chunkUrls.length; i++) {
+      const url = chunkUrls[i];
+      const local = path.join(TMP_DIR, `${sid}_chunk_${String(i + 1).padStart(3, "0")}.mp3`);
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`Failed to fetch chunk ${url}`);
+      if (!res.ok) throw new Error(`Failed to fetch audio chunk: ${url}`);
       const buf = Buffer.from(await res.arrayBuffer());
-      fs.writeFileSync(localPath, buf);
-      localPaths.push(localPath);
+      fs.writeFileSync(local, buf);
+      localPaths.push(local);
     }
 
-    const concatListPath = path.join(TMP_DIR, `${sessionId}_list.txt`);
-    const outputFile = path.join(TMP_DIR, `${sessionId}_merged.mp3`);
+    // 2) Build ffmpeg concat list with LOCAL paths
+    const listPath = path.join(TMP_DIR, `${sid}_list.txt`);
+    const outPath  = path.join(TMP_DIR, `${sid}_merged.mp3`);
+    fs.writeFileSync(listPath, localPaths.map(p => `file '${p}'`).join("\n"), "utf8");
 
-    // Write ffmpeg concat list with LOCAL paths
-    fs.writeFileSync(
-      concatListPath,
-      localPaths.map((f) => `file '${f}'`).join("\n"),
-      "utf8"
-    );
-
-    // Merge locally downloaded files
-    execSync(`ffmpeg -y -f concat -safe 0 -i ${concatListPath} -c copy ${outputFile}`, {
+    // 3) Merge using stream copy (all chunks are MP3)
+    execSync(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}"`, {
       stdio: "pipe",
     });
 
-    const mergedBuffer = fs.readFileSync(outputFile);
-    const key = `${sessionId}_merged.mp3`;
+    // 4) Upload merged MP3 to R2
+    const mergedBuf = fs.readFileSync(outPath);
+    const mergedKey = `${sid}.mp3`;
+    await uploadBuffer(MERGED_BUCKET, mergedKey, mergedBuf, "audio/mpeg");
 
-    await uploadBuffer("merged", key, mergedBuffer, "audio/mpeg");
-    info({ sessionId, key }, "💾 Uploaded merged MP3 to R2");
-
-    return outputFile;
+    info({ sessionId: sid, key: mergedKey, bytes: mergedBuf.length }, "💾 Uploaded merged MP3 to R2");
+    return { key: mergedKey, localPath: outPath };
   } catch (err) {
-    error({ sessionId, error: err.message }, "💥 mergeProcessor failed");
+    error({ sessionId: sid, error: err.message }, "💥 mergeProcessor failed");
     throw err;
   }
 }
+
+export default mergeProcessor;
