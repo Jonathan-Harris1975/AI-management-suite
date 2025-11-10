@@ -1,29 +1,40 @@
-// services/tts/utils/ttsProcessor.js
 // ============================================================
-// 🎙 TTS Processor — Amazon Polly (URL-based chunk ingestion)
+// 🎙️ TTS Processor — Cloud-Native Production Version
 // ============================================================
 //
-// ✅ Features
-//  • Reads text chunks directly from R2 public URLs
-//  • Uses Amazon Polly neural voice (UK Brian by default)
-//  • Detailed logging (fetch, Polly, error stack, summary)
-//  • Safe heartbeat loop
+// ✅ Reads text chunks from R2_PUBLIC_BASE_URL_RAW_TEXT
+// ✅ Synthesizes speech with Amazon Polly (Neural)
+// ✅ Uploads .mp3 chunks to R2_BUCKET_CHUNKS (podcast-chunks)
+// ✅ Returns metadata for mergeProcessor
+// ✅ Fully aligned with Shiper R2 environment
 // ============================================================
 
-import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
-import { info, error, warn, debug } from "#logger.js";
-import { startHeartbeat, stopHeartbeat } from "../../shared/utils/heartbeat.js";
+import {
+  PollyClient,
+  SynthesizeSpeechCommand,
+} from "@aws-sdk/client-polly";
+import { info, error } from "#logger.js";
+import { putObject } from "#shared/r2-client.js";
+import pLimit from "p-limit";
 
-// ------------------------------------------------------------
-// 🔧 Configuration
-// ------------------------------------------------------------
-const VOICE_ID = process.env.POLLY_VOICE_ID || "Brian";
+// ------------------------------------------------------------------
+// ⚙️ Config
+// ------------------------------------------------------------------
 const REGION = process.env.AWS_REGION || "eu-west-2";
-const TTS_CONCURRENCY = Number(process.env.TTS_CONCURRENCY || 2);
+const VOICE_ID = process.env.POLLY_VOICE_ID || "Brian";
+const CONCURRENCY = parseInt(process.env.TTS_CONCURRENCY || "2", 10);
 
-// ------------------------------------------------------------
+const R2_BUCKET_CHUNKS = process.env.R2_BUCKET_CHUNKS || "podcast-chunks";
+const R2_PUBLIC_BASE_URL_CHUNKS =
+  process.env.R2_PUBLIC_BASE_URL_CHUNKS ||
+  "https://pub-f5923355782641348fc97d1a8aa9cd71.r2.dev";
+const R2_PUBLIC_BASE_URL_RAW_TEXT =
+  process.env.R2_PUBLIC_BASE_URL_RAW_TEXT ||
+  "https://pub-7a098297d4ef4011a01077c72929753c.r2.dev";
+
+// ------------------------------------------------------------------
 // 🧠 Initialize Polly
-// ------------------------------------------------------------
+// ------------------------------------------------------------------
 const polly = new PollyClient({
   region: REGION,
   credentials: {
@@ -32,98 +43,110 @@ const polly = new PollyClient({
   },
 });
 
-// ------------------------------------------------------------
-// 🎧 Helper to fetch text from R2 public URL
-// ------------------------------------------------------------
-async function fetchChunkText(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} when fetching ${url}`);
-  return await res.text();
-}
+info(
+  { region: REGION, voice: VOICE_ID, concurrency: CONCURRENCY },
+  "🧩 Using Amazon Polly (Neural) configuration"
+);
 
-// ------------------------------------------------------------
-// 🔊 Process a single chunk with Polly
-// ------------------------------------------------------------
-async function processChunk({ sessionId, index, url }) {
-  const logContext = { sessionId, index, url };
-  try {
-    info(logContext, `🔍 Fetching chunk text from URL...`);
-    const res = await fetch(url);
+// ------------------------------------------------------------------
+// 🎧 TTS Processor
+// ------------------------------------------------------------------
+export async function ttsProcessor(sessionId, chunkList = []) {
+  info({ sessionId }, "🎙 TTS Processor Start");
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} ${res.statusText} when fetching ${url}`);
-    }
-
-    const text = await res.text();
-    if (!text || !text.trim()) {
-      throw new Error(`Empty text content returned from ${url}`);
-    }
-
-    debug({ ...logContext, length: text.length }, `📜 Chunk text fetched successfully`);
-
-    const synthCmd = new SynthesizeSpeechCommand({
-      OutputFormat: "mp3",
-      Engine: "neural",
-      Text: text,
-      VoiceId: VOICE_ID,
-    });
-
-    const response = await polly.send(synthCmd);
-
-    if (!response.AudioStream) {
-      throw new Error("Polly did not return an AudioStream");
-    }
-
-    const audioBuffer = await response.AudioStream.transformToByteArray();
-    info({ ...logContext, size: audioBuffer.length }, `✅ TTS Chunk ${index} synthesized`);
-
-    return { index, success: true, size: audioBuffer.length, url };
-  } catch (err) {
-    error(
-      { ...logContext, message: err.message, stack: err.stack?.split("\n").slice(0, 3) },
-      "❌ TTS Chunk Failure"
-    );
-    return { index, success: false, error: err.message, url };
-  }
-}
-
-// ------------------------------------------------------------
-// 🧩 Main Processor
-// ------------------------------------------------------------
-export async function ttsProcessor({ sessionId, chunks }) {
-  const sid = sessionId || `session-${Date.now()}`;
-  info({ sessionId: sid, model: "Amazon Polly", voice: VOICE_ID, region: REGION }, "🎧 Starting TTS Processor");
-
-  if (!Array.isArray(chunks) || chunks.length === 0) {
-    throw new Error("No valid text chunks provided to TTS Processor.");
+  if (!Array.isArray(chunkList) || chunkList.length === 0) {
+    throw new Error("No text chunks provided to ttsProcessor");
   }
 
-  const hb = startHeartbeat(`ttsProcessor:${sid}`);
+  const limit = pLimit(CONCURRENCY);
   const results = [];
-  const limit = TTS_CONCURRENCY;
 
-  try {
-    for (let i = 0; i < chunks.length; i += limit) {
-      const slice = chunks.slice(i, i + limit);
-      const batchResults = await Promise.all(slice.map(c => processChunk({ ...c, sessionId: sid })));
-      results.push(...batchResults);
-    }
+  const tasks = chunkList.map((chunk, index) =>
+    limit(async () => {
+      const chunkNumber = index + 1;
+      try {
+        // -----------------------------------------------------------
+        // 🔍 Fetch text from R2_PUBLIC_BASE_URL_RAW_TEXT
+        // -----------------------------------------------------------
+        const textUrl =
+          chunk.url ||
+          `${R2_PUBLIC_BASE_URL_RAW_TEXT}/${sessionId}/chunk-${String(
+            chunkNumber
+          ).padStart(3, "0")}.txt`;
 
-    const successCount = results.filter(r => r.success).length;
-    const failCount = results.filter(r => !r.success).length;
-    const failedUrls = results.filter(r => !r.success).map(r => r.url);
+        info({ sessionId, textUrl }, "🔍 Fetching chunk text from URL...");
+        const res = await fetch(textUrl);
+        if (!res.ok)
+          throw new Error(`Failed to fetch text chunk ${chunkNumber}: ${res.status}`);
+        const text = await res.text();
+        if (!text.trim())
+          throw new Error(`Empty text content in chunk ${chunkNumber}`);
 
-    info(
-      { sessionId: sid, successCount, failCount, total: results.length, failedUrls },
-      "🎧 TTS Summary"
-    );
+        // -----------------------------------------------------------
+        // 🗣️ Convert to speech with Amazon Polly
+        // -----------------------------------------------------------
+        const command = new SynthesizeSpeechCommand({
+          Text: text,
+          OutputFormat: "mp3",
+          VoiceId: VOICE_ID,
+          Engine: "neural",
+        });
 
-    if (successCount === 0) throw new Error("No TTS chunks were produced or returned.");
+        const pollyResult = await polly.send(command);
+        const audioBuffer = Buffer.from(
+          await pollyResult.AudioStream.transformToByteArray()
+        );
 
-    return results;
-  } finally {
-    stopHeartbeat(hb);
-  }
+        // -----------------------------------------------------------
+        // ☁️ Upload to R2_BUCKET_CHUNKS (podcast-chunks)
+        // -----------------------------------------------------------
+        const key = `${sessionId}/audio-${String(chunkNumber).padStart(3, "0")}.mp3`;
+        await putObject("chunks", key, audioBuffer, "audio/mpeg");
+
+        const publicUrl = `${R2_PUBLIC_BASE_URL_CHUNKS}/${encodeURIComponent(key)}`;
+        info(
+          { sessionId, key, publicUrl, bytes: audioBuffer.length },
+          "✅ TTS chunk uploaded"
+        );
+
+        results.push({
+          success: true,
+          index: chunkNumber,
+          key,
+          url: publicUrl,
+          bytes: audioBuffer.length,
+        });
+      } catch (err) {
+        error(
+          { sessionId, index: chunkNumber, message: err.message },
+          "❌ TTS Chunk Failure"
+        );
+        results.push({ success: false, index: chunkNumber, error: err.message });
+      }
+    })
+  );
+
+  await Promise.all(tasks);
+
+  // ------------------------------------------------------------------
+  // 📊 Summary
+  // ------------------------------------------------------------------
+  const successCount = results.filter((r) => r.success).length;
+  const failCount = results.filter((r) => !r.success).length;
+
+  info(
+    { sessionId, total: results.length, successCount, failCount },
+    "🎧 TTS Summary"
+  );
+
+  if (successCount === 0)
+    throw new Error("No TTS chunks were produced or returned.");
+
+  info({ sessionId }, "🗣️ TTS complete");
+  return results;
 }
 
+// ------------------------------------------------------------------
+// 📦 Default Export
+// ------------------------------------------------------------------
 export default { ttsProcessor };
