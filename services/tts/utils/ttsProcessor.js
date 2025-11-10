@@ -74,4 +74,4 @@ export async function processTTS({ sessionId, chunks }) {
   stopHeartbeat(`ttsProcessor:${sessionId}`);
 }
 
-export default processTTS;
+export default ttsProcessor;
