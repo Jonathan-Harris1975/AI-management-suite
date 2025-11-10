@@ -12,7 +12,7 @@
 // ============================================================
 
 import { info, error, warn } from "#logger.js";
-import { startHeartbeat, stopHeartbeat } from "#shared/utils/heartbeat.js";
+import { startHeartbeat, stopHeartbeat } from "../../shared/utils/heartbeat.js";
 import { putJson } from "#shared/r2-client.js";
 import { ttsProcessor } from "./ttsProcessor.js";
 
