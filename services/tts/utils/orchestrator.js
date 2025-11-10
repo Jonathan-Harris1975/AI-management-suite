@@ -1,87 +1,74 @@
 // services/tts/utils/orchestrator.js
 // ============================================================
-// 🎙 AI Podcast Suite – TTS Orchestrator (Amazon Polly Edition)
+// 🎛 TTS Orchestrator — Root-level chunk URL pattern version
 // ============================================================
 //
-// ✅ Features
-//  • Works with flat R2 layout (no nested folders)
-//  • Builds public chunk URLs automatically
-//  • Logs model + region info
-//  • Keeps heartbeat alive for long processes
-//  • Provides detailed success/error summaries
+// Example:
+//   https://pub-7a098297d4ef4011a01077c72929753c.r2.dev/TT-2025-11-10/chunk-001.txt
+//
+// Steps:
+//   • Build chunk URLs for sessionId
+//   • Verify accessibility with HEAD requests
+//   • Run ttsProcessor on confirmed chunks
 // ============================================================
 
-import { info, error, warn } from "#logger.js";
-import { startHeartbeat, stopHeartbeat } from "../../shared/utils/heartbeat.js";
-import { putJson } from "#shared/r2-client.js";
 import { ttsProcessor } from "./ttsProcessor.js";
+import { info, error, debug } from "#logger.js";
+import { startHeartbeat, stopHeartbeat } from "../../shared/utils/heartbeat.js";
 
-// ------------------------------------------------------------
-// 🌍 Constants & Helpers
-// ------------------------------------------------------------
-const RAWTEXT_BASE =
-  process.env.R2_PUBLIC_BASE_URL_RAW_TEXT ||
-  "https://pub-7a098297d4ef4011a01077c72929753c.r2.dev";
+// Base public URL for R2 raw-text bucket (root-level)
+const BASE_URL = process.env.R2_PUBLIC_BASE_URL_RAW_TEXT;
 
-const DEFAULT_VOICE = process.env.POLLY_VOICE_ID || "Brian";
-const AWS_REGION = process.env.AWS_REGION || "eu-west-2";
-
-// ------------------------------------------------------------
-// 🧠 Main Orchestrator
-// ------------------------------------------------------------
-export async function orchestrateTTS(sessionId) {
-  const sid = sessionId || `TT-${Date.now()}`;
-  info({ service: "ai-podcast-suite", sessionId: sid }, "🎙 TTS Processor Start");
-
-  // Start heartbeat
-  const hb = startHeartbeat(`ttsProcessor:${sid}`);
+async function urlExists(url) {
   try {
-    info(
-      { sessionId: sid, model: "Amazon Polly", voice: DEFAULT_VOICE, region: AWS_REGION },
-      "🧩 Using Amazon Polly (Neural) configuration"
-    );
+    const res = await fetch(url, { method: "HEAD" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
-    // Build flat URL list for text chunks
-    // Example: https://pub-xxx.r2.dev/TT-2025-11-10/chunk-001.txt
-    const chunkUrls = [];
-    for (let i = 1; i <= 50; i++) {
-      const index = String(i).padStart(3, "0");
-      const url = `${RAWTEXT_BASE}/${sid}/chunk-${index}.txt`;
-      chunkUrls.push({ index, url });
+async function buildChunkUrls(sessionId, maxChunks = 60) {
+  info({ sessionId }, "🔍 Building and validating chunk URLs...");
+  const valid = [];
+
+  for (let i = 1; i <= maxChunks; i++) {
+    const chunkName = `chunk-${String(i).padStart(3, "0")}.txt`;
+    const url = `${BASE_URL}/${sessionId}/${chunkName}`;
+    if (await urlExists(url)) {
+      valid.push({ index: i, url });
+      info({ index: i, url }, "✅ Chunk confirmed");
+    } else {
+      debug({ index: i, url }, "⚠️ Chunk not found, stopping scan");
+      break;
+    }
+  }
+
+  info({ sessionId, count: valid.length }, "🧩 Chunk URL validation complete");
+  return valid;
+}
+
+export async function orchestrateTTS(sessionId) {
+  info({ sessionId }, "🎬 TTS Orchestration begin");
+
+  const hb = startHeartbeat(`ttsProcessor:${sessionId}`);
+  try {
+    const chunks = await buildChunkUrls(sessionId, 60);
+
+    if (!chunks.length) {
+      throw new Error("No valid chunk URLs found for this session.");
     }
 
-    info({ sessionId: sid, count: chunkUrls.length }, "🧩 Built TTS chunk URL list");
+    const results = await ttsProcessor({ sessionId, chunks });
 
-    // Run TTS Processor (Amazon Polly)
-    const results = await ttsProcessor({ sessionId: sid, chunks: chunkUrls });
-
-    if (!results || !Array.isArray(results) || results.length === 0) {
-      throw new Error("No TTS chunks were produced or returned.");
-    }
-
-    // Upload TTS summary metadata to R2 (meta bucket)
-    const summary = {
-      sessionId: sid,
-      model: "Amazon Polly (Neural)",
-      voice: DEFAULT_VOICE,
-      region: AWS_REGION,
-      chunks: results.length,
-      createdAt: new Date().toISOString(),
-    };
-
-    await putJson("meta", `${sid}-tts-summary.json`, summary);
-    info({ sessionId: sid, summary }, "✅ TTS orchestration complete");
-
-    return summary;
+    info({ sessionId, total: results.length }, "🎧 TTS complete");
+    return results;
   } catch (err) {
-    error({ sessionId: sid, message: err.message, stack: err.stack }, "💥 TTS orchestration failed");
+    error({ sessionId, error: err.message, stack: err.stack?.split("\n").slice(0, 3) }, "💥 TTS orchestration failed");
     throw err;
   } finally {
     stopHeartbeat(hb);
   }
 }
 
-// ------------------------------------------------------------
-// 🧩 Default Export
-// ------------------------------------------------------------
-export default orchestrateTTS;
+export default { orchestrateTTS };
