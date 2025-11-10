@@ -1,24 +1,8 @@
-// ============================================================
-// 🔊 TTS Route — Entry Point for Full Pipeline
-// ============================================================
-
+// Deprecated: prefer routes/tts.js
 import express from "express";
-import { orchestrateTTS } from "../utils/orchestrator.js";
-import { info, error } from "#logger.js";
+import ttsRouter from "./tts.js";
 
 const router = express.Router();
-
-router.post("/", async (req, res) => {
-  const { sessionId } = req.body;
-  info({ sessionId }, "🔊 /tts orchestrate route called");
-
-  try {
-    const result = await orchestrateTTS(sessionId);
-    res.json({ success: true, result });
-  } catch (err) {
-    error({ sessionId, error: err.message }, "💥 /tts orchestration failed");
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+router.use("/", ttsRouter); // forward everything to /tts routes
 
 export default router;
