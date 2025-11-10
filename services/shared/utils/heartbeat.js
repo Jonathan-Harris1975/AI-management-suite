@@ -13,7 +13,7 @@ let interval = null;
  */
 export function startHeartbeat(label = "Heartbeat", ms = 30000) {
   stopHeartbeat();
-  info({ label }, `💓 Starting heartbeat for ${label}`);
+  info({ label }, `💚 Starting heartbeat for ${label}`);
   interval = setInterval(() => {
     info({ label, time: new Date().toISOString() }, "💓 Heartbeat tick");
   }, ms);
@@ -26,6 +26,7 @@ export function stopHeartbeat() {
   if (interval) {
     clearInterval(interval);
     interval = null;
-    export default startHeartbeat;
   }
 }
+
+export default startHeartbeat;
