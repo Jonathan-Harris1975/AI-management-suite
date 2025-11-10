@@ -16,13 +16,16 @@ router.post("/orchestrate", async (req, res) => {
   const sessionId = req.body?.sessionId || `TT-${Date.now()}`;
   info({ sessionId }, "🎙 /tts/orchestrate called");
 
-  try {
-    const result = await orchestrateTTS(sessionId);
-    res.json({ ok: true, sessionId, ...result });
-  } catch (err) {
-    error({ sessionId, error: err.message }, "💥 /tts/orchestrate failed");
-    res.status(500).json({ ok: false, sessionId, error: err.message });
-  }
+  // Respond immediately to avoid request timeouts; run orchestration async
+  res.json({ ok: true, message: "TTS orchestration started", sessionId });
+
+  (async () => {
+    try {
+      await orchestrateTTS(sessionId);
+    } catch (err) {
+      error({ sessionId, error: err.message }, "💥 async /tts/orchestrate failed");
+    }
+  })();
 });
 
 export default router;
