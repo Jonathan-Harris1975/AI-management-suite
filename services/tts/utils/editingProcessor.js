@@ -37,7 +37,8 @@ const filters = [
 // 🧩 Main Processor
 // ------------------------------------------------------------
 export async function editingProcessor(sessionId, inputPath) {
-  const sessionId = arguments[0];
+  startHeartbeat(`editingProcessor:${sessionId}`, 25000);
+  
   startHeartbeat(`editingProcessor:${sessionId}`, 25000);
   ensureTmpDir();
   log.info({ sessionId }, "🎚️ Starting editingProcessor");
@@ -60,6 +61,7 @@ export async function editingProcessor(sessionId, inputPath) {
     return editedFile;
   } catch (err) {
     log.error({ sessionId, error: err.message }, "💥 editingProcessor failed");
+    stopHeartbeat();
     stopHeartbeat();
     throw err;
   }

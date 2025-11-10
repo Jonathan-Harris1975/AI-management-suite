@@ -1,10 +1,10 @@
-// services/tts/utils/ttsProcessor.js
+// services/utils/ttsProcessor.js
 // ============================================================
 // 🔊 Amazon Polly TTS Processor — UK "Brian" Voice Edition (Fixed)
 // ============================================================
 // - Uses AWS Polly Neural TTS
 // - Reads text from raw-text/<sid>/chunk-*.txt
-// - Produces MP3s in podcast-chunks/<sid>/tts/
+// - Produces MP3s in podcast-chunks/<sid>/
 // - Includes per-chunk timeout, heartbeat, and detailed logs
 // ============================================================
 
