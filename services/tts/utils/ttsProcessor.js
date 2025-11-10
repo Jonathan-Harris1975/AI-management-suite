@@ -25,7 +25,7 @@ const TEXT_BUCKET_ALIAS  = "rawtext";
 const AUDIO_BUCKET_ALIAS = "raw";
 
 const CHUNK_TIMEOUT_MS = 45_000;          // fail fast per chunk
-const CONCURRENCY      = Number(process.env.TTS_CONCURRENCY || 2);
+const CONCURRENCY      = Number(process.env.TTS_CONCURRENCY || );
 
 function assertEnv() {
   if (!API_KEY) throw new Error("GEMINI_API_KEY is missing");
