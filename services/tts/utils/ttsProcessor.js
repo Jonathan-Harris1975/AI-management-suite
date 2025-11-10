@@ -6,12 +6,12 @@
 // ✅ Features
 //  • Reads text chunks directly from R2 public URLs
 //  • Uses Amazon Polly neural voice (UK Brian by default)
-//  • Logs detailed success/failure per chunk
-//  • Returns summary for orchestrator
+//  • Detailed logging (fetch, Polly, error stack, summary)
+//  • Safe heartbeat loop
 // ============================================================
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
-import { info, error, warn } from "#logger.js";
+import { info, error, warn, debug } from "#logger.js";
 import { startHeartbeat, stopHeartbeat } from "../../shared/utils/heartbeat.js";
 
 // ------------------------------------------------------------
@@ -37,7 +37,7 @@ const polly = new PollyClient({
 // ------------------------------------------------------------
 async function fetchChunkText(url) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to fetch chunk: ${url} (${res.status})`);
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} when fetching ${url}`);
   return await res.text();
 }
 
@@ -45,9 +45,21 @@ async function fetchChunkText(url) {
 // 🔊 Process a single chunk with Polly
 // ------------------------------------------------------------
 async function processChunk({ sessionId, index, url }) {
+  const logContext = { sessionId, index, url };
   try {
-    const text = await fetchChunkText(url);
-    if (!text || !text.trim()) throw new Error("Empty chunk text");
+    info(logContext, `🔍 Fetching chunk text from URL...`);
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ${res.statusText} when fetching ${url}`);
+    }
+
+    const text = await res.text();
+    if (!text || !text.trim()) {
+      throw new Error(`Empty text content returned from ${url}`);
+    }
+
+    debug({ ...logContext, length: text.length }, `📜 Chunk text fetched successfully`);
 
     const synthCmd = new SynthesizeSpeechCommand({
       OutputFormat: "mp3",
@@ -57,13 +69,21 @@ async function processChunk({ sessionId, index, url }) {
     });
 
     const response = await polly.send(synthCmd);
-    const audioBuffer = await response.AudioStream.transformToByteArray();
 
-    info({ sessionId, index }, `✅ TTS Chunk ${index} succeeded`);
-    return { index, success: true, size: audioBuffer.length };
+    if (!response.AudioStream) {
+      throw new Error("Polly did not return an AudioStream");
+    }
+
+    const audioBuffer = await response.AudioStream.transformToByteArray();
+    info({ ...logContext, size: audioBuffer.length }, `✅ TTS Chunk ${index} synthesized`);
+
+    return { index, success: true, size: audioBuffer.length, url };
   } catch (err) {
-    error({ sessionId, index, message: err.message }, "❌ TTS Chunk Failure");
-    return { index, success: false, error: err.message };
+    error(
+      { ...logContext, message: err.message, stack: err.stack?.split("\n").slice(0, 3) },
+      "❌ TTS Chunk Failure"
+    );
+    return { index, success: false, error: err.message, url };
   }
 }
 
@@ -91,9 +111,10 @@ export async function ttsProcessor({ sessionId, chunks }) {
 
     const successCount = results.filter(r => r.success).length;
     const failCount = results.filter(r => !r.success).length;
+    const failedUrls = results.filter(r => !r.success).map(r => r.url);
 
     info(
-      { sessionId: sid, successCount, failCount, total: results.length },
+      { sessionId: sid, successCount, failCount, total: results.length, failedUrls },
       "🎧 TTS Summary"
     );
 
