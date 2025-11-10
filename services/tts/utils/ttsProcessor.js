@@ -54,6 +54,7 @@ export async function processTTS({ sessionId, chunks }) {
   for (const chunk of chunks) {
     try {
       const res = await fetch(chunk.url);
+      if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
       const text = await res.text();
       totalBytes += Buffer.byteLength(text, "utf8");
       const out = await synthesizeChunk(sessionId, text, chunk.index);
@@ -74,4 +75,6 @@ export async function processTTS({ sessionId, chunks }) {
   stopHeartbeat(`ttsProcessor:${sessionId}`);
 }
 
-export default ttsProcessor;
+// ✅ Allow both default and named import
+export const ttsProcessor = processTTS;
+export default processTTS;
