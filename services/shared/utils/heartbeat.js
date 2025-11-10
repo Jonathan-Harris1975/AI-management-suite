@@ -9,11 +9,21 @@ let interval = null;
 /**
  * Starts a heartbeat log every N seconds to prevent idle timeout.
  * @param {string} label - Identifier for logs, e.g. "TTS Pipeline"
- * @param {number} ms - Interval in milliseconds (default: 30s)
+ * @param {number} intervalSeconds - Interval in SECONDS (default: 120s / 2 minutes)
  */
-export function startHeartbeat(label = "Heartbeat", ms = 120000) {
+export function startHeartbeat(label = "Heartbeat", intervalSeconds = 120) {
   stopHeartbeat();
-  info({ label }, `💚 Starting heartbeat for ${label}`);
+  
+  // Safety check: minimum 5 seconds to prevent runaway logs
+  const safeInterval = Math.max(intervalSeconds, 5);
+  const ms = safeInterval * 1000;
+  
+  if (intervalSeconds < 5) {
+    info({ label }, `⚠️ Heartbeat interval too low (${intervalSeconds}s), using minimum of 5s`);
+  }
+  
+  info({ label }, `💚 Starting heartbeat for ${label} (every ${safeInterval}s)`);
+  
   interval = setInterval(() => {
     info({ label, time: new Date().toISOString() }, "♥️ Heartbeat tick");
   }, ms);
