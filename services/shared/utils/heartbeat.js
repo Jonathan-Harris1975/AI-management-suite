@@ -11,11 +11,11 @@ let interval = null;
  * @param {string} label - Identifier for logs, e.g. "TTS Pipeline"
  * @param {number} ms - Interval in milliseconds (default: 30s)
  */
-export function startHeartbeat(label = "Heartbeat", ms = 30000) {
+export function startHeartbeat(label = "Heartbeat", ms = 90000) {
   stopHeartbeat();
   info({ label }, `💚 Starting heartbeat for ${label}`);
   interval = setInterval(() => {
-    info({ label, time: new Date().toISOString() }, "💓 Heartbeat tick");
+    info({ label, time: new Date().toISOString() }, "♥️ Heartbeat tick");
   }, ms);
 }
 
