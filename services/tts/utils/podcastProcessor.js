@@ -26,7 +26,6 @@ const masterFilters = [
 ];
 
 export async function podcastProcessor(sessionId, mainAudioPath) {
-  const sessionId = arguments[0];
   startHeartbeat(`podcastProcessor:${sessionId}`, 25000);
   ensureTmpDir();
   log.info({ sessionId }, "🎵 Starting podcastProcessor");
