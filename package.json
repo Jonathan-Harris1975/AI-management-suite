@@ -1,6 +1,6 @@
 {
   "name": "AI-management-suite",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "type": "module",
   "main": "server.js",
 
@@ -14,6 +14,7 @@
   },
 
   "dependencies": {
+    "@aws-sdk/client-polly": "^3.663.0",
     "@aws-sdk/client-s3": "^3.663.0",
     "@google/generative-ai": "0.10.0",
     "cors": "^2.8.5",
