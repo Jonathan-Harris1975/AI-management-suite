@@ -1,9 +1,8 @@
 // services/tts/utils/ttsProcessor.js
 // ============================================================
-// 🔊 Gemini 2.5 Pro TTS Processor (streamGenerateContent)
-// - Uses official @google/generative-ai client
-// - Mirrors Google Studio syntax (generationConfig.speech_config)
-// - Streams MP3 output and uploads to R2
+// 🔊 Gemini 2.5 Pro Preview TTS Processor (Studio-compatible)
+// - Uses @google/generative-ai SDK
+// - Reads text from raw-text/<sid>/, uploads MP3 to podcast-chunks/<sid>/tts/
 // ============================================================
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -13,81 +12,75 @@ import { listKeys, uploadBuffer } from "#shared/r2-client.js";
 
 const API_KEY = process.env.GEMINI_API_KEY;
 const MODEL_ID = process.env.GEMINI_TTS_MODEL || "gemini-2.5-pro-preview-tts";
-
 const VOICE = process.env.GEMINI_TTS_VOICE || "Charon";
 const TEXT_BUCKET = "rawtext";
 const AUDIO_BUCKET = "raw";
+
+const RAW_TEXT_BASE = (process.env.R2_PUBLIC_BASE_URL_RAW_TEXT || "").replace(/\/$/, "");
+const AUDIO_BASE = (process.env.R2_PUBLIC_BASE_URL_PODCAST || process.env.R2_PUBLIC_BASE_URL_RAW || "").replace(/\/$/, "");
 
 if (!API_KEY) throw new Error("❌ Missing GEMINI_API_KEY for TTS");
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 const model = genAI.getGenerativeModel({ model: MODEL_ID });
 
-// R2 base URLs
-const RAW_BASE = (process.env.R2_PUBLIC_BASE_URL_RAW_TEXT || "").replace(/\/$/, "");
-const AUDIO_BASE = (process.env.R2_PUBLIC_BASE_URL_PODCAST || process.env.R2_PUBLIC_BASE_URL_RAW || "").replace(/\/$/, "");
+// simple text cleaner
+const clean = (txt) =>
+  String(txt || "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
 export async function ttsProcessor(sessionId) {
   const sid = sessionId || `TT-${Date.now()}`;
-  info({ sessionId: sid }, "🎙 Starting full TTS orchestration pipeline");
+  info({ sessionId: sid }, "🎙 TTS processor start");
 
   try {
-    // 1️⃣ Fetch list of text chunks from R2
     const textKeys = await listKeys(TEXT_BUCKET, `${sid}/`);
     if (!textKeys?.length)
       throw new Error(`No text chunks found in r2://${TEXT_BUCKET}/${sid}/`);
 
-    const limit = pLimit(1);
+    const limiter = pLimit(1);
     const audioUrls = [];
 
     await Promise.all(
-      textKeys.map((key, idx) =>
-        limit(async () => {
-          const textUrl = `${RAW_BASE}/${key}`;
+      textKeys.map((key, i) =>
+        limiter(async () => {
+          const textUrl = `${RAW_TEXT_BASE}/${key}`;
           const res = await fetch(textUrl);
-          if (!res.ok) throw new Error(`Failed to fetch text chunk: ${textUrl}`);
-          const cleaned = (await res.text()).replace(/<[^>]*>/g, "").trim();
+          if (!res.ok) throw new Error(`Failed to fetch ${textUrl}`);
+          const input = clean(await res.text());
 
-          // 2️⃣ Build Gemini TTS config
+          // Studio-spec config
           const generationConfig = {
             responseModalities: ["AUDIO"],
             temperature: 1,
             speech_config: {
               voice_config: {
-                prebuilt_voice_config: { voice_name: VOICE },
+                prebuilt_voice_config: {
+                  voice_name: VOICE,
+                },
               },
             },
           };
 
-          // 3️⃣ Call the API
           const result = await model.generateContent({
-            contents: [
-              {
-                role: "user",
-                parts: [{ text: cleaned }],
-              },
-            ],
+            contents: [{ role: "user", parts: [{ text: input }] }],
             generationConfig,
           });
 
-          const audioPart = result.response?.candidates?.[0]?.content?.parts?.find(
-            (p) => p.inlineData?.mimeType?.includes("audio")
-          );
-
+          const parts = result?.response?.candidates?.[0]?.content?.parts || [];
+          const audioPart = parts.find((p) => p.inlineData?.mimeType?.startsWith("audio/"));
           if (!audioPart?.inlineData?.data)
-            throw new Error("No audio data returned by Gemini TTS");
+            throw new Error("Gemini returned no audio data");
 
-          const audioBuf = Buffer.from(audioPart.inlineData.data, "base64");
-          const outKey = `${sid}/tts/chunk_${idx + 1}.mp3`;
-          await uploadBuffer(AUDIO_BUCKET, outKey, audioBuf, "audio/mpeg");
+          const buf = Buffer.from(audioPart.inlineData.data, "base64");
+          const outKey = `${sid}/tts/chunk_${i + 1}.mp3`;
+          await uploadBuffer(AUDIO_BUCKET, outKey, buf, "audio/mpeg");
 
-          const publicUrl = `${AUDIO_BASE}/${outKey}`;
-          audioUrls.push(publicUrl);
-
-          info(
-            { sessionId: sid, index: idx + 1, bytes: audioBuf.length },
-            "tts.chunk.done"
-          );
+          const url = `${AUDIO_BASE}/${outKey}`;
+          audioUrls.push(url);
+          info({ sessionId: sid, index: i + 1, bytes: buf.length }, "tts.chunk.done");
         })
       )
     );
@@ -95,7 +88,7 @@ export async function ttsProcessor(sessionId) {
     info({ sessionId: sid, chunks: audioUrls.length }, "✅ TTS chunks generated");
     return audioUrls;
   } catch (err) {
-    error({ sessionId: sessionId, error: err.message }, "💥 TTS orchestration failed");
+    error({ sessionId: sid, error: err.message }, "💥 TTS processor failed");
     throw err;
   }
 }
