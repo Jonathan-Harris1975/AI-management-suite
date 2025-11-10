@@ -4,7 +4,22 @@
 
 import { info } from "#logger.js";
 
-let interval = null;
+// Use a global symbol to ensure only ONE heartbeat across all imports
+const HEARTBEAT_KEY = Symbol.for('__app_heartbeat_interval__');
+
+/**
+ * Gets the global interval reference
+ */
+function getInterval() {
+  return globalThis[HEARTBEAT_KEY];
+}
+
+/**
+ * Sets the global interval reference
+ */
+function setInterval(val) {
+  globalThis[HEARTBEAT_KEY] = val;
+}
 
 /**
  * Starts a heartbeat log every N seconds to prevent idle timeout.
@@ -12,6 +27,7 @@ let interval = null;
  * @param {number} intervalSeconds - Interval in SECONDS (default: 120s / 2 minutes)
  */
 export function startHeartbeat(label = "Heartbeat", intervalSeconds = 120) {
+  // Stop any existing heartbeat first
   stopHeartbeat();
   
   // Safety check: minimum 5 seconds to prevent runaway logs
@@ -22,20 +38,29 @@ export function startHeartbeat(label = "Heartbeat", intervalSeconds = 120) {
     info({ label }, `⚠️ Heartbeat interval too low (${intervalSeconds}s), using minimum of 5s`);
   }
   
-  info({ label }, `💚 Starting heartbeat for ${label} (every ${safeInterval}s)`);
+  info({ label }, `💚 Starting heartbeat for ${label} (every ${safeInterval}s, ${ms}ms)`);
   
-  interval = setInterval(() => {
+  // Create the interval
+  const intervalId = global.setInterval(() => {
     info({ label, time: new Date().toISOString() }, "♥️ Heartbeat tick");
   }, ms);
+  
+  // Store it globally
+  setInterval(intervalId);
+  
+  // Log confirmation with interval ID
+  info({ label, intervalId }, `✅ Heartbeat interval created with ID: ${intervalId}`);
 }
 
 /**
  * Stops any active heartbeat interval.
  */
 export function stopHeartbeat() {
-  if (interval) {
-    clearInterval(interval);
-    interval = null;
+  const intervalId = getInterval();
+  if (intervalId) {
+    info({}, `🛑 Stopping heartbeat (interval ID: ${intervalId})`);
+    global.clearInterval(intervalId);
+    setInterval(null);
   }
 }
 
