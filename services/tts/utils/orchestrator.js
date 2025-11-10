@@ -4,7 +4,7 @@
 //
 // ✅ Uses env vars only (no hardcoded URLs)
 // ✅ Works with R2 public URLs for chunk fetches
-// ✅ Resolves heartbeat correctly whether on Render or locally
+// ✅ Resolves heartbeat correctly across all deployments
 // ============================================================
 
 import { info, error } from "#logger.js";
@@ -13,15 +13,20 @@ import { ttsProcessor } from "./ttsProcessor.js";
 import { mergeProcessor } from "./mergeProcessor.js";
 
 // ------------------------------------------------------------
-// 🫀 Heartbeat Import (robust cross-env resolution)
+// 🫀 Heartbeat Import (multi-path safe)
 // ------------------------------------------------------------
 let startHeartbeat;
 try {
-  // Preferred path when aliases are properly set up
+  // Preferred: use configured alias
   startHeartbeat = (await import("#shared/utils/heartbeat.js")).default;
 } catch {
-  // Fallback for Render or zipped deploys
-  startHeartbeat = (await import("../../../shared/utils/heartbeat.js")).default;
+  try {
+    // Fallback for production container (Render, Shiper)
+    startHeartbeat = (await import("../../shared/utils/heartbeat.js")).default;
+  } catch {
+    // Final fallback for zipped or relative deploys
+    startHeartbeat = (await import("../../../shared/utils/heartbeat.js")).default;
+  }
 }
 
 // ------------------------------------------------------------
