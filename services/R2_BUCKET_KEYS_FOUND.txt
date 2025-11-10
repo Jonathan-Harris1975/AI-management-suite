@@ -1,8 +1,0 @@
-Bucket keys used across repo:
-merged
-meta
-podcast
-raw
-rawtext
-transcript
-transcripts
