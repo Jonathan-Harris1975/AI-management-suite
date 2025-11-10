@@ -73,7 +73,7 @@ export const R2_BUCKETS = {
   // ✅ RSS aliases
   rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
   podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS || R2_BUCKET_RSS_FEEDS || "rss-feeds",
-  "rss-feeds": R2_BUCKET_RSS_FEEDS || "rss-feeds",
+  rssfeeds: R2_BUCKET_RSS_FEEDS || "rss-feeds",
 
   // ✅ Transcript aliases
   transcripts: R2_BUCKET_TRANSCRIPTS,
