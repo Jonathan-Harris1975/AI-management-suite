@@ -8,8 +8,7 @@ import { mergeProcessor } from "./utils/mergeProcessor.js";
 import { editingProcessor } from "./utils/editingProcessor.js";
 import { podcastProcessor } from "./utils/podcastProcessor.js";
 import { putObject } from "#shared/r2-client.js";
-import { startHeartbeat, stopHeartbeat } from "#shared/utils/heartbeat.js";
-
+import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
 // Normalize ID if called via object { sessionId: "..." }
 const normalize = (s) => (typeof s === "object" && s.sessionId ? s.sessionId : s);
 
