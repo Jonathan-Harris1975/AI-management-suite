@@ -1,55 +1,72 @@
 // services/tts/utils/ttsProcessor.js
 // ============================================================
 // 🔊 Gemini 2.5 Flash TTS Processor — fixed request schema
+// - Pulls text chunks from R2 (raw-text/<sessionId>/...)
+// - Calls Gemini TTS (root-level audioConfig; inlineData base64)
+// - Uploads MP3 chunks to R2 (podcast-chunks/<sessionId>/tts/...)
+// - Returns PUBLIC HTTPS URLs for mergeProcessor
 // ============================================================
 
-import fs from "fs";
-import path from "path";
 import fetch from "node-fetch";
 import pLimit from "p-limit";
 import { info, error } from "#logger.js";
-import { uploadBuffer, listKeys } from "#shared/r2-client.js";
+import { listKeys, uploadBuffer } from "#shared/r2-client.js";
 
-const TMP_DIR = "/tmp/podcast_tts";
-const TTS_API_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent";
 const API_KEY = process.env.GEMINI_API_KEY;
-const VOICE = process.env.GEMINI_TTS_VOICE || "Charon";
-const LANGUAGE = process.env.GEMINI_TTS_LANGUAGE || "en-GB";
+const TTS_MODEL =
+  process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts";
+const TTS_API_URL =
+  `https://generativelanguage.googleapis.com/v1beta/models/${TTS_MODEL}:generateContent`;
 
-if (!API_KEY) throw new Error("❌ Missing GEMINI_API_KEY for TTS");
+const VOICE   = process.env.GEMINI_TTS_VOICE    || "Charon";
+const LANG    = process.env.GEMINI_TTS_LANGUAGE || "en-GB";
+const CHUNK_BUCKET = "raw";   // audio output
+const TEXT_BUCKET  = "rawtext";         // text input
+
+// Prefer podcast public base for audio; fall back to RAW if not set
+function baseUrlForAudio() {
+  const a = (process.env.R2_PUBLIC_BASE_URL_PODCAST || "").trim();
+  const b = (process.env.R2_PUBLIC_BASE_URL_RAW     || "").trim();
+  return (a || b).replace(/\/$/, "");
+}
+function baseUrlForText() {
+  const t = (process.env.R2_PUBLIC_BASE_URL_RAW_TEXT || "").trim();
+  return t.replace(/\/$/, "");
+}
+
+if (!API_KEY) {
+  throw new Error("❌ Missing GEMINI_API_KEY for TTS");
+}
 
 function b64PlainText(s) {
   return Buffer.from(s, "utf8").toString("base64");
 }
 
 export async function ttsProcessor(sessionId) {
-  info({ sessionId }, "🎙 Starting full TTS orchestration pipeline");
-
-  const tmpDir = path.join(TMP_DIR, sessionId);
-  fs.mkdirSync(tmpDir, { recursive: true });
+  const sid = sessionId || `TT-${Date.now()}`;
+  info({ sessionId: sid }, "🎙 Starting full TTS orchestration pipeline");
 
   try {
-    // 1) discover text chunk keys in raw-text/<sessionId>/
-    const textBucket = "rawtext";
-    const textKeys = await listKeys(textBucket, `${sessionId}/`);
-    if (!textKeys?.length) throw new Error("No text chunks found in R2.");
-    info({ sessionId, count: textKeys.length }, "🧩 Retrieved text chunks for TTS");
+    // 1) discover text chunks in raw-text/<sid>/
+    const textKeys = await listKeys(TEXT_BUCKET, `${sid}/`);
+    if (!textKeys?.length) throw new Error(`No text chunks found in r2://${TEXT_BUCKET}/${sid}/`);
 
-    const limit = pLimit(1); // serialize to avoid hitting rate limits
+    const textBase = baseUrlForText();
+    const audioBase = baseUrlForAudio();
+    const limit = pLimit(1); // serialize to keep API happy
     const audioUrls = [];
 
     await Promise.all(
       textKeys.map((key, idx) =>
         limit(async () => {
-          // fetch chunk text
-          const textUrl = `${process.env.R2_PUBLIC_BASE_URL_RAW_TEXT.replace(/\/$/, "")}/${key}`;
+          // GET raw text
+          const textUrl = `${textBase}/${key}`;
           const res = await fetch(textUrl);
           if (!res.ok) throw new Error(`Failed to fetch text chunk: ${textUrl}`);
           const raw = await res.text();
           const cleaned = raw.replace(/<[^>]*>/g, "").trim();
 
-          // 2) correct Gemini TTS request body (inlineData + audioEncoding)
+          // 2) Correct Gemini 2.5 TTS body: root-level audioConfig + inlineData
           const body = {
             contents: [
               {
@@ -64,14 +81,9 @@ export async function ttsProcessor(sessionId) {
                 ],
               },
             ],
-            generationConfig: {
-              audioConfig: {
-                voiceConfig: {
-                  voiceName: VOICE,
-                  languageCode: LANGUAGE,
-                },
-                audioEncoding: "MP3",
-              },
+            audioConfig: {
+              voiceConfig: { voiceName: VOICE, languageCode: LANG },
+              audioEncoding: "MP3",
             },
           };
 
@@ -82,34 +94,30 @@ export async function ttsProcessor(sessionId) {
           });
 
           if (!resp.ok) {
-            const text = await resp.text().catch(() => "");
-            throw new Error(`TTS API failed: ${resp.status} ${resp.statusText} ${text}`);
+            const detail = await resp.text().catch(() => "");
+            throw new Error(`TTS API failed: ${resp.status} ${resp.statusText} ${detail}`);
           }
 
           const data = await resp.json();
-          const audioBase64 =
-            data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-          if (!audioBase64) throw new Error("No audio data returned by TTS.");
+          const audioB64 = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+          if (!audioB64) throw new Error("No audio data returned by TTS.");
 
-          const audioBuffer = Buffer.from(audioBase64, "base64");
+          const audioBuf = Buffer.from(audioB64, "base64");
+          const outKey = `${sid}/tts/chunk_${idx + 1}.mp3`;
 
-          // 3) upload mp3 chunk to podcast-chunks/<sessionId>/tts/...
-          const audioKey = `${sessionId}/tts/chunk_${idx + 1}.mp3`;
-          await uploadBuffer("raw", audioKey, audioBuffer, "audio/mpeg");
+          await uploadBuffer(CHUNK_BUCKET, outKey, audioBuf, "audio/mpeg");
+          const publicUrl = `${audioBase}/${outKey}`;
+          audioUrls.push(publicUrl);
 
-          // public URL for merge step
-          const publicBase = process.env.R2_PUBLIC_BASE_URL_RAW || process.env.R2_PUBLIC_BASE_URL_PODCAST || "";
-          audioUrls.push(`${publicBase.replace(/\/$/, "")}/${audioKey}`);
-
-          info({ sessionId, index: idx + 1, bytes: audioBuffer.length }, "tts.chunk.done");
+          info({ sessionId: sid, index: idx + 1, bytes: audioBuf.length }, "tts.chunk.done");
         })
       )
     );
 
-    info({ sessionId, chunks: audioUrls.length }, "✅ TTS chunks generated");
+    info({ sessionId: sid, chunks: audioUrls.length }, "✅ TTS chunks generated");
     return audioUrls;
   } catch (err) {
-    error({ sessionId, error: err.message }, "💥 TTS orchestration failed");
+    error({ sessionId: sid, error: err.message }, "💥 TTS orchestration failed");
     throw err;
   }
 }
