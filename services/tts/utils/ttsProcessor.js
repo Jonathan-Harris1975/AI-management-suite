@@ -1,64 +1,128 @@
+// services/tts/utils/ttsProcessor.js
 // ============================================================
-// 🔊 ttsProcessor.js — Robust chunk-level synthesis
+// 🔊 Robust Gemini TTS Processor
+// - Lists text from raw-text/<sid>/chunk-*.txt
+// - Synthesizes with GoogleGenerativeAI (Gemini TTS)
+// - Uploads MP3 to podcast-chunks/<sid>/tts/
+// - Returns array of PUBLIC chunk URLs
+// - Adds per-chunk timeout + defensive logging
 // ============================================================
 
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import pLimit from "p-limit";
 import { info, error } from "#logger.js";
-import { getObject, putObject } from "#shared/r2-client.js";
+import { listKeys, uploadBuffer, buildPublicUrl } from "#shared/r2-client.js";
 import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
-import { textToSpeech } from "#shared/tts-client.js"; // your Gemini or Google wrapper
 
-const BUCKET_RAW = "rawtext";
-const BUCKET_CHUNKS = "raw";
-const CHUNK_TIMEOUT = 45_000; // ms
+const API_KEY   = process.env.GEMINI_API_KEY;
+const MODEL_ID  = process.env.GEMINI_TTS_MODEL || "gemini-2.5-pro-preview-tts";
+const VOICE     = process.env.GEMINI_TTS_VOICE || "Charon";
+
+// Bucket aliases (see r2-client ensureBucketKey mapping)
+// rawtext -> R2_BUCKET_RAW_TEXT (e.g., 'raw-text')
+// raw     -> R2_BUCKET_RAW       (e.g., 'podcast-chunks')
+const TEXT_BUCKET_ALIAS  = "rawtext";
+const AUDIO_BUCKET_ALIAS = "raw";
+
+const CHUNK_TIMEOUT_MS = 45_000;          // fail fast per chunk
+const CONCURRENCY      = Number(process.env.TTS_CONCURRENCY || 2);
+
+function assertEnv() {
+  if (!API_KEY) throw new Error("GEMINI_API_KEY is missing");
+}
+
+function abortableTimeout(ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return { controller, timer };
+}
 
 export async function ttsProcessor(sessionId) {
-  info({ sessionId }, "🎙 TTS processor start");
+  assertEnv();
   startHeartbeat(`ttsProcessor:${sessionId}`, 25_000);
+  info({ sessionId, model: MODEL_ID, voice: VOICE, concurrency: CONCURRENCY }, "🎙 TTS processor start");
 
   try {
-    // pull raw text chunks
+    // 1) Discover raw text chunks for this session
     const prefix = `${sessionId}/`;
-    const rawKeys = await getObject.list(BUCKET_RAW, prefix);
-    if (!rawKeys?.length) throw new Error(`No raw-text found under ${prefix}`);
+    const keys = await listKeys(TEXT_BUCKET_ALIAS, prefix);
+    const textKeys = (keys || [])
+      .filter(k => /chunk-\d+\.txt$/i.test(k))
+      .sort((a, b) => {
+        const ai = parseInt(a.match(/chunk-(\d+)\.txt$/i)[1], 10);
+        const bi = parseInt(b.match(/chunk-(\d+)\.txt$/i)[1], 10);
+        return ai - bi;
+      });
+
+    if (!textKeys.length) {
+      throw new Error(`No text chunks found in ${TEXT_BUCKET_ALIAS}:${prefix}`);
+    }
+    info({ sessionId, count: textKeys.length }, "📝 Text chunks discovered");
+
+    // 2) Init Gemini client
+    const genAI = new GoogleGenerativeAI(API_KEY);
+    // New-style TTS models expose generateContent with audio parts
+    const limit = pLimit(CONCURRENCY);
 
     const outputs = [];
-    let index = 0;
+    let produced = 0;
 
-    for (const key of rawKeys) {
-      index++;
-      const { Body } = await getObject(BUCKET_RAW, key);
-      const text = Body.toString().trim();
-      if (!text) continue;
+    await Promise.all(
+      textKeys.map((key, idx) =>
+        limit(async () => {
+          const i = idx + 1;
+          const { controller, timer } = abortableTimeout(CHUNK_TIMEOUT_MS);
+          try {
+            // Fetch text via signed public URL (no need here — we just use buildPublicUrl + fetch)
+            const url = buildPublicUrl(TEXT_BUCKET_ALIAS, key);
+            const res = await fetch(url);
+            const text = (await res.text()).trim();
+            if (!text) throw new Error("Empty text chunk");
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), CHUNK_TIMEOUT);
+            const model = genAI.getGenerativeModel({ model: MODEL_ID, generationConfig: { voiceConfig: { voiceName: VOICE }}});
+            const result = await model.generateContent(
+              [{ text }],
+              { signal: controller.signal }
+            );
 
-      try {
-        const audio = await textToSpeech(text, { signal: controller.signal });
-        clearTimeout(timer);
+            clearTimeout(timer);
 
-        if (!audio?.length) throw new Error("Empty audio buffer");
-        const chunkKey = `${sessionId}/chunk-${index}.mp3`;
+            // Parse audio
+            const parts = result?.response?.candidates?.[0]?.content?.parts || result?.response?.content?.parts || [];
+            const audioPart = parts.find(p => p.inlineData?.mimeType?.startsWith("audio/"));
+            const b64 = audioPart?.inlineData?.data;
+            if (!b64) throw new Error("Gemini returned no audio data");
 
-        await putObject(BUCKET_CHUNKS, chunkKey, audio, "audio/mpeg");
-        outputs.push(`https://podcast-chunks.jonathan-harris.online/${encodeURIComponent(chunkKey)}`);
+            const buf = Buffer.from(b64, "base64");
+            const outKey = `${sessionId}/tts/chunk_${i}.mp3`;
+            await uploadBuffer(AUDIO_BUCKET_ALIAS, outKey, buf, "audio/mpeg");
 
-        info({ sessionId, index, bytes: audio.length, preview: text.slice(0, 80) + "..." }, "tts.chunk");
-      } catch (e) {
-        clearTimeout(timer);
-        error({ sessionId, index, err: e.message }, "tts.chunk.failed");
-        continue;
-      }
-    }
+            // Public URL for chunks should come from the RAW (podcast-chunks) public base
+            const publicUrl = buildPublicUrl(AUDIO_BUCKET_ALIAS, outKey);
+            outputs.push(publicUrl);
+            produced += 1;
+
+            info({ sessionId, index: i, bytes: buf.length }, "tts.chunk.done");
+          } catch (e) {
+            clearTimeout(timer);
+            error({ sessionId, index: i, error: e?.message || String(e) }, "tts.chunk.failed");
+          }
+        })
+      )
+    );
 
     stopHeartbeat();
 
-    if (!outputs.length) throw new Error("No chunks produced");
-    info({ sessionId, count: outputs.length }, "🎧 TTS generation complete");
+    if (!produced) {
+      throw new Error("No TTS chunks were produced");
+    }
+    info({ sessionId, chunks: produced }, "✅ TTS chunks generated");
     return outputs;
   } catch (err) {
-    error({ sessionId, error: err.stack || err.message }, "ttsProcessor.failed");
+    error({ sessionId, error: err?.stack || err?.message }, "💥 TTS processor failed");
     stopHeartbeat();
     throw err;
   }
-      }
+}
+
+export default ttsProcessor;
