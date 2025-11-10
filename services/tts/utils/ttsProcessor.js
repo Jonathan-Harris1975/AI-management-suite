@@ -70,7 +70,7 @@ export async function ttsProcessor(sessionId) {
             for await (const chunk of response.AudioStream) chunks.push(chunk);
             const buf = Buffer.concat(chunks);
 
-            const outKey = `${sessionId}/tts/chunk_${i}.mp3`;
+            const outKey = `${sessionId}/chunk_${i}.mp3`;
             await uploadBuffer("raw", outKey, buf, "audio/mpeg");
             const publicUrl = buildPublicUrl("raw", outKey);
             outputs.push(publicUrl);

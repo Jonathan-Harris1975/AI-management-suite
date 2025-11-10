@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
 import { log } from "#logger.js";
+import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 
 // ------------------------------------------------------------
@@ -36,6 +37,8 @@ const filters = [
 // 🧩 Main Processor
 // ------------------------------------------------------------
 export async function editingProcessor(sessionId, inputPath) {
+  const sessionId = arguments[0];
+  startHeartbeat(`editingProcessor:${sessionId}`, 25000);
   ensureTmpDir();
   log.info({ sessionId }, "🎚️ Starting editingProcessor");
 
@@ -57,6 +60,7 @@ export async function editingProcessor(sessionId, inputPath) {
     return editedFile;
   } catch (err) {
     log.error({ sessionId, error: err.message }, "💥 editingProcessor failed");
+    stopHeartbeat();
     throw err;
   }
 }

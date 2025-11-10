@@ -11,6 +11,7 @@ import path from "path";
 import { execSync } from "child_process";
 import fetch from "node-fetch";
 import { info, error } from "#logger.js";
+import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 
 const TMP_DIR = "/tmp/podcast_merge";
@@ -21,6 +22,7 @@ function ensureTmpDir() {
 }
 
 export async function mergeProcessor(sessionId, chunkUrls = []) {
+  startHeartbeat(`mergeProcessor:${sessionId}`, 25000);
   const sid = sessionId || `TT-${Date.now()}`;
   ensureTmpDir();
   info({ sessionId: sid }, "🎧 Starting mergeProcessor");
@@ -56,9 +58,11 @@ export async function mergeProcessor(sessionId, chunkUrls = []) {
     await uploadBuffer(MERGED_BUCKET, mergedKey, mergedBuf, "audio/mpeg");
 
     info({ sessionId: sid, key: mergedKey, bytes: mergedBuf.length }, "💾 Uploaded merged MP3 to R2");
+    stopHeartbeat();
     return { key: mergedKey, localPath: outPath };
   } catch (err) {
     error({ sessionId: sid, error: err.message }, "💥 mergeProcessor failed");
+    stopHeartbeat();
     throw err;
   }
 }
