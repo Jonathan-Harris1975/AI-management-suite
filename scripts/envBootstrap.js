@@ -1,13 +1,12 @@
-// scripts/envBootstrap.js
 // ============================================================
-// 🌍 AI Podcast Suite — Environment Bootstrap (Final Version)
+// 🌍 AI Podcast Suite — Environment Bootstrap (Shiper-Aligned Final)
 // ============================================================
 //
-// ✅ Features:
+// Features:
 //   • Logs full system snapshot
-//   • Validates environment variables
-//   • Warns for low resources
-//   • Runs standalone — no missing imports
+//   • Validates all Shiper environment variables
+//   • Warns for low system resources
+//   • Compatible with R2, AWS Polly, and OpenRouter setup
 // ============================================================
 
 import os from "os";
@@ -15,7 +14,7 @@ import process from "process";
 import { log } from "#logger.js";
 
 // ------------------------------------------------------------------
-// 🧱 Inline validateEnv() to avoid external dependency errors
+// 🧱 Inline validateEnv()
 // ------------------------------------------------------------------
 function validateEnv(requiredKeys = []) {
   const missing = [];
@@ -62,29 +61,54 @@ if (cpus < 2) log.warn({ cpus }, "Low CPU core count (<2 cores)");
 log.info({}, "🚀 Beginning environment validation...");
 
 // ------------------------------------------------------------------
-// ✅ Validate all required environment variables
+// ✅ Validate all Shiper environment variables
 // ------------------------------------------------------------------
 validateEnv([
-  "NODE_ENV", "LOG_LEVEL", "DISABLE_RSS", "DISABLE_PODCAST",
-  "DISABLE_REWRITE", "HEARTBEAT_ENABLE", "FEED_URL",
-  "MIN_INTRO_DURATION", "MIN_OUTRO_DURATION",
- "OPENROUTER_API_KEY_CHATGPT", "OPENROUTER_API_KEY_GOOGLE",
+  // Core system
+  "NODE_ENV", "LOG_LEVEL", "DISABLE_RSS", "DISABLE_PODCAST", "DISABLE_REWRITE",
+  "HEARTBEAT_ENABLE", "FEED_URL", "MIN_INTRO_DURATION", "MIN_OUTRO_DURATION",
+
+  // Feed and performance tuning
+  "FEED_FRESHNESS_HOURS", "FEED_RETENTION_DAYS",
+  "MAX_FEEDS_PER_RUN", "MAX_ITEMS_PER_FEED",
+  "MAX_RSS_FEEDS_PER_RUN", "MAX_SUMMARY_CHARS",
+  "MAX_TOTAL_ITEMS", "MAX_URL_FEEDS_PER_RUN", "MIN_SUMMARY_CHARS",
+
+  // AI model keys (OpenRouter)
+  "OPENROUTER_API_KEY_CHATGPT", "OPENROUTER_API_KEY_GOOGLE",
   "OPENROUTER_API_KEY_DEEPSEEK", "OPENROUTER_API_KEY_META",
   "OPENROUTER_API_KEY_ART", "OPENROUTER_API_KEY_ANTHROPIC",
   "OPENROUTER_CHATGPT", "OPENROUTER_GOOGLE", "OPENROUTER_DEEPSEEK",
   "OPENROUTER_META", "OPENROUTER_ART", "OPENROUTER_ANTHROPIC",
-  "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
-  "R2_ENDPOINT", "R2_REGION",
-  "R2_BUCKET_PODCAST", "R2_BUCKET_RAW", "R2_BUCKET_RAW_TEXT", "R2_BUCKET_META",
-  "R2_BUCKET_MERGED", "R2_BUCKET_ART", "R2_BUCKET_PODCAST_RSS_FEEDS",
-  "R2_BUCKET_RSS_FEEDS", "R2_BUCKET_TRANSCRIPTS",
-  "R2_PUBLIC_BASE_URL_PODCAST", "R2_PUBLIC_BASE_URL_RAW",
-  "R2_PUBLIC_BASE_URL_RAW_TEXT", "R2_PUBLIC_BASE_URL_META",
-  "R2_PUBLIC_BASE_URL_MERGE", "R2_PUBLIC_BASE_URL_ART",
-  "R2_PUBLIC_BASE_URL_PODCAST_RSS", "R2_PUBLIC_BASE_URL_RSS",
-  "R2_PUBLIC_BASE_URL_TRANSCRIPT", "R2_PUBLIC_BASE_URL_CHUNKS",
-  "SHORTIO_API_KEY", "SHORTIO_DOMAIN", "RAPIDAPI_KEY", "RAPIDAPI_HOST",
-  "RSS_FEED_TITLE", "RSS_FEED_DESCRIPTION"
+
+  // R2 credentials
+  "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_ENDPOINT", "R2_REGION",
+
+  // R2 buckets
+  "R2_BUCKET_PODCAST", "R2_BUCKET_RAW_TEXT", "R2_BUCKET_META",
+  "R2_BUCKET_MERGED", "R2_BUCKET_ART", "R2_BUCKET_RSS_FEEDS",
+  "R2_BUCKET_PODCAST_RSS_FEEDS", "R2_BUCKET_TRANSCRIPTS",
+  "R2_BUCKET_CHUNKS",
+
+  // R2 public URLs
+  "R2_PUBLIC_BASE_URL_PODCAST", "R2_PUBLIC_BASE_URL_RAW_TEXT",
+  "R2_PUBLIC_BASE_URL_META", "R2_PUBLIC_BASE_URL_MERGE",
+  "R2_PUBLIC_BASE_URL_ART", "R2_PUBLIC_BASE_URL_RSS",
+  "R2_PUBLIC_BASE_URL_PODCAST_RSS", "R2_PUBLIC_BASE_URL_TRANSCRIPT",
+  "R2_PUBLIC_BASE_URL_CHUNKS",
+
+  // AWS Polly (TTS)
+  "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "POLLY_VOICE_ID",
+
+  // Third-party API keys
+  "RAPIDAPI_KEY", "RAPIDAPI_HOST",
+  "SHORTIO_API_KEY", "SHORTIO_DOMAIN",
+
+  // Podcast Intro/Outro
+  "PODCAST_INTRO_URL", "PODCAST_OUTRO_URL",
+
+  // RSS feed info
+  "RSS_FEED_TITLE", "RSS_FEED_DESCRIPTION",
 ]);
 
 // ------------------------------------------------------------------
