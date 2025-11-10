@@ -1,68 +1,87 @@
+// services/tts/utils/orchestrator.js
 // ============================================================
-// 🔊 TTS Orchestrator — Full Audio Generation Pipeline
-// 1) Generate TTS chunks -> 2) Merge -> 3) Editing -> 4) Mixdown
-// -> 5) Upload final MP3 to R2
+// 🎙 AI Podcast Suite – TTS Orchestrator (Amazon Polly Edition)
+// ============================================================
+//
+// ✅ Features
+//  • Works with flat R2 layout (no nested folders)
+//  • Builds public chunk URLs automatically
+//  • Logs model + region info
+//  • Keeps heartbeat alive for long processes
+//  • Provides detailed success/error summaries
 // ============================================================
 
-import { info, error } from "#logger.js";
+import { info, error, warn } from "#logger.js";
+import { startHeartbeat, stopHeartbeat } from "#shared/utils/heartbeat.js";
+import { putJson } from "#shared/r2-client.js";
 import { ttsProcessor } from "./ttsProcessor.js";
-import { mergeProcessor } from "./mergeProcessor.js";
-import { editingProcessor } from "./editingProcessor.js";
-import { podcastProcessor } from "./podcastProcessor.js";
-import { putObject } from "#shared/r2-client.js";
 
-const FINAL_BUCKET = "podcast"; // R2 bucket for final episodes
+// ------------------------------------------------------------
+// 🌍 Constants & Helpers
+// ------------------------------------------------------------
+const RAWTEXT_BASE =
+  process.env.R2_PUBLIC_BASE_URL_RAW_TEXT ||
+  "https://pub-7a098297d4ef4011a01077c72929753c.r2.dev";
 
-// Normalize ID if called via object { sessionId: "..." }
-const normalize = (s) => (typeof s === "object" && s?.sessionId ? s.sessionId : s);
+const DEFAULT_VOICE = process.env.POLLY_VOICE_ID || "Brian";
+const AWS_REGION = process.env.AWS_REGION || "eu-west-2";
 
-/**
- * Orchestrates the entire TTS pipeline for a session.
- * Returns: { ok: true, sessionId, file }
- */
-export async function orchestrateTTS(session) {
-  const sessionId = normalize(session);
+// ------------------------------------------------------------
+// 🧠 Main Orchestrator
+// ------------------------------------------------------------
+export async function orchestrateTTS(sessionId) {
+  const sid = sessionId || `TT-${Date.now()}`;
+  info({ service: "ai-podcast-suite", sessionId: sid }, "🎙 TTS Processor Start");
 
-  const t0 = Date.now();
-  info({ sessionId }, "🎬 Orchestration begin");
-
+  // Start heartbeat
+  const hb = startHeartbeat(`ttsProcessor:${sid}`);
   try {
-    // 1) Generate TTS chunks (returns array of PUBLIC URLs)
-    const t1 = Date.now();
-    const chunkUrls = await ttsProcessor(sessionId);
-    if (!chunkUrls?.length) {
-      throw new Error("No TTS chunks were produced. Check raw-text inputs and TTS credentials.");
+    info(
+      { sessionId: sid, model: "Amazon Polly", voice: DEFAULT_VOICE, region: AWS_REGION },
+      "🧩 Using Amazon Polly (Neural) configuration"
+    );
+
+    // Build flat URL list for text chunks
+    // Example: https://pub-xxx.r2.dev/TT-2025-11-10/chunk-001.txt
+    const chunkUrls = [];
+    for (let i = 1; i <= 50; i++) {
+      const index = String(i).padStart(3, "0");
+      const url = `${RAWTEXT_BASE}/${sid}/chunk-${index}.txt`;
+      chunkUrls.push({ index, url });
     }
-    info({ sessionId, count: chunkUrls.length, ms: Date.now() - t1 }, "🗣️ TTS complete");
 
-    // 2) Merge those chunks locally with ffmpeg -> upload merged MP3
-    const t2 = Date.now();
-    const merged = await mergeProcessor(sessionId, chunkUrls); // { key, localPath }
-    if (!merged?.key) throw new Error("Merge step failed to produce an R2 key.");
-    info({ sessionId, key: merged.key, ms: Date.now() - t2 }, "🧩 Merge complete");
+    info({ sessionId: sid, count: chunkUrls.length }, "🧩 Built TTS chunk URL list");
 
-    // 3) Optional editing (intros/outros/normalization/effects) -> returns buffer
-    const t3 = Date.now();
-    const editedBuffer = await editingProcessor(sessionId, merged);
-    if (!editedBuffer?.length) throw new Error("Editing step returned no audio data.");
-    info({ sessionId, bytes: editedBuffer.length, ms: Date.now() - t3 }, "✂️ Editing complete");
+    // Run TTS Processor (Amazon Polly)
+    const results = await ttsProcessor({ sessionId: sid, chunks: chunkUrls });
 
-    // 4) Mix with intro/outro and mastering -> returns final Buffer
-    const t4 = Date.now();
-    const finalAudio = await podcastProcessor(sessionId, editedBuffer);
-    if (!finalAudio?.length) throw new Error("Mixdown step returned no audio data.");
-    info({ sessionId, bytes: finalAudio.length, ms: Date.now() - t4 }, "🎚️ Mixdown complete");
+    if (!results || !Array.isArray(results) || results.length === 0) {
+      throw new Error("No TTS chunks were produced or returned.");
+    }
 
-    // 5) Upload final MP3 to R2
-    const key = `${sessionId}.mp3`;
-    await putObject(FINAL_BUCKET, key, finalAudio, "audio/mpeg");
-    info({ sessionId, key, totalMs: Date.now() - t0 }, "💾 Uploaded final MP3 to R2");
+    // Upload TTS summary metadata to R2 (meta bucket)
+    const summary = {
+      sessionId: sid,
+      model: "Amazon Polly (Neural)",
+      voice: DEFAULT_VOICE,
+      region: AWS_REGION,
+      chunks: results.length,
+      createdAt: new Date().toISOString(),
+    };
 
-    return { ok: true, sessionId, file: key };
+    await putJson("meta", `${sid}-tts-summary.json`, summary);
+    info({ sessionId: sid, summary }, "✅ TTS orchestration complete");
+
+    return summary;
   } catch (err) {
-    error({ sessionId, error: err?.stack || err?.message }, "💥 TTS orchestration failed");
+    error({ sessionId: sid, message: err.message, stack: err.stack }, "💥 TTS orchestration failed");
     throw err;
+  } finally {
+    stopHeartbeat(hb);
   }
 }
 
+// ------------------------------------------------------------
+// 🧩 Default Export
+// ------------------------------------------------------------
 export default orchestrateTTS;
