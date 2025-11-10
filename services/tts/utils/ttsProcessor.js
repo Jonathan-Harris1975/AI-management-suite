@@ -31,7 +31,7 @@ export async function ttsProcessor(sessionId) {
 
   try {
     // 1) discover text chunk keys in raw-text/<sessionId>/
-    const textBucket = "raw-text";
+    const textBucket = "rawtext";
     const textKeys = await listKeys(textBucket, `${sessionId}/`);
     if (!textKeys?.length) throw new Error("No text chunks found in R2.");
     info({ sessionId, count: textKeys.length }, "🧩 Retrieved text chunks for TTS");
@@ -95,7 +95,7 @@ export async function ttsProcessor(sessionId) {
 
           // 3) upload mp3 chunk to podcast-chunks/<sessionId>/tts/...
           const audioKey = `${sessionId}/tts/chunk_${idx + 1}.mp3`;
-          await uploadBuffer("podcast-chunks", audioKey, audioBuffer, "audio/mpeg");
+          await uploadBuffer("raw", audioKey, audioBuffer, "audio/mpeg");
 
           // public URL for merge step
           const publicBase = process.env.R2_PUBLIC_BASE_URL_RAW || process.env.R2_PUBLIC_BASE_URL_PODCAST || "";
