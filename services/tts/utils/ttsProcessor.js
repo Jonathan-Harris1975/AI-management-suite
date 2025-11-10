@@ -1,129 +1,94 @@
-// services/tts/utils/ttsProcessor.js
+// services/tts/utils/ttsprocessor.js
 // ============================================================
-// 🎙 TTS Processor — Amazon Polly (URL-based chunk ingestion)
+// 🎛 TTS Orchestrator — R2-Aware Direct Listing Version
 // ============================================================
-//
-// ✅ Features
-//  • Reads text chunks directly from R2 public URLs
-//  • Uses Amazon Polly neural voice (UK Brian by default)
-//  • Detailed logging (fetch, Polly, error stack, summary)
-//  • Safe heartbeat loop
+// Automatically lists available chunk objects in R2_BUCKET_RAW_TEXT
+// and constructs their public URLs via R2_PUBLIC_BASE_URL_RAW_TEXT.
+// Fully logs session, model, and voice setup.
 // ============================================================
 
-import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
-import { info, error, warn, debug } from "#logger.js";
+import { ttsProcessor } from "./ttsProcessor.js";
+import { info, error } from "#logger.js";
 import { startHeartbeat, stopHeartbeat } from "../../shared/utils/heartbeat.js";
+import { s3 } from "#shared/r2-client.js";
+import { ListObjectsV2Command } from "@aws-sdk/client-s3";
+
+const BUCKET = process.env.R2_BUCKET_RAW_TEXT;
+const PUBLIC_BASE = process.env.R2_PUBLIC_BASE_URL_RAW_TEXT;
+const MODEL = "Amazon Polly (Neural)";
+const VOICE = process.env.POLLY_VOICE_ID || "Brian";
 
 // ------------------------------------------------------------
-// 🔧 Configuration
+// Helper: List available chunks in R2
 // ------------------------------------------------------------
-const VOICE_ID = process.env.POLLY_VOICE_ID || "Brian";
-const REGION = process.env.AWS_REGION || "eu-west-2";
-const TTS_CONCURRENCY = Number(process.env.TTS_CONCURRENCY || 2);
+async function listChunksFromR2(sessionId) {
+  info({ sessionId, bucket: BUCKET }, "🔍 Listing chunks in R2...");
 
-// ------------------------------------------------------------
-// 🧠 Initialize Polly
-// ------------------------------------------------------------
-const polly = new PollyClient({
-  region: REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
+  const command = new ListObjectsV2Command({
+    Bucket: BUCKET,
+    Prefix: `${sessionId}/chunk-`,
+  });
 
-// ------------------------------------------------------------
-// 🎧 Helper to fetch text from R2 public URL
-// ------------------------------------------------------------
-async function fetchChunkText(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} when fetching ${url}`);
-  return await res.text();
+  const { Contents = [] } = await s3.send(command);
+  const chunkKeys = Contents.filter((c) => c.Key.endsWith(".txt"))
+    .sort((a, b) => a.Key.localeCompare(b.Key))
+    .map((c) => c.Key);
+
+  info({ sessionId, found: chunkKeys.length }, "🧩 R2 chunks listed successfully");
+
+  return chunkKeys.map((key, index) => ({
+    index: index + 1,
+    key,
+    url: `${PUBLIC_BASE}/${encodeURIComponent(key)}`,
+  }));
 }
 
 // ------------------------------------------------------------
-// 🔊 Process a single chunk with Polly
+// Main Orchestration
 // ------------------------------------------------------------
-async function processChunk({ sessionId, index, url }) {
-  const logContext = { sessionId, index, url };
-  try {
-    info(logContext, `🔍 Fetching chunk text from URL...`);
-    const res = await fetch(url);
+export async function orchestrateTTS(sessionId) {
+  info({ sessionId }, "🎬 TTS Orchestration begin");
+  info({ model: MODEL, voice: VOICE }, "🎙 TTS Model Configuration");
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} ${res.statusText} when fetching ${url}`);
-    }
-
-    const text = await res.text();
-    if (!text || !text.trim()) {
-      throw new Error(`Empty text content returned from ${url}`);
-    }
-
-    debug({ ...logContext, length: text.length }, `📜 Chunk text fetched successfully`);
-
-    const synthCmd = new SynthesizeSpeechCommand({
-      OutputFormat: "mp3",
-      Engine: "neural",
-      Text: text,
-      VoiceId: VOICE_ID,
-    });
-
-    const response = await polly.send(synthCmd);
-
-    if (!response.AudioStream) {
-      throw new Error("Polly did not return an AudioStream");
-    }
-
-    const audioBuffer = await response.AudioStream.transformToByteArray();
-    info({ ...logContext, size: audioBuffer.length }, `✅ TTS Chunk ${index} synthesized`);
-
-    return { index, success: true, size: audioBuffer.length, url };
-  } catch (err) {
-    error(
-      { ...logContext, message: err.message, stack: err.stack?.split("\n").slice(0, 3) },
-      "❌ TTS Chunk Failure"
-    );
-    return { index, success: false, error: err.message, url };
-  }
-}
-
-// ------------------------------------------------------------
-// 🧩 Main Processor
-// ------------------------------------------------------------
-export async function ttsProcessor({ sessionId, chunks }) {
-  const sid = sessionId || `session-${Date.now()}`;
-  info({ sessionId: sid, model: "Amazon Polly", voice: VOICE_ID, region: REGION }, "🎧 Starting TTS Processor");
-
-  if (!Array.isArray(chunks) || chunks.length === 0) {
-    throw new Error("No valid text chunks provided to TTS Processor.");
-  }
-
-  const hb = startHeartbeat(`ttsProcessor:${sid}`);
-  const results = [];
-  const limit = TTS_CONCURRENCY;
+  const hb = startHeartbeat(`ttsProcessor:${sessionId}`);
 
   try {
-    for (let i = 0; i < chunks.length; i += limit) {
-      const slice = chunks.slice(i, i + limit);
-      const batchResults = await Promise.all(slice.map(c => processChunk({ ...c, sessionId: sid })));
-      results.push(...batchResults);
-    }
+    const chunks = await listChunksFromR2(sessionId);
 
-    const successCount = results.filter(r => r.success).length;
-    const failCount = results.filter(r => !r.success).length;
-    const failedUrls = results.filter(r => !r.success).map(r => r.url);
+    if (!chunks.length) {
+      throw new Error(`No text chunks found in R2 for ${sessionId}.`);
+    }
 
     info(
-      { sessionId: sid, successCount, failCount, total: results.length, failedUrls },
-      "🎧 TTS Summary"
+      { sessionId, count: chunks.length },
+      "✅ Valid chunk list constructed — starting TTS synthesis"
     );
 
-    if (successCount === 0) throw new Error("No TTS chunks were produced or returned.");
+    const results = await ttsProcessor({
+      sessionId,
+      chunks,
+      model: MODEL,
+      voice: VOICE,
+    });
+
+    const successCount = results.filter((r) => r.success).length;
+    const failCount = results.filter((r) => !r.success).length;
+
+    info(
+      { sessionId, successCount, failCount },
+      "🎧 TTS Summary — Synthesis complete"
+    );
 
     return results;
+  } catch (err) {
+    error(
+      { sessionId, error: err.message, stack: err.stack?.split("\n").slice(0, 3) },
+      "💥 TTS orchestration failed"
+    );
+    throw err;
   } finally {
     stopHeartbeat(hb);
   }
 }
 
-export default { ttsProcessor };
+export default { orchestrateTTS };
