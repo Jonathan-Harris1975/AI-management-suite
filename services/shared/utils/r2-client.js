@@ -1,6 +1,13 @@
 // services/shared/utils/r2-client.js
 // ============================================================
-// ☁️ Cloudflare R2 Client — Final Unified Version
+// ☁️ Cloudflare R2 Client — Final Unified + Compatible Version
+// ============================================================
+//
+// ✅ Includes:
+//   - Amazon S3-compatible client
+//   - Full alias support (rss-feeds, transcript, rawtext)
+//   - Flat key uploads (no nested folders)
+//   - Restored `putObject` for backward compatibility
 // ============================================================
 
 import {
@@ -12,11 +19,15 @@ import {
 } from "@aws-sdk/client-s3";
 import { log } from "#logger.js";
 
+// ------------------------------------------------------------
+// 🔧 Environment Setup
+// ------------------------------------------------------------
 const {
   R2_ACCESS_KEY_ID,
   R2_SECRET_ACCESS_KEY,
   R2_ENDPOINT,
   R2_REGION,
+
   // Buckets
   R2_BUCKET_PODCAST,
   R2_BUCKET_RAW,
@@ -27,6 +38,7 @@ const {
   R2_BUCKET_RSS_FEEDS,
   R2_BUCKET_PODCAST_RSS_FEEDS,
   R2_BUCKET_TRANSCRIPTS,
+
   // Public URLs
   R2_PUBLIC_BASE_URL_PODCAST,
   R2_PUBLIC_BASE_URL_RAW,
@@ -38,6 +50,9 @@ const {
   R2_PUBLIC_BASE_URL_TRANSCRIPT,
 } = process.env;
 
+// ------------------------------------------------------------
+// 🧠 Client Initialization
+// ------------------------------------------------------------
 export const s3 = new S3Client({
   region: R2_REGION || "auto",
   endpoint: R2_ENDPOINT,
@@ -48,7 +63,7 @@ export const s3 = new S3Client({
 });
 
 // ------------------------------------------------------------
-// 🪣 Bucket Registry (with rss-feeds alias)
+// 🪣 Bucket Registry (includes rss-feeds alias)
 // ------------------------------------------------------------
 export const R2_BUCKETS = {
   podcast: R2_BUCKET_PODCAST,
@@ -58,10 +73,14 @@ export const R2_BUCKETS = {
   meta: R2_BUCKET_META,
   merged: R2_BUCKET_MERGED,
   art: R2_BUCKET_ART,
+
+  // ✅ RSS aliases
   rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
-  "rss-feeds": R2_BUCKET_RSS_FEEDS || "rss-feeds", // ✅ Added alias
+  "rss-feeds": R2_BUCKET_RSS_FEEDS || "rss-feeds",
   podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS || R2_BUCKET_RSS_FEEDS || "rss-feeds",
   rssfeeds: R2_BUCKET_RSS_FEEDS || "rss-feeds",
+
+  // ✅ Transcript aliases
   transcripts: R2_BUCKET_TRANSCRIPTS,
   transcript: R2_BUCKET_TRANSCRIPTS,
 };
@@ -81,7 +100,7 @@ export const R2_PUBLIC_URLS = {
 };
 
 // ------------------------------------------------------------
-// ⚙️ Core Helpers
+// 🧩 Bucket Validator
 // ------------------------------------------------------------
 export function ensureBucketKey(bucketKey) {
   const bucket = R2_BUCKETS[bucketKey];
@@ -92,9 +111,19 @@ export function ensureBucketKey(bucketKey) {
   return bucket;
 }
 
+// ------------------------------------------------------------
+// ⚙️ Core Upload / Download Functions
+// ------------------------------------------------------------
 export async function uploadBuffer(bucketKey, key, buffer, contentType = "application/octet-stream") {
   const bucket = ensureBucketKey(bucketKey);
-  await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: buffer, ContentType: contentType }));
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType,
+    })
+  );
   return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
 }
 
@@ -111,15 +140,19 @@ export async function getObjectAsText(bucketKey, key) {
 }
 
 // ------------------------------------------------------------
-// 🔁 Aliases
+// 🔁 Aliases (Restored Legacy Exports)
 // ------------------------------------------------------------
 export const r2Put = uploadBuffer;
+export const putObject = uploadBuffer; // ✅ Restored legacy alias for orchestrator.js
 export const putJson = async (bucketKey, key, obj) =>
   uploadText(bucketKey, key, JSON.stringify(obj, null, 2), "application/json");
 export const putText = uploadText;
 export const getObject = getObjectAsText;
 export const r2Get = getObjectAsText;
 
+// ------------------------------------------------------------
+// 🧰 Additional Utilities
+// ------------------------------------------------------------
 export async function getR2ReadStream(bucketKey, key) {
   const bucket = ensureBucketKey(bucketKey);
   const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
@@ -142,8 +175,17 @@ export function buildPublicUrl(bucketKey, key) {
   return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
 }
 
-log.info({ endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.values(R2_BUCKETS) }, "r2-client.initialized");
+// ------------------------------------------------------------
+// 🧾 Startup Log
+// ------------------------------------------------------------
+log.info(
+  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.values(R2_BUCKETS) },
+  "r2-client.initialized"
+);
 
+// ------------------------------------------------------------
+// 📦 Default Export
+// ------------------------------------------------------------
 export default {
   s3,
   R2_BUCKETS,
@@ -155,7 +197,9 @@ export default {
   listKeys,
   getR2ReadStream,
   buildPublicUrl,
+  // ✅ Legacy aliases
   r2Put,
+  putObject,
   putJson,
   putText,
   getObject,
