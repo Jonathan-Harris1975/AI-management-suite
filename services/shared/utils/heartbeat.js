@@ -26,5 +26,6 @@ export function stopHeartbeat() {
   if (interval) {
     clearInterval(interval);
     interval = null;
+    export default startHeartbeat;
   }
 }
