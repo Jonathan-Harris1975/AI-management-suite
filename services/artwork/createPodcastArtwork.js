@@ -17,7 +17,7 @@ export async function createPodcastArtwork({ sessionId, prompt }) {
     const buffer = Buffer.from(base64Data, "base64");
 
     // 🗂️ Save to R2
-    const key = `${sessionId}/cover.png`;
+    const key = `${sessionId}.png`;
     const publicUrl = await uploadBuffer(R2_BUCKET_ART_KEY, key, buffer, "image/png");
     log("done", { key, publicUrl });
 
