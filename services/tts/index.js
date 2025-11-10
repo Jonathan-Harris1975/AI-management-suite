@@ -1,58 +1,31 @@
 // ============================================================
-// 🔊 TTS Orchestrator — Full Audio Generation Pipeline
+// 🔊 TTS Orchestrator — Public entry for the TTS service
+//  - Re-exports the real orchestrator from utils/orchestrator.js
+//  - Adds a heartbeat wrapper to avoid idle timeouts on hosts
 // ============================================================
 
 import { info, error } from "#logger.js";
-import { ttsProcessor } from "./utils/ttsProcessor.js";
-import { mergeProcessor } from "./utils/mergeProcessor.js";
-import { editingProcessor } from "./utils/editingProcessor.js";
-import { podcastProcessor } from "./utils/podcastProcessor.js";
-import { putObject } from "#shared/r2-client.js";
-import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js"; // alias maps to services/shared/utils/heartbeat.js
+import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js"; // ✅ correct alias
+import { orchestrateTTS as _orchestrateTTS } from "./utils/orchestrator.js";
 
 // Normalize ID if called via object { sessionId: "..." }
 const normalize = (s) => (typeof s === "object" && s?.sessionId ? s.sessionId : s);
 
 /**
- * Orchestrates the entire TTS pipeline:
- *  1️⃣ Generate speech chunks
- *  2️⃣ Merge chunks
- *  3️⃣ Apply EQ & humanizing edits
- *  4️⃣ Mix intro/outro and finalize
- *  5️⃣ Upload to R2
+ * Orchestrate the full TTS pipeline with a heartbeat guard.
+ * This keeps the container alive on platforms with idle timeouts.
  */
 export async function orchestrateTTS(session) {
   const sessionId = normalize(session);
-  info({ sessionId }, "🎙 Starting full TTS orchestration pipeline");
-
-  // 🫀 Keep container alive while long TTS runs (prevents Shipher idle restart)
-  startHeartbeat(`TTS-${sessionId}`, 25000);
+  startHeartbeat(`TTS Pipeline ${sessionId}`, 30_000);
 
   try {
-    // 1) TTS chunks
-    const ttsFiles = await ttsProcessor(sessionId);
-    info({ sessionId, count: ttsFiles?.length || 0 }, "✅ TTS chunks generated");
-
-    // 2) Merge → single track
-    const mergedPath = await mergeProcessor(sessionId, ttsFiles);
-    info({ sessionId, mergedPath }, "✅ Chunks merged successfully");
-
-    // 3) Audio polish
-    const editedPath = await editingProcessor(sessionId, mergedPath);
-    info({ sessionId, editedPath }, "✅ Audio editing complete");
-
-    // 4) Final mix (intro/outro)
-    const finalAudio = await podcastProcessor(sessionId, editedPath);
-    info({ sessionId, finalAudio }, "✅ Podcast mixdown complete");
-
-    // 5) Upload finished MP3
-    const key = `${sessionId}.mp3`;
-    await putObject("podcast", key, finalAudio, "audio/mpeg");
-    info({ sessionId, key }, "💾 Uploaded final podcast MP3 to R2");
-
-    return { ok: true, sessionId, file: key };
+    info({ sessionId }, "🚀 Starting TTS pipeline");
+    const result = await _orchestrateTTS(sessionId);
+    info({ sessionId, result }, "✅ TTS pipeline finished");
+    return result;
   } catch (err) {
-    error({ sessionId, error: err.message }, "💥 TTS orchestration failed");
+    error({ sessionId, error: err?.stack || err?.message }, "💥 TTS pipeline failed");
     throw err;
   } finally {
     stopHeartbeat();
