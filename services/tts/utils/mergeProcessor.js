@@ -1,70 +1,114 @@
 // services/tts/utils/mergeProcessor.js
 // ============================================================
-// 🎧 Merge Processor — downloads remote chunk URLs to /tmp then merges via ffmpeg
-// - Accepts an array of PUBLIC HTTPS URLs (from ttsProcessor)
-// - Writes concat list with LOCAL paths
-// - Uploads merged MP3 to R2 (podcast-merged/<sessionId>.mp3)
+// 🎧 mergeProcessor — Static FFmpeg Version (Production Safe)
+// ============================================================
+//
+// ✅ Uses ffmpeg-static (no system dependency)
+// ✅ Merges remote/public .mp3 chunks into one final file
+// ✅ Uploads merged file to R2_BUCKET_MERGED
+// ✅ Compatible with Shiper’s environment
 // ============================================================
 
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
-import fetch from "node-fetch";
+import os from "os";
+import { promisify } from "util";
+import { exec } from "child_process";
+import ffmpegPath from "ffmpeg-static";
 import { info, error } from "#logger.js";
-import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
-import { uploadBuffer } from "#shared/r2-client.js";
+import { putObject } from "#shared/r2-client.js";
 
-const TMP_DIR = "/tmp/podcast_merge";
-const MERGED_BUCKET = "merged";
+const execAsync = promisify(exec);
 
-function ensureTmpDir() {
-  if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+// ------------------------------------------------------------
+// ⚙️ Config
+// ------------------------------------------------------------
+const TMP_DIR = path.join(os.tmpdir(), "podcast_merge");
+const R2_BUCKET_MERGED = process.env.R2_BUCKET_MERGED || "podcast-merged";
+
+// ------------------------------------------------------------
+// 🧩 Helper
+// ------------------------------------------------------------
+function safeFilename(name) {
+  return name.replace(/[^a-zA-Z0-9_\-.]/g, "_");
 }
 
-export async function mergeProcessor(sessionId, chunkUrls = []) {
-  startHeartbeat(`mergeProcessor:${sessionId}`, 25000);
-  const sid = sessionId || `TT-${Date.now()}`;
-  ensureTmpDir();
-  info({ sessionId: sid }, "🎧 Starting mergeProcessor");
+// ------------------------------------------------------------
+// 🚀 Main Merge Processor
+// ------------------------------------------------------------
+export async function mergeProcessor(sessionId, audioChunks = []) {
+  info({ sessionId }, "🎧 Starting mergeProcessor");
+
+  if (!Array.isArray(audioChunks) || audioChunks.length === 0) {
+    throw new Error("No audio chunks provided for merging");
+  }
 
   try {
-    if (!chunkUrls?.length) throw new Error("mergeProcessor requires non-empty array of chunk URLs.");
+    fs.mkdirSync(TMP_DIR, { recursive: true });
 
-    // 1) Download each remote MP3 to /tmp
-    const localPaths = [];
-    for (let i = 0; i < chunkUrls.length; i++) {
-      const url = chunkUrls[i];
-      const local = path.join(TMP_DIR, `${sid}_chunk_${String(i + 1).padStart(3, "0")}.mp3`);
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Failed to fetch audio chunk: ${url}`);
-      const buf = Buffer.from(await res.arrayBuffer());
-      fs.writeFileSync(local, buf);
-      localPaths.push(local);
+    // --------------------------------------------------------
+    // 📝 Create list file for FFmpeg concat
+    // --------------------------------------------------------
+    const validChunks = audioChunks.filter((c) => c && c.url);
+    if (validChunks.length === 0)
+      throw new Error("No valid chunk URLs to merge");
+
+    const listFile = path.join(TMP_DIR, `${safeFilename(sessionId)}_list.txt`);
+    const mergedPath = path.join(TMP_DIR, `${safeFilename(sessionId)}_merged.mp3`);
+
+    const fileListContent = validChunks
+      .map((c) => `file '${c.url}'`)
+      .join("\n");
+    fs.writeFileSync(listFile, fileListContent, "utf8");
+
+    info({ sessionId, listFile, count: validChunks.length }, "🧾 Merge list created");
+
+    // --------------------------------------------------------
+    // 🧠 Run FFmpeg concat
+    // --------------------------------------------------------
+    const command = `${ffmpegPath} -y -f concat -safe 0 -protocol_whitelist file,http,https,tcp,tls -i "${listFile}" -c copy "${mergedPath}"`;
+    info({ sessionId, command }, "🎞 Running ffmpeg concat...");
+
+    await execAsync(command, { maxBuffer: 1024 * 1024 * 10 }); // 10MB buffer
+
+    if (!fs.existsSync(mergedPath)) {
+      throw new Error("FFmpeg merge output not found");
     }
 
-    // 2) Build ffmpeg concat list with LOCAL paths
-    const listPath = path.join(TMP_DIR, `${sid}_list.txt`);
-    const outPath  = path.join(TMP_DIR, `${sid}_merged.mp3`);
-    fs.writeFileSync(listPath, localPaths.map(p => `file '${p}'`).join("\n"), "utf8");
+    const stats = fs.statSync(mergedPath);
+    info(
+      { sessionId, bytes: stats.size },
+      "🎧 Merge completed successfully"
+    );
 
-    // 3) Merge using stream copy (all chunks are MP3)
-    execSync(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}"`, {
-      stdio: "pipe",
-    });
+    // --------------------------------------------------------
+    // ☁️ Upload merged audio to R2
+    // --------------------------------------------------------
+    const key = `${sessionId}/${safeFilename(sessionId)}_merged.mp3`;
+    const buffer = fs.readFileSync(mergedPath);
 
-    // 4) Upload merged MP3 to R2
-    const mergedBuf = fs.readFileSync(outPath);
-    const mergedKey = `${sid}.mp3`;
-    await uploadBuffer(MERGED_BUCKET, mergedKey, mergedBuf, "audio/mpeg");
+    await putObject("merged", key, buffer, "audio/mpeg");
+    const publicUrl = `${process.env.R2_PUBLIC_BASE_URL_MERGE}/${encodeURIComponent(key)}`;
 
-    info({ sessionId: sid, key: mergedKey, bytes: mergedBuf.length }, "💾 Uploaded merged MP3 to R2");
-    stopHeartbeat();
-    return { key: mergedKey, localPath: outPath };
+    info(
+      { sessionId, key, publicUrl, bytes: stats.size },
+      "☁️ Uploaded merged MP3 to R2"
+    );
+
+    // --------------------------------------------------------
+    // 🧹 Cleanup temp files
+    // --------------------------------------------------------
+    fs.unlinkSync(listFile);
+    fs.unlinkSync(mergedPath);
+
+    return { key, publicUrl, bytes: stats.size };
   } catch (err) {
-    error({ sessionId: sid, error: err.message }, "💥 mergeProcessor failed");
-    stopHeartbeat();
+    error(
+      { sessionId, error: err.message },
+      "💥 mergeProcessor failed"
+    );
     throw err;
   }
 }
 
-export default mergeProcessor;
+export default { mergeProcessor };
