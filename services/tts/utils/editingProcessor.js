@@ -1,11 +1,12 @@
 // ============================================================
-// 🎚️ editingProcessor — Deep & Mature Voice + Heartbeat Integration
+// 🎚️ editingProcessor — Deep & Mature Voice + Render-Safe Keep-Alive
 // ============================================================
 //
-// 🧩 Features:
-//   • Deeper EQ tuning for AWS Polly voices
-//   • Continuous heartbeat during long ffmpeg edits
-//   • Graceful cleanup + error handling
+// 🧠 Features
+//   • Prevents idle timeout (persistent stdout heartbeat)
+//   • Adds deep, warm EQ for AWS Polly voices
+//   • Works even on >10-minute ffmpeg runs
+//   • Cleans up temp files safely
 // ============================================================
 
 import { info, error } from "#logger.js";
@@ -13,10 +14,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { startKeepAlive, stopKeepAlive } from "../../shared/utils/heartbeat.js"; // ✅ Correct file path
 
 // ------------------------------------------------------------
-// 🧠 Locate ffmpeg binary
+// 🧠 Locate ffmpeg binary (supports bundled or system)
 // ------------------------------------------------------------
 async function findFfmpeg() {
   try {
@@ -36,33 +36,45 @@ async function findFfmpeg() {
 }
 
 // ------------------------------------------------------------
-// 🎧 EQ / compression chain tuned for deep mature tone
+// 💓 Persistent keep-alive — stdout ping every 15s
+// ------------------------------------------------------------
+function startPersistentKeepAlive(label = "editingProcessor", intervalMs = 15000) {
+  const id = setInterval(() => {
+    process.stdout.write(`💓 ${label} alive @ ${new Date().toISOString()}\n`);
+  }, intervalMs);
+  return id;
+}
+function stopPersistentKeepAlive(id) {
+  if (id) clearInterval(id);
+}
+
+// ------------------------------------------------------------
+// 🎧 EQ chain tuned for deeper, more mature male tone
 // ------------------------------------------------------------
 const FILTERS = [
-  "highpass=f=70",
+  "highpass=f=60",
   "lowpass=f=14000",
-  "equalizer=f=200:width_type=o:width=2:g=4",
-  "equalizer=f=3000:width_type=o:width=2:g=-2",
-  "bass=g=4",
-  "treble=g=-1",
-  "acompressor=threshold=-20dB:ratio=3:attack=15:release=200:makeup=5",
+  "bass=g=6",
+  "treble=g=-2",
+  "equalizer=f=180:width_type=o:width=2:g=4",
+  "equalizer=f=2800:width_type=o:width=2:g=-3",
+  "acompressor=threshold=-20dB:ratio=4:attack=15:release=200:makeup=6",
   "loudnorm=I=-16:TP=-1.5:LRA=11",
-  "volume=1.05"
+  "volume=1.1"
 ].join(",");
 
 // ------------------------------------------------------------
-// 🧩 Main editing processor
+// 🧩 Main Editing Processor
 // ------------------------------------------------------------
 export async function editingProcessor(sessionId, merged) {
-  info({ sessionId }, "🎚️ Starting Deep Voice EditingProcessor (Heartbeat enabled)");
+  info({ sessionId }, "🎚️ Starting Editing Processor (persistent keep-alive)");
 
-  // ✅ Keep container alive during long ffmpeg runs
-  const label = `editingProcessor:${sessionId}`;
-  startKeepAlive(label, 120); // pulse every 120s (2 mins)
+  const keepId = startPersistentKeepAlive(`editingProcessor:${sessionId}`);
 
   try {
-    if (!merged) throw new Error("editingProcessor: missing merged input");
+    if (!merged) throw new Error("Missing merged input for editingProcessor");
 
+    // 🔍 Resolve input path or download from R2
     let inputPath;
     if (typeof merged === "string") inputPath = merged;
     else if (merged.localPath) inputPath = merged.localPath;
@@ -70,49 +82,59 @@ export async function editingProcessor(sessionId, merged) {
       const tmpDir = path.join(os.tmpdir(), "tts_editing", sessionId);
       await fs.mkdir(tmpDir, { recursive: true });
       inputPath = path.join(tmpDir, "input.mp3");
+
       const res = await fetch(merged.url);
-      if (!res.ok) throw new Error(`Failed to fetch merged mp3: ${res.status}`);
+      if (!res.ok) throw new Error(`Failed to fetch merged MP3: ${res.status}`);
       const buf = Buffer.from(await res.arrayBuffer());
       await fs.writeFile(inputPath, buf);
-      info({ sessionId, size: buf.length }, "📥 Downloaded merged MP3 for editing");
+      info({ sessionId, bytes: buf.length }, "📥 Downloaded merged MP3");
     } else {
-      throw new Error("editingProcessor: invalid input");
+      throw new Error("Invalid merged input object");
     }
 
-    const tmpOut = path.join(os.tmpdir(), "tts_editing", `${sessionId}_edited.mp3`);
-    await fs.mkdir(path.dirname(tmpOut), { recursive: true });
+    const outputPath = path.join(os.tmpdir(), "tts_editing", `${sessionId}_edited.mp3`);
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
     const ffmpegPath = await findFfmpeg();
-
     const args = [
       "-y",
       "-i", inputPath,
       "-af", FILTERS,
       "-ar", "44100",
       "-b:a", "192k",
-      tmpOut
+      outputPath
     ];
 
-    info({ sessionId }, "🎛️ ffmpeg process starting (heartbeat engaged)");
+    info({ sessionId, args }, "🎛️ Launching ffmpeg (keep-alive active)");
 
     await new Promise((resolve, reject) => {
       const proc = spawn(ffmpegPath, args);
       let stderr = "";
-      proc.stderr.on("data", (d) => (stderr += d.toString()));
+
+      proc.stdout.on("data", (chunk) => {
+        process.stdout.write(chunk.toString());
+      });
+      proc.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+        if (stderr.length > 8000) stderr = stderr.slice(-8000); // keep log small
+      });
+
       proc.on("error", reject);
-      proc.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(stderr))));
+      proc.on("exit", (code) => {
+        code === 0 ? resolve() : reject(new Error(stderr));
+      });
     });
 
-    const edited = await fs.readFile(tmpOut);
-    info({ sessionId, bytes: edited.length }, "✅ Deep & Mature voice enhancement complete");
+    const editedBuffer = await fs.readFile(outputPath);
+    info({ sessionId, bytes: editedBuffer.length }, "✅ Deep-voice editing complete");
 
-    return edited;
+    return editedBuffer;
   } catch (err) {
     error({ sessionId, err: err.message }, "💥 editingProcessor failed");
     throw err;
   } finally {
-    stopKeepAlive(label);
-    info({ sessionId }, "🌙 Heartbeat stopped (editing complete)");
+    stopPersistentKeepAlive(keepId);
+    info({ sessionId }, "🌙 Keep-alive stopped (editing complete)");
   }
 }
 
