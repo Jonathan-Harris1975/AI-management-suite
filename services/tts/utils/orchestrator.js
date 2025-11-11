@@ -19,9 +19,9 @@ import { startKeepAlive } from "../../shared/utils/heartbeat.js";
 // ------------------------------------------------------------
 // ⚙️ Environment Configuration
 // ------------------------------------------------------------
-const RAW_TEXT_BUCKET = process.env.R2_BUCKET_RAW_TEXT || "raw-text";
+const RAW_TEXT_BUCKET = process.env.R2_BUCKET_RAW_TEXT ;
 const RAW_TEXT_BASE_URL = process.env.R2_PUBLIC_BASE_URL_RAW_TEXT;
-const FINAL_BUCKET = process.env.R2_BUCKET_PODCAST || "podcast";
+const FINAL_BUCKET = process.env.R2_BUCKET_PODCAST ;
 const PUBLIC_BASE_URL_PODCAST = process.env.R2_PUBLIC_BASE_URL_PODCAST;
 
 if (!FINAL_BUCKET) throw new Error("❌ Missing R2_BUCKET_PODCAST environment variable");
