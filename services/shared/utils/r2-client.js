@@ -1,12 +1,11 @@
-// services/shared/utils/r2-client.js
 // ============================================================
-// ☁️ Cloudflare R2 Client — Final Unified + Backward Compatible Version
+// ☁️ Cloudflare R2 Client — Universal Version (Final)
 // ============================================================
 //
-// ✅ Compatible with ALL services (script-maker, tts, rss, podcast)
-// ✅ Supports: chunks, merged, raw, rss-feeds, transcripts
-// ✅ Restores buildPublicUrl() for legacy modules
-// ✅ Safe for both public URL generation & upload/download ops
+// ✅ Supports every alias used by AI-Podcast-Suite services:
+//    - script-maker, tts, merge, rss, artwork, models, orchestrator
+// ✅ Includes aliases: raw-text, rawtext, rawText
+// ✅ Compatible with legacy buildPublicUrl(), putObject(), etc.
 // ============================================================
 
 import {
@@ -37,7 +36,7 @@ const {
   R2_BUCKET_RSS_FEEDS,
   R2_BUCKET_PODCAST_RSS_FEEDS,
   R2_BUCKET_TRANSCRIPTS,
-  R2_BUCKET_CHUNKS, // ✅ for TTS
+  R2_BUCKET_CHUNKS,
 
   // Public URLs
   R2_PUBLIC_BASE_URL_PODCAST,
@@ -48,11 +47,11 @@ const {
   R2_PUBLIC_BASE_URL_ART,
   R2_PUBLIC_BASE_URL_RSS,
   R2_PUBLIC_BASE_URL_TRANSCRIPT,
-  R2_PUBLIC_BASE_URL_CHUNKS, // ✅ for TTS chunks
+  R2_PUBLIC_BASE_URL_CHUNKS,
 } = process.env;
 
 // ------------------------------------------------------------
-// 🧠 Initialize S3-compatible client
+// 🧠 Initialize Client
 // ------------------------------------------------------------
 export const s3 = new S3Client({
   region: R2_REGION || "auto",
@@ -64,22 +63,23 @@ export const s3 = new S3Client({
 });
 
 // ------------------------------------------------------------
-// 🪣 Bucket Aliases (Full Coverage)
+// 🪣 Bucket Aliases
 // ------------------------------------------------------------
 export const R2_BUCKETS = {
   podcast: R2_BUCKET_PODCAST,
   raw: R2_BUCKET_RAW,
   rawtext: R2_BUCKET_RAW_TEXT,
   rawText: R2_BUCKET_RAW_TEXT,
+  "raw-text": R2_BUCKET_RAW_TEXT, // ✅ new alias
   meta: R2_BUCKET_META,
   merged: R2_BUCKET_MERGED,
   art: R2_BUCKET_ART,
 
-  // ✅ Chunks support
+  // ✅ Chunks
   chunks: R2_BUCKET_CHUNKS || "podcast-chunks",
   "podcast-chunks": R2_BUCKET_CHUNKS || "podcast-chunks",
 
-  // ✅ RSS feeds
+  // ✅ RSS
   rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
   "rss-feeds": R2_BUCKET_RSS_FEEDS || "rss-feeds",
   podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS || R2_BUCKET_RSS_FEEDS || "rss-feeds",
@@ -98,19 +98,18 @@ export const R2_PUBLIC_URLS = {
   raw: R2_PUBLIC_BASE_URL_RAW,
   rawtext: R2_PUBLIC_BASE_URL_RAW_TEXT,
   rawText: R2_PUBLIC_BASE_URL_RAW_TEXT,
+  "raw-text": R2_PUBLIC_BASE_URL_RAW_TEXT,
   meta: R2_PUBLIC_BASE_URL_META,
   merged: R2_PUBLIC_BASE_URL_MERGE,
   art: R2_PUBLIC_BASE_URL_ART,
   rss: R2_PUBLIC_BASE_URL_RSS,
   transcript: R2_PUBLIC_BASE_URL_TRANSCRIPT,
-
-  // ✅ Chunks URLs
   chunks: R2_PUBLIC_BASE_URL_CHUNKS,
   "podcast-chunks": R2_PUBLIC_BASE_URL_CHUNKS,
 };
 
 // ------------------------------------------------------------
-// 🧩 Validation
+// 🧩 Validation Helper
 // ------------------------------------------------------------
 export function ensureBucketKey(bucketKey) {
   const bucket = R2_BUCKETS[bucketKey];
@@ -122,7 +121,7 @@ export function ensureBucketKey(bucketKey) {
 }
 
 // ------------------------------------------------------------
-// ⚙️ Upload & Retrieval Helpers
+// ⚙️ Core Upload / Download
 // ------------------------------------------------------------
 export async function uploadBuffer(bucketKey, key, buffer, contentType = "application/octet-stream") {
   const bucket = ensureBucketKey(bucketKey);
@@ -150,7 +149,7 @@ export async function getObjectAsText(bucketKey, key) {
 }
 
 // ------------------------------------------------------------
-// 🔁 Legacy & Aliases
+// 🔁 Legacy Aliases
 // ------------------------------------------------------------
 export const putObject = uploadBuffer;
 export const r2Put = uploadBuffer;
@@ -160,7 +159,7 @@ export const r2Get = getObjectAsText;
 export const putJson = async (bucketKey, key, obj) =>
   uploadText(bucketKey, key, JSON.stringify(obj, null, 2), "application/json");
 
-// ✅ Restored for models.js, rss-feed, and artwork
+// ✅ Legacy URL builder (used by models.js, rss, etc.)
 export function buildPublicUrl(bucketKey, key) {
   const base = R2_PUBLIC_URLS[bucketKey];
   if (!base) throw new Error(`❌ No public URL configured for ${bucketKey}`);
@@ -168,7 +167,7 @@ export function buildPublicUrl(bucketKey, key) {
 }
 
 // ------------------------------------------------------------
-// 🧰 Utility Methods
+// 🧰 Utilities
 // ------------------------------------------------------------
 export async function listKeys(bucketKey, prefix = "") {
   const bucket = ensureBucketKey(bucketKey);
@@ -186,7 +185,7 @@ export async function deleteObject(bucketKey, key) {
 // 🧾 Startup Log
 // ------------------------------------------------------------
 log.info(
-  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.values(R2_BUCKETS) },
+  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.keys(R2_BUCKETS) },
   "r2-client.initialized"
 );
 
@@ -205,7 +204,7 @@ export default {
   putObject,
   putJson,
   putText,
-  buildPublicUrl, // ✅ restored for imports
+  buildPublicUrl,
   getObject,
   r2Put,
   r2Get,
