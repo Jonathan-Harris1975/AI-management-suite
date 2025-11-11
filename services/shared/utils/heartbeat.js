@@ -1,52 +1,43 @@
 // ============================================================
-// ❤️ Heartbeat Utility — Safe, throttled version
+// 🌡 Keep-Alive Utility — Silent version for long tasks
 // ============================================================
+//
+// Keeps container alive by sending minimal signals at safe intervals.
+// Uses a single low-frequency timer (default: 2 minutes).
+//
 
 import { info } from "#logger.js";
 
-// Track active heartbeats by label
-const heartbeats = new Map();
+const KEEP_ALIVE_KEY = Symbol.for("__app_keepalive_timer__");
 
 /**
- * Starts a heartbeat log every N seconds (default 30s).
- * Prevents duplicates and runaway intervals.
+ * Starts a minimal keep-alive pulse to prevent idle timeouts.
+ * Does NOT spam logs — only logs once per start and stop.
  *
- * @param {string} label - Identifier for logs, e.g. "ttsProcessor:TT-2025-11-10"
- * @param {number} ms - Interval in milliseconds (default: 30,000)
+ * @param {string} label - Identifier for context (e.g. "TTS Pipeline")
+ * @param {number} intervalMs - Interval in ms (default 2 minutes)
  */
-export function startHeartbeat(label = "Heartbeat", ms = 30000) {
-  // If one is already running for this label, stop it first
-  stopHeartbeat(label);
+export function startKeepAlive(label = "KeepAlive", intervalMs = 120000) {
+  stopKeepAlive();
+  info(`🌡 Starting keep-alive for ${label} (every ${intervalMs / 1000}s)`);
 
-  info({ label }, `💓 Starting heartbeat for ${label}`);
+  const timer = setInterval(() => {
+    process.stdout.write("."); // single dot, no newline — keeps process active
+  }, intervalMs);
 
-  const interval = setInterval(() => {
-    info({ label, time: new Date().toISOString() }, "💓 Heartbeat tick");
-  }, ms);
-
-  heartbeats.set(label, interval);
+  globalThis[KEEP_ALIVE_KEY] = timer;
 }
 
 /**
- * Stops a specific heartbeat or all if no label is provided.
- * @param {string} [label]
+ * Stops any active keep-alive pulse.
  */
-export function stopHeartbeat(label) {
-  if (label) {
-    const interval = heartbeats.get(label);
-    if (interval) {
-      clearInterval(interval);
-      heartbeats.delete(label);
-      info({ label }, `🫀 Heartbeat stopped for ${label}`);
-    }
-  } else {
-    // stop all active intervals
-    for (const [key, interval] of heartbeats.entries()) {
-      clearInterval(interval);
-      heartbeats.delete(key);
-      info({ label: key }, `🫀 Heartbeat stopped for ${key}`);
-    }
+export function stopKeepAlive() {
+  const timer = globalThis[KEEP_ALIVE_KEY];
+  if (timer) {
+    clearInterval(timer);
+    globalThis[KEEP_ALIVE_KEY] = null;
+    info("🌡 Keep-alive stopped.");
   }
 }
 
-export default startHeartbeat;
+export default startKeepAlive;
