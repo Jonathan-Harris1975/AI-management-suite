@@ -1,6 +1,11 @@
 // ============================================================
 // 🎚️ editingProcessor — Deep & Mature Tone + Render-Safe Keep-Alive
 // ============================================================
+//
+// ✅ Applies EQ + compression filters for a mature voice tone
+// ✅ Uses ffmpeg or ffmpeg-static fallback
+// ✅ Automatically triggers silent keep-alive pings to avoid Render idle timeout
+// ============================================================
 
 import { info, error } from "#logger.js";
 import fs from "node:fs/promises";
@@ -22,6 +27,9 @@ const FILTERS = [
   "volume=1.1"
 ].join(",");
 
+// ------------------------------------------------------------
+// 🧩 Helper — Locate ffmpeg (system or static)
+// ------------------------------------------------------------
 async function findFfmpeg() {
   try {
     await new Promise((res, rej) => {
@@ -33,61 +41,55 @@ async function findFfmpeg() {
   } catch {
     const mod = await import("ffmpeg-static").catch(() => null);
     if (mod?.default) return mod.default;
-    throw new Error("❌ ffmpeg not found");
+    throw new Error("❌ ffmpeg binary not found (system or static)");
   }
 }
 
+// ------------------------------------------------------------
+// 🚀 Core Processor — Applies EQ / compression / loudnorm
+// ------------------------------------------------------------
 export async function editingProcessor(sessionId, merged) {
   const label = `editingProcessor:${sessionId}`;
-  startKeepAlive(label, 20000);
-  info({ sessionId }, "🎚️ Editing Processor started (keep-alive active)");
+  startKeepAlive(label, 20000); // 🟢 ping every 20s during ffmpeg run
+
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "edit-"));
+  const inputPath = path.join(tmpDir, "input.wav");
+  const outputPath = path.join(tmpDir, "output.wav");
+
+  await fs.writeFile(inputPath, merged.buffer);
 
   try {
-    if (!merged) throw new Error("No merged input for editingProcessor");
-
-    const inputPath =
-      typeof merged === "string"
-        ? merged
-        : merged.localPath || (await downloadFile(merged.url, sessionId));
-
-    const outDir = path.join(os.tmpdir(), "tts_editing");
-    await fs.mkdir(outDir, { recursive: true });
-    const outputPath = path.join(outDir, `${sessionId}_edited.mp3`);
-
     const ffmpegPath = await findFfmpeg();
-    const args = ["-y", "-i", inputPath, "-af", FILTERS, "-ar", "44100", "-b:a", "192k", outputPath];
-    info({ sessionId, args }, "🎛️ Launching ffmpeg for editing");
+    info({ sessionId, ffmpegPath }, "🎧 EditingProcessor started — applying EQ chain");
 
-    await runFfmpeg(ffmpegPath, args);
-    const buffer = await fs.readFile(outputPath);
-    info({ sessionId, bytes: buffer.length }, "✅ Editing complete");
-    return buffer;
+    await new Promise((resolve, reject) => {
+      const proc = spawn(ffmpegPath, [
+        "-i", inputPath,
+        "-af", FILTERS,
+        outputPath,
+        "-y"
+      ]);
+
+      proc.stdout.on("data", d => process.stdout.write(d.toString()));
+      proc.stderr.on("data", d => process.stderr.write(d.toString()));
+
+      proc.once("close", code => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg exited with code ${code}`));
+      });
+    });
+
+    const edited = await fs.readFile(outputPath);
+    info({ sessionId, bytes: edited.length }, "🎚️ Editing stage complete");
+    return edited;
+
   } catch (err) {
-    error({ sessionId, err: err.message }, "💥 editingProcessor failed");
+    error({ sessionId, err: err.message }, "💥 Editing failed");
     throw err;
+
   } finally {
-    stopKeepAlive(label);
+    stopKeepAlive(label); // 🛑 ensure cleanup even if error occurs
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    info({ sessionId }, "🌙 Keep-alive stopped, temp files cleaned up");
   }
-}
-
-async function runFfmpeg(path, args) {
-  return new Promise((resolve, reject) => {
-    const p = spawn(path, args);
-    let stderr = "";
-    p.stderr.on("data", d => (stderr += d.toString()));
-    p.on("exit", c => (c === 0 ? resolve() : reject(new Error(stderr))));
-  });
-}
-
-async function downloadFile(url, sessionId) {
-  const dir = path.join(os.tmpdir(), "tts_editing", sessionId);
-  await fs.mkdir(dir, { recursive: true });
-  const dest = path.join(dir, "input.mp3");
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to download merged audio (${res.status})`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  await fs.writeFile(dest, buf);
-  return dest;
-}
-
-export default { editingProcessor };
+                                                       }
