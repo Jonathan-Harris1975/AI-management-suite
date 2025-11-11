@@ -2,12 +2,12 @@
 // 🎛️ mergeProcessor — Robust MP3 concatenation for TTS chunks
 // ============================================================
 //
-// ✅ Accepts: string[] (urls) OR { index:number, url:string }[]
+// ✅ Accepts: string[] or { index:number, url:string }[]
 // ✅ Sorts correctly (by index, else by filename number)
 // ✅ Downloads to /tmp, builds ffmpeg concat list
 // ✅ Uses ffmpeg if available; otherwise falls back to buffer concat
-// ✅ Uploads to R2 'merged' bucket and returns { key, url }
-// ✅ Now includes render-safe keep-alive throughout the merge stage
+// ✅ Uploads to Cloudflare R2 'merged' bucket safely
+// ✅ Includes Render-safe keep-alive across the merge stage
 // ============================================================
 
 import { info, warn, error } from "#logger.js";
@@ -18,16 +18,18 @@ import path from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
 
-// ---------- Config ----------
-const MERGED_BUCKET_KEY = "merged"; // R2 alias handled in r2-client
-const PUBLIC_BASE_URL_MERGE =
-  process.env.R2_PUBLIC_BASE_URL_MERGE || "";
+// ------------------------------------------------------------
+// ⚙️ Config
+// ------------------------------------------------------------
+const MERGED_BUCKET_KEY = "merged";
+const PUBLIC_BASE_URL_MERGE = process.env.R2_PUBLIC_BASE_URL_MERGE || "";
 
-// ---------- Helpers ----------
+// ------------------------------------------------------------
+// 🧩 Helpers
+// ------------------------------------------------------------
 function toUrlList(input) {
   if (!Array.isArray(input)) return [];
 
-  // normalise to { index?:number, url:string }
   const mapped = input
     .map((x) =>
       typeof x === "string"
@@ -39,13 +41,11 @@ function toUrlList(input) {
     .filter(Boolean)
     .filter((x) => typeof x.url === "string" && x.url.startsWith("http"));
 
-  // primary: sort by explicit index
   const withIndex = mapped.every((m) => Number.isFinite(m.index));
   if (withIndex) {
     return mapped.sort((a, b) => a.index - b.index).map((m) => m.url);
   }
 
-  // fallback: sort by audio-###.mp3 numeral if present
   const rex = /(\d+)(?=\.mp3$)/i;
   return mapped
     .sort((a, b) => {
@@ -62,9 +62,7 @@ async function ensureDir(dir) {
 
 async function downloadToFile(url, filePath) {
   const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Download failed: ${url} -> ${res.status} ${res.statusText}`);
-  }
+  if (!res.ok) throw new Error(`Download failed: ${url} -> ${res.status} ${res.statusText}`);
   const ab = await res.arrayBuffer();
   await fs.writeFile(filePath, Buffer.from(ab));
 }
@@ -116,24 +114,26 @@ async function concatBuffers(files, outFile) {
   await fs.writeFile(outFile, total);
 }
 
-// ---------- Main ----------
+// ------------------------------------------------------------
+// 🚀 Main Processor
+// ------------------------------------------------------------
 export async function mergeProcessor(sessionId, ttsResults) {
   const label = `mergeProcessor:${sessionId}`;
-  startKeepAlive(label, 20000); // keep alive every 20s
+  startKeepAlive(label, 20000);
   info({ sessionId }, "🎧 Starting mergeProcessor (keep-alive active)");
 
   try {
-    // 1) Build ordered list of URLs
+    // 1️⃣ Build ordered list of URLs
     const urls = toUrlList(ttsResults).filter(Boolean);
     if (!urls.length) throw new Error("No valid chunk URLs to merge");
 
-    // 2) Prep temp workspace
+    // 2️⃣ Prepare temp workspace
     const baseTmp = path.join(os.tmpdir(), "podcast_merge", sessionId);
     const listFile = path.join(baseTmp, `${sessionId}_list.txt`);
     const outFile = path.join(baseTmp, `${sessionId}_merged.mp3`);
     await ensureDir(baseTmp);
 
-    // 3) Download all parts
+    // 3️⃣ Download all chunks
     const localFiles = [];
     for (let i = 0; i < urls.length; i++) {
       const num = String(i + 1).padStart(3, "0");
@@ -145,16 +145,15 @@ export async function mergeProcessor(sessionId, ttsResults) {
         warn({ sessionId, url: urls[i], err: err.message }, "⚠️ Skipping failed download");
       }
     }
-    if (!localFiles.length)
-      throw new Error("All chunk downloads failed — nothing to merge");
+    if (!localFiles.length) throw new Error("All chunk downloads failed — nothing to merge");
 
-    // 4) Write ffmpeg concat list
+    // 4️⃣ Write ffmpeg concat list
     const listContent = localFiles
       .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
       .join("\n");
     await fs.writeFile(listFile, listContent, "utf-8");
 
-    // 5) Try ffmpeg, else fallback to buffer concat
+    // 5️⃣ Merge using ffmpeg if available, else buffer concat
     let usedFfmpeg = false;
     const ffmpegPath = await whichFfmpeg();
     if (ffmpegPath) {
@@ -174,21 +173,32 @@ export async function mergeProcessor(sessionId, ttsResults) {
       info({ sessionId }, "🎛️ Merged via buffer concatenation");
     }
 
-    // 6) Upload to R2 (merged bucket)
+    // 6️⃣ Upload to Cloudflare R2 — validated + logged
     const key = `${sessionId}.mp3`;
     const mp3Buf = await fs.readFile(outFile);
-    await putObject(MERGED_BUCKET_KEY, key, mp3Buf, "audio/mpeg");
-    const publicUrl = buildPublicUrl
-      ? buildPublicUrl(MERGED_BUCKET_KEY, key)
-      : `${PUBLIC_BASE_URL_MERGE}/${encodeURIComponent(key)}`;
 
-    info(
-      { sessionId, key, size: mp3Buf.length, publicUrl },
-      "💾 Merged MP3 uploaded to R2"
-    );
+    const bucketName =
+      process.env.R2_BUCKET_MERGED ||
+      process.env.R2_BUCKET_PODCAST ||
+      "podcast-merged";
 
-    // 7) Return metadata for next stage (editingProcessor)
-    return { key, url: publicUrl, localPath: outFile, count: localFiles.length };
+    try {
+      await putObject(bucketName, key, mp3Buf, "audio/mpeg");
+
+      const publicUrl = buildPublicUrl
+        ? buildPublicUrl(bucketName, key)
+        : `${(process.env.R2_PUBLIC_BASE_URL_MERGE || "").replace(/\/$/, "")}/${encodeURIComponent(key)}`;
+
+      info(
+        { sessionId, key, size: mp3Buf.length, bucketName, publicUrl },
+        "💾 Merged MP3 uploaded to R2"
+      );
+
+      return { key, url: publicUrl, localPath: outFile, count: localFiles.length };
+    } catch (uploadErr) {
+      error({ sessionId, err: uploadErr.message, bucketName }, "💥 R2 upload failed in mergeProcessor");
+      throw uploadErr;
+    }
   } catch (err) {
     error({ sessionId, err: err.message }, "💥 mergeProcessor failed");
     throw err;
