@@ -1,68 +1,107 @@
 // ============================================================
-// 🎚️ Editing Processor — Apply Audio Enhancements & Mastering
+// 🎚️ editingProcessor — Deep & Mature Voice Enhancement (AWS Polly)
+// ============================================================
+//
+// 🎯 Goals:
+//   • Add warmth and body (~150–350 Hz boost)
+//   • Slightly soften top-end (~6–8 kHz rolloff)
+//   • Preserve clarity and avoid metallic artifacts
+//   • Maintain podcast-level loudness (-16 LUFS)
 // ============================================================
 
-import fs from "fs";
-import path from "path";
-import { execSync } from "child_process";
-import { log } from "#logger.js";
-import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
-import { uploadBuffer } from "#shared/r2-client.js";
+import { info, warn } from "#logger.js";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
 
-// ------------------------------------------------------------
-// 🧠 Setup
-// ------------------------------------------------------------
-const TMP_DIR = "/tmp/tts_editing";
-
-function ensureTmpDir() {
-  if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
-  return TMP_DIR;
-}
-
-// ------------------------------------------------------------
-// 🎛️ Audio Enhancement Filters (Warm + Clean + Controlled)
-// ------------------------------------------------------------
-const filters = [
-  // Stage 1: Clean noise, shape tone, and balance frequencies
-  "highpass=f=100,lowpass=f=10000,afftdn=nr=10:tn=1,firequalizer=gain_entry='entry(150,3);entry(2500,2)',deesser=f=7000:i=0.7,acompressor=threshold=-24dB:ratio=4:attack=10:release=200:makeup=5,dynaudnorm=f=100:n=0:p=0.9,aresample=44100,aconvolution=reverb=0.1:0.1:0.9:0.9",
-
-  // Stage 2: Gentle tonal lift (warmth and brightness)
-  "equalizer=f=120:width_type=o:width=2:g=3",
-
-  // Stage 3: Presence boost for clarity
-  "equalizer=f=9000:width_type=o:width=2:g=2",
-];
-
-// ------------------------------------------------------------
-// 🧩 Main Processor
-// ------------------------------------------------------------
-export async function editingProcessor(sessionId, inputPath) {
-  startHeartbeat(`editingProcessor:${sessionId}`, 25000);
-  
-  startHeartbeat(`editingProcessor:${sessionId}`, 25000);
-  ensureTmpDir();
-  log.info({ sessionId }, "🎚️ Starting editingProcessor");
-
+async function findFfmpeg() {
   try {
-    const editedFile = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
-    const filterStr = filters.join(",");
-
-    // Run FFmpeg with the advanced audio filter chain
-    execSync(`ffmpeg -y -i ${inputPath} -af "${filterStr}" -ar 44100 -b:a 192k ${editedFile}`, {
-      stdio: "ignore",
+    await new Promise((res, rej) => {
+      const p = spawn("ffmpeg", ["-version"]);
+      p.on("error", rej);
+      p.on("exit", (c) => (c === 0 ? res() : rej()));
     });
-
-    // Upload to R2
-    const buffer = fs.readFileSync(editedFile);
-    const key = `${sessionId}_edited.mp3`;
-    await uploadBuffer("merged", key, buffer, "audio/mpeg");
-
-    log.info({ sessionId, key }, "💾 Uploaded edited MP3 to R2");
-    return editedFile;
-  } catch (err) {
-    log.error({ sessionId, error: err.message }, "💥 editingProcessor failed");
-    stopHeartbeat();
-    stopHeartbeat();
-    throw err;
+    return "ffmpeg";
+  } catch {
+    try {
+      const ff = await import("ffmpeg-static");
+      if (ff?.default) return ff.default;
+    } catch {}
   }
+  throw new Error("❌ ffmpeg not available in environment");
 }
+
+// ------------------------------------------------------------
+// 🎧 EQ / compression chain tuned for "mature" tone
+// ------------------------------------------------------------
+//
+//  equalizer=f=200:width_type=o:width=2:g=4   -> warmth boost
+//  equalizer=f=3000:width_type=o:width=2:g=-2 -> soften harshness
+//  bass=g=4                                   -> low-end reinforcement
+//  treble=g=-1                                -> gentle high rolloff
+//  loudnorm + compressor                      -> controlled loudness
+//
+const FILTERS = [
+  "highpass=f=70",
+  "lowpass=f=14000",
+  "equalizer=f=200:width_type=o:width=2:g=4",
+  "equalizer=f=3000:width_type=o:width=2:g=-2",
+  "bass=g=4",
+  "treble=g=-1",
+  "acompressor=threshold=-20dB:ratio=3:attack=15:release=200:makeup=5",
+  "loudnorm=I=-16:TP=-1.5:LRA=11",
+  "volume=1.05"
+].join(",");
+
+// ------------------------------------------------------------
+// 🧠 Main
+// ------------------------------------------------------------
+export async function editingProcessor(sessionId, merged) {
+  info({ sessionId }, "🎚️ Starting Deep Voice EditingProcessor (Polly)");
+
+  if (!merged) throw new Error("editingProcessor: missing merged input");
+
+  let inputPath;
+  if (typeof merged === "string") inputPath = merged;
+  else if (merged.localPath) inputPath = merged.localPath;
+  else if (merged.url) {
+    const tmpDir = path.join(os.tmpdir(), "tts_editing", sessionId);
+    await fs.mkdir(tmpDir, { recursive: true });
+    inputPath = path.join(tmpDir, "input.mp3");
+    const res = await fetch(merged.url);
+    if (!res.ok) throw new Error(`Failed to fetch merged mp3: ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    await fs.writeFile(inputPath, buf);
+    info({ sessionId, size: buf.length }, "📥 Downloaded merged MP3 for editing");
+  } else throw new Error("editingProcessor: invalid input");
+
+  const tmpOut = path.join(os.tmpdir(), "tts_editing", `${sessionId}_edited.mp3`);
+  await fs.mkdir(path.dirname(tmpOut), { recursive: true });
+
+  const ffmpegPath = await findFfmpeg();
+
+  const args = [
+    "-y",
+    "-i", inputPath,
+    "-af", FILTERS,
+    "-ar", "44100",
+    "-b:a", "192k",
+    tmpOut
+  ];
+
+  await new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, args);
+    let stderr = "";
+    proc.stderr.on("data", (d) => (stderr += d.toString()));
+    proc.on("error", reject);
+    proc.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(stderr))));
+  });
+
+  const edited = await fs.readFile(tmpOut);
+  info({ sessionId, bytes: edited.length }, "✅ Deep & Mature voice enhancement complete");
+
+  return edited;
+}
+
+export default { editingProcessor };,
