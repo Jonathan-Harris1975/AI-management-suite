@@ -14,7 +14,7 @@ import { ttsProcessor } from "./utils/ttsProcessor.js";
 import { mergeProcessor } from "./utils/mergeProcessor.js";
 import { editingProcessor } from "./utils/editingProcessor.js";
 import { podcastProcessor } from "./utils/podcastProcessor.js";
-import { startKeepAlive, stopKeepAlive } from "#shared/utils/keepalive.js";
+import { startKeepAlive, stopKeepAlive } from "../../shared/utils/keepalive.js;
 
 // ============================================================
 // 🧩 Orchestrator
