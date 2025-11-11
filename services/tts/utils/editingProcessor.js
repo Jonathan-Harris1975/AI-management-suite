@@ -1,11 +1,11 @@
 // ============================================================
-// 🎚️ editingProcessor — Deep & Mature Voice + Keep-Alive Integration
+// 🎚️ editingProcessor — Deep & Mature Voice + Heartbeat Integration
 // ============================================================
 //
 // 🧩 Features:
-//   • Deeper, warmer EQ tuning for AWS Polly voices
-//   • Continuous keep-alive during long ffmpeg processing
-//   • Graceful cleanup and error handling
+//   • Deeper EQ tuning for AWS Polly voices
+//   • Continuous heartbeat during long ffmpeg edits
+//   • Graceful cleanup + error handling
 // ============================================================
 
 import { info, error } from "#logger.js";
@@ -13,7 +13,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { startSilentKeepAlive, stopSilentKeepAlive } from "../../shared/utils/keepalive.js"; // ✅ fixed relative path
+import { startKeepAlive, stopKeepAlive } from "../../shared/utils/heartbeat.js"; // ✅ Correct file path
 
 // ------------------------------------------------------------
 // 🧠 Locate ffmpeg binary
@@ -54,11 +54,11 @@ const FILTERS = [
 // 🧩 Main editing processor
 // ------------------------------------------------------------
 export async function editingProcessor(sessionId, merged) {
-  info({ sessionId }, "🎚️ Starting Deep Voice EditingProcessor (Keep-Alive enabled)");
+  info({ sessionId }, "🎚️ Starting Deep Voice EditingProcessor (Heartbeat enabled)");
 
-  // ✅ Activate keep-alive to prevent container sleep
+  // ✅ Keep container alive during long ffmpeg runs
   const label = `editingProcessor:${sessionId}`;
-  startSilentKeepAlive(label, 25000);
+  startKeepAlive(label, 120); // pulse every 120s (2 mins)
 
   try {
     if (!merged) throw new Error("editingProcessor: missing merged input");
@@ -70,7 +70,6 @@ export async function editingProcessor(sessionId, merged) {
       const tmpDir = path.join(os.tmpdir(), "tts_editing", sessionId);
       await fs.mkdir(tmpDir, { recursive: true });
       inputPath = path.join(tmpDir, "input.mp3");
-
       const res = await fetch(merged.url);
       if (!res.ok) throw new Error(`Failed to fetch merged mp3: ${res.status}`);
       const buf = Buffer.from(await res.arrayBuffer());
@@ -94,7 +93,7 @@ export async function editingProcessor(sessionId, merged) {
       tmpOut
     ];
 
-    info({ sessionId, args }, "🎛️ ffmpeg process starting (keep-alive engaged)");
+    info({ sessionId }, "🎛️ ffmpeg process starting (heartbeat engaged)");
 
     await new Promise((resolve, reject) => {
       const proc = spawn(ffmpegPath, args);
@@ -112,8 +111,8 @@ export async function editingProcessor(sessionId, merged) {
     error({ sessionId, err: err.message }, "💥 editingProcessor failed");
     throw err;
   } finally {
-    stopSilentKeepAlive(label);
-    info({ sessionId }, "🌙 Keep-alive stopped (editing complete)");
+    stopKeepAlive(label);
+    info({ sessionId }, "🌙 Heartbeat stopped (editing complete)");
   }
 }
 
