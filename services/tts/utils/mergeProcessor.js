@@ -7,10 +7,12 @@
 // ✅ Downloads to /tmp, builds ffmpeg concat list
 // ✅ Uses ffmpeg if available; otherwise falls back to buffer concat
 // ✅ Uploads to R2 'merged' bucket and returns { key, url }
+// ✅ Now includes render-safe keep-alive throughout the merge stage
 // ============================================================
 
 import { info, warn, error } from "#logger.js";
 import { putObject, buildPublicUrl } from "#shared/r2-client.js";
+import { startKeepAlive, stopKeepAlive } from "../../shared/utils/keepalive.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -19,7 +21,7 @@ import { spawn } from "node:child_process";
 // ---------- Config ----------
 const MERGED_BUCKET_KEY = "merged"; // R2 alias handled in r2-client
 const PUBLIC_BASE_URL_MERGE =
-  process.env.R2_PUBLIC_BASE_URL_MERGE || ""; // used by buildPublicUrl if set
+  process.env.R2_PUBLIC_BASE_URL_MERGE || "";
 
 // ---------- Helpers ----------
 function toUrlList(input) {
@@ -68,7 +70,6 @@ async function downloadToFile(url, filePath) {
 }
 
 async function whichFfmpeg() {
-  // 1) try system ffmpeg
   try {
     await new Promise((resolve, reject) => {
       const p = spawn("ffmpeg", ["-version"]);
@@ -78,9 +79,7 @@ async function whichFfmpeg() {
     return "ffmpeg";
   } catch (_) {}
 
-  // 2) try ffmpeg-static if installed
   try {
-    // eslint-disable-next-line import/no-extraneous-dependencies, global-require
     const ff = await import("ffmpeg-static");
     if (ff?.default) return ff.default;
   } catch (_) {}
@@ -90,17 +89,28 @@ async function whichFfmpeg() {
 
 async function concatWithFfmpeg(listFile, outFile, ffmpegPath) {
   await new Promise((resolve, reject) => {
-    const proc = spawn(ffmpegPath, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", outFile]);
+    const proc = spawn(ffmpegPath, [
+      "-y",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      listFile,
+      "-c",
+      "copy",
+      outFile,
+    ]);
     let stderr = "";
     proc.stderr.on("data", (d) => (stderr += d.toString()));
     proc.on("error", reject);
-    proc.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(stderr || `ffmpeg exited ${code}`))));
+    proc.on("exit", (code) =>
+      code === 0 ? resolve() : reject(new Error(stderr || `ffmpeg exited ${code}`))
+    );
   });
 }
 
 async function concatBuffers(files, outFile) {
-  // Minimal, pragmatic MP3 concat for identical codec (Polly) outputs.
-  // Not as strict as ffmpeg, but widely playable.
   const bufs = await Promise.all(files.map((f) => fs.readFile(f)));
   const total = Buffer.concat(bufs);
   await fs.writeFile(outFile, total);
@@ -108,66 +118,83 @@ async function concatBuffers(files, outFile) {
 
 // ---------- Main ----------
 export async function mergeProcessor(sessionId, ttsResults) {
-  info({ sessionId }, "🎧 Starting mergeProcessor");
+  const label = `mergeProcessor:${sessionId}`;
+  startKeepAlive(label, 20000); // keep alive every 20s
+  info({ sessionId }, "🎧 Starting mergeProcessor (keep-alive active)");
 
-  // 1) Build ordered list of URLs
-  const urls = toUrlList(ttsResults).filter(Boolean);
-  if (!urls.length) throw new Error("No valid chunk URLs to merge");
+  try {
+    // 1) Build ordered list of URLs
+    const urls = toUrlList(ttsResults).filter(Boolean);
+    if (!urls.length) throw new Error("No valid chunk URLs to merge");
 
-  // 2) Prep temp workspace
-  const baseTmp = path.join(os.tmpdir(), "podcast_merge", sessionId);
-  const listFile = path.join(baseTmp, `${sessionId}_list.txt`);
-  const outFile = path.join(baseTmp, `${sessionId}_merged.mp3`);
-  await ensureDir(baseTmp);
+    // 2) Prep temp workspace
+    const baseTmp = path.join(os.tmpdir(), "podcast_merge", sessionId);
+    const listFile = path.join(baseTmp, `${sessionId}_list.txt`);
+    const outFile = path.join(baseTmp, `${sessionId}_merged.mp3`);
+    await ensureDir(baseTmp);
 
-  // 3) Download all parts
-  const localFiles = [];
-  for (let i = 0; i < urls.length; i++) {
-    const num = String(i + 1).padStart(3, "0");
-    const fpath = path.join(baseTmp, `part-${num}.mp3`);
-    try {
-      await downloadToFile(urls[i], fpath);
-      localFiles.push(fpath);
-    } catch (err) {
-      warn({ sessionId, url: urls[i], err: err.message }, "⚠️ Skipping failed download");
+    // 3) Download all parts
+    const localFiles = [];
+    for (let i = 0; i < urls.length; i++) {
+      const num = String(i + 1).padStart(3, "0");
+      const fpath = path.join(baseTmp, `part-${num}.mp3`);
+      try {
+        await downloadToFile(urls[i], fpath);
+        localFiles.push(fpath);
+      } catch (err) {
+        warn({ sessionId, url: urls[i], err: err.message }, "⚠️ Skipping failed download");
+      }
     }
-  }
-  if (!localFiles.length) throw new Error("All chunk downloads failed — nothing to merge");
+    if (!localFiles.length)
+      throw new Error("All chunk downloads failed — nothing to merge");
 
-  // 4) Write ffmpeg concat list
-  const listContent = localFiles.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n");
-  await fs.writeFile(listFile, listContent, "utf-8");
+    // 4) Write ffmpeg concat list
+    const listContent = localFiles
+      .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
+      .join("\n");
+    await fs.writeFile(listFile, listContent, "utf-8");
 
-  // 5) Try ffmpeg, else fallback to buffer concat
-  let usedFfmpeg = false;
-  const ffmpegPath = await whichFfmpeg();
-  if (ffmpegPath) {
-    try {
-      await concatWithFfmpeg(listFile, outFile, ffmpegPath);
-      usedFfmpeg = true;
-      info({ sessionId, ffmpegPath }, "🎛️ Merged with ffmpeg");
-    } catch (err) {
-      warn({ sessionId, err: err.message }, "⚠️ ffmpeg merge failed, falling back to buffer concat");
+    // 5) Try ffmpeg, else fallback to buffer concat
+    let usedFfmpeg = false;
+    const ffmpegPath = await whichFfmpeg();
+    if (ffmpegPath) {
+      try {
+        await concatWithFfmpeg(listFile, outFile, ffmpegPath);
+        usedFfmpeg = true;
+        info({ sessionId, ffmpegPath }, "🎛️ Merged with ffmpeg");
+      } catch (err) {
+        warn({ sessionId, err: err.message }, "⚠️ ffmpeg merge failed, falling back to buffer concat");
+      }
+    } else {
+      warn({ sessionId }, "⚠️ ffmpeg not available, using buffer concat fallback");
     }
-  } else {
-    warn({ sessionId }, "⚠️ ffmpeg not available, using buffer concat fallback");
+
+    if (!usedFfmpeg) {
+      await concatBuffers(localFiles, outFile);
+      info({ sessionId }, "🎛️ Merged via buffer concatenation");
+    }
+
+    // 6) Upload to R2 (merged bucket)
+    const key = `${sessionId}.mp3`;
+    const mp3Buf = await fs.readFile(outFile);
+    await putObject(MERGED_BUCKET_KEY, key, mp3Buf, "audio/mpeg");
+    const publicUrl = buildPublicUrl
+      ? buildPublicUrl(MERGED_BUCKET_KEY, key)
+      : `${PUBLIC_BASE_URL_MERGE}/${encodeURIComponent(key)}`;
+
+    info(
+      { sessionId, key, size: mp3Buf.length, publicUrl },
+      "💾 Merged MP3 uploaded to R2"
+    );
+
+    // 7) Return metadata for next stage (editingProcessor)
+    return { key, url: publicUrl, localPath: outFile, count: localFiles.length };
+  } catch (err) {
+    error({ sessionId, err: err.message }, "💥 mergeProcessor failed");
+    throw err;
+  } finally {
+    stopKeepAlive(label);
   }
-
-  if (!usedFfmpeg) {
-    await concatBuffers(localFiles, outFile);
-    info({ sessionId }, "🎛️ Merged via buffer concatenation");
-  }
-
-  // 6) Upload to R2 (merged bucket)
-  const key = `${sessionId}.mp3`;
-  const mp3Buf = await fs.readFile(outFile);
-  await putObject(MERGED_BUCKET_KEY, key, mp3Buf, "audio/mpeg");
-  const publicUrl = buildPublicUrl ? buildPublicUrl(MERGED_BUCKET_KEY, key) : `${PUBLIC_BASE_URL_MERGE}/${encodeURIComponent(key)}`;
-
-  info({ sessionId, key, size: mp3Buf.length, publicUrl }, "💾 Merged MP3 uploaded to R2");
-
-  // 7) Return metadata for next stage (editingProcessor)
-  return { key, url: publicUrl, localPath: outFile, count: localFiles.length };
 }
 
 export default { mergeProcessor };
