@@ -2,12 +2,10 @@
 // 🎛️ mergeProcessor — Robust MP3 concatenation for TTS chunks
 // ============================================================
 //
-// ✅ Accepts: string[] or { index:number, url:string }[]
-// ✅ Sorts correctly (by index, else by filename number)
-// ✅ Downloads to /tmp, builds ffmpeg concat list
-// ✅ Uses ffmpeg if available; otherwise falls back to buffer concat
-// ✅ Uploads to Cloudflare R2 'merged' bucket safely
-// ✅ Includes Render-safe keep-alive across the merge stage
+// ✅ Bounded-parallel downloads with per-chunk timeout + retries
+// ✅ ffmpeg concat demuxer with safe fallback to buffer concat
+// ✅ Render-safe keep-alive active during entire stage
+// ✅ Explicit R2 upload with strong logging & URL building
 // ============================================================
 
 import { info, warn, error } from "#logger.js";
@@ -19,17 +17,21 @@ import os from "node:os";
 import { spawn } from "node:child_process";
 
 // ------------------------------------------------------------
-// ⚙️ Config
+// ⚙️ Tunables
 // ------------------------------------------------------------
-const MERGED_BUCKET_KEY = "merged";
-const PUBLIC_BASE_URL_MERGE = process.env.R2_PUBLIC_BASE_URL_MERGE || "";
+const DL_CONCURRENCY = Number(process.env.MERGE_DL_CONCURRENCY || 4);
+const DL_TIMEOUT_MS  = Number(process.env.MERGE_DL_TIMEOUT_MS  || 60_000);
+const DL_RETRIES     = Number(process.env.MERGE_DL_RETRIES     || 2);
+const KA_INTERVAL_MS = Number(process.env.MERGE_KEEPALIVE_MS   || 15_000);
+
+const PUBLIC_BASE_URL_MERGE = (process.env.R2_PUBLIC_BASE_URL_MERGE || "").replace(/\/$/, "");
+const BUCKET_MERGED = process.env.R2_BUCKET_MERGED || process.env.R2_BUCKET_PODCAST || "podcast-merged";
 
 // ------------------------------------------------------------
 // 🧩 Helpers
 // ------------------------------------------------------------
 function toUrlList(input) {
   if (!Array.isArray(input)) return [];
-
   const mapped = input
     .map((x) =>
       typeof x === "string"
@@ -60,11 +62,32 @@ async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
 }
 
-async function downloadToFile(url, filePath) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Download failed: ${url} -> ${res.status} ${res.statusText}`);
-  const ab = await res.arrayBuffer();
-  await fs.writeFile(filePath, Buffer.from(ab));
+async function fetchWithTimeout(url, timeoutMs) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(new Error(`Timeout ${timeoutMs}ms`)), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    return res;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+async function downloadToFile(url, filePath, timeoutMs, attempt = 0) {
+  try {
+    const res = await fetchWithTimeout(url, timeoutMs);
+    if (!res.ok) {
+      throw new Error(`Download failed: ${url} -> ${res.status} ${res.statusText}`);
+    }
+    const ab = await res.arrayBuffer();
+    await fs.writeFile(filePath, Buffer.from(ab));
+  } catch (err) {
+    if (attempt < DL_RETRIES) {
+      warn({ url, attempt, err: err.message }, "↻ Retrying chunk download");
+      return downloadToFile(url, filePath, timeoutMs, attempt + 1);
+    }
+    throw err;
+  }
 }
 
 async function whichFfmpeg() {
@@ -114,43 +137,71 @@ async function concatBuffers(files, outFile) {
   await fs.writeFile(outFile, total);
 }
 
+// Simple bounded concurrency runner
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let idx = 0;
+  let active = 0;
+
+  return await new Promise((resolve, reject) => {
+    const next = () => {
+      if (idx >= items.length && active === 0) return resolve(results);
+      while (active < limit && idx < items.length) {
+        const i = idx++;
+        active++;
+        Promise.resolve(fn(items[i], i))
+          .then((r) => (results[i] = r))
+          .catch((e) => (results[i] = { __error: e }))
+          .finally(() => {
+            active--;
+            next();
+          });
+      }
+    };
+    next();
+  });
+}
+
 // ------------------------------------------------------------
 // 🚀 Main Processor
 // ------------------------------------------------------------
 export async function mergeProcessor(sessionId, ttsResults) {
   const label = `mergeProcessor:${sessionId}`;
-  startKeepAlive(label, 20000);
-  info({ sessionId }, "🎧 Starting mergeProcessor (keep-alive active)");
+  startKeepAlive(label, KA_INTERVAL_MS);
+  info(
+    { sessionId, DL_CONCURRENCY, DL_TIMEOUT_MS, DL_RETRIES, KA_INTERVAL_MS, bucket: BUCKET_MERGED },
+    "🎧 Starting mergeProcessor (keep-alive active)"
+  );
 
   try {
-    // 1️⃣ Build ordered list of URLs
+    // 1️⃣ URLs
     const urls = toUrlList(ttsResults).filter(Boolean);
     if (!urls.length) throw new Error("No valid chunk URLs to merge");
 
-    // 2️⃣ Prepare temp workspace
+    // 2️⃣ Temp workspace
     const baseTmp = path.join(os.tmpdir(), "podcast_merge", sessionId);
     const listFile = path.join(baseTmp, `${sessionId}_list.txt`);
     const outFile = path.join(baseTmp, `${sessionId}_merged.mp3`);
     await ensureDir(baseTmp);
 
-    // 3️⃣ Download all chunks
-    const localFiles = [];
-    for (let i = 0; i < urls.length; i++) {
+    // 3️⃣ Parallel downloads with timeout & retry
+    const localFiles = new Array(urls.length);
+    await mapLimit(urls, DL_CONCURRENCY, async (url, i) => {
       const num = String(i + 1).padStart(3, "0");
       const fpath = path.join(baseTmp, `part-${num}.mp3`);
       try {
-        await downloadToFile(urls[i], fpath);
-        localFiles.push(fpath);
+        await downloadToFile(url, fpath, DL_TIMEOUT_MS);
+        localFiles[i] = fpath;
       } catch (err) {
-        warn({ sessionId, url: urls[i], err: err.message }, "⚠️ Skipping failed download");
+        warn({ sessionId, url, err: err.message }, "⚠️ Skipping failed download");
       }
-    }
-    if (!localFiles.length) throw new Error("All chunk downloads failed — nothing to merge");
+    });
 
-    // 4️⃣ Write ffmpeg concat list
-    const listContent = localFiles
-      .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
-      .join("\n");
+    const filtered = localFiles.filter(Boolean);
+    if (!filtered.length) throw new Error("All chunk downloads failed — nothing to merge");
+
+    // 4️⃣ Write ffmpeg concat list (only the files that downloaded)
+    const listContent = filtered.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n");
     await fs.writeFile(listFile, listContent, "utf-8");
 
     // 5️⃣ Merge using ffmpeg if available, else buffer concat
@@ -169,7 +220,7 @@ export async function mergeProcessor(sessionId, ttsResults) {
     }
 
     if (!usedFfmpeg) {
-      await concatBuffers(localFiles, outFile);
+      await concatBuffers(filtered, outFile);
       info({ sessionId }, "🎛️ Merged via buffer concatenation");
     }
 
@@ -177,26 +228,21 @@ export async function mergeProcessor(sessionId, ttsResults) {
     const key = `${sessionId}.mp3`;
     const mp3Buf = await fs.readFile(outFile);
 
-    const bucketName =
-      process.env.R2_BUCKET_MERGED ||
-      process.env.R2_BUCKET_PODCAST ||
-      "podcast-merged";
-
     try {
-      await putObject(bucketName, key, mp3Buf, "audio/mpeg");
+      await putObject(BUCKET_MERGED, key, mp3Buf, "audio/mpeg");
 
       const publicUrl = buildPublicUrl
-        ? buildPublicUrl(bucketName, key)
-        : `${(process.env.R2_PUBLIC_BASE_URL_MERGE || "").replace(/\/$/, "")}/${encodeURIComponent(key)}`;
+        ? buildPublicUrl(BUCKET_MERGED, key)
+        : `${PUBLIC_BASE_URL_MERGE}/${encodeURIComponent(key)}`;
 
       info(
-        { sessionId, key, size: mp3Buf.length, bucketName, publicUrl },
+        { sessionId, key, size: mp3Buf.length, bucketName: BUCKET_MERGED, publicUrl },
         "💾 Merged MP3 uploaded to R2"
       );
 
-      return { key, url: publicUrl, localPath: outFile, count: localFiles.length };
+      return { key, url: publicUrl, localPath: outFile, count: filtered.length };
     } catch (uploadErr) {
-      error({ sessionId, err: uploadErr.message, bucketName }, "💥 R2 upload failed in mergeProcessor");
+      error({ sessionId, err: uploadErr.message, bucketName: BUCKET_MERGED }, "💥 R2 upload failed in mergeProcessor");
       throw uploadErr;
     }
   } catch (err) {
