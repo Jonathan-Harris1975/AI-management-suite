@@ -3,21 +3,20 @@
 // ============================================================
 //
 // 🧩 Features:
-//   • Warm, deeper tone enhancement for AWS Polly
-//   • Loudness normalization for podcast standards
-//   • Auto heartbeat (prevents Render/Shipr idle restarts)
-//   • Graceful cleanup even if ffmpeg fails
+//   • Deeper, warmer EQ tuning for AWS Polly voices
+//   • Continuous keep-alive during long ffmpeg processing
+//   • Graceful cleanup and error handling
 // ============================================================
 
-import { info, warn, error } from "#logger.js";
+import { info, error } from "#logger.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { startSilentKeepAlive, stopSilentKeepAlive } from "#keepalive.js"; // ✅ use the global silent keep-alive
+import { startSilentKeepAlive, stopSilentKeepAlive } from "../../shared/utils/keepalive.js"; // ✅ fixed relative path
 
 // ------------------------------------------------------------
-// 🧠 Locate ffmpeg
+// 🧠 Locate ffmpeg binary
 // ------------------------------------------------------------
 async function findFfmpeg() {
   try {
@@ -37,7 +36,7 @@ async function findFfmpeg() {
 }
 
 // ------------------------------------------------------------
-// 🎧 Deep & mature EQ / compression chain
+// 🎧 EQ / compression chain tuned for deep mature tone
 // ------------------------------------------------------------
 const FILTERS = [
   "highpass=f=70",
@@ -55,9 +54,9 @@ const FILTERS = [
 // 🧩 Main editing processor
 // ------------------------------------------------------------
 export async function editingProcessor(sessionId, merged) {
-  info({ sessionId }, "🎚️ Starting Deep Voice EditingProcessor with Keep-Alive");
+  info({ sessionId }, "🎚️ Starting Deep Voice EditingProcessor (Keep-Alive enabled)");
 
-  // ✅ Activate keep-alive every 25s (safe interval)
+  // ✅ Activate keep-alive to prevent container sleep
   const label = `editingProcessor:${sessionId}`;
   startSilentKeepAlive(label, 25000);
 
@@ -71,12 +70,15 @@ export async function editingProcessor(sessionId, merged) {
       const tmpDir = path.join(os.tmpdir(), "tts_editing", sessionId);
       await fs.mkdir(tmpDir, { recursive: true });
       inputPath = path.join(tmpDir, "input.mp3");
+
       const res = await fetch(merged.url);
       if (!res.ok) throw new Error(`Failed to fetch merged mp3: ${res.status}`);
       const buf = Buffer.from(await res.arrayBuffer());
       await fs.writeFile(inputPath, buf);
       info({ sessionId, size: buf.length }, "📥 Downloaded merged MP3 for editing");
-    } else throw new Error("editingProcessor: invalid input");
+    } else {
+      throw new Error("editingProcessor: invalid input");
+    }
 
     const tmpOut = path.join(os.tmpdir(), "tts_editing", `${sessionId}_edited.mp3`);
     await fs.mkdir(path.dirname(tmpOut), { recursive: true });
@@ -92,7 +94,7 @@ export async function editingProcessor(sessionId, merged) {
       tmpOut
     ];
 
-    info({ sessionId }, "🎛️ ffmpeg process starting (keep-alive engaged)");
+    info({ sessionId, args }, "🎛️ ffmpeg process starting (keep-alive engaged)");
 
     await new Promise((resolve, reject) => {
       const proc = spawn(ffmpegPath, args);
@@ -110,8 +112,7 @@ export async function editingProcessor(sessionId, merged) {
     error({ sessionId, err: err.message }, "💥 editingProcessor failed");
     throw err;
   } finally {
-    // ✅ Stop keep-alive
-    stopSilentKeepAlive();
+    stopSilentKeepAlive(label);
     info({ sessionId }, "🌙 Keep-alive stopped (editing complete)");
   }
 }
