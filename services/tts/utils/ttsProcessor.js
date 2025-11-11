@@ -1,12 +1,12 @@
-    // ============================================================
-// 🎙️ TTS Processor — Cloud-Native Production Version
+// services/tts/utils/ttsProcessor.js
+// ============================================================
+// 🎙️ TTS Processor — Bulletproof Polly + R2 Upload Version
 // ============================================================
 //
 // ✅ Reads text chunks from R2_PUBLIC_BASE_URL_RAW_TEXT
 // ✅ Synthesizes speech with Amazon Polly (Neural)
 // ✅ Uploads .mp3 chunks to R2_BUCKET_CHUNKS (podcast-chunks)
-// ✅ Returns metadata for mergeProcessor
-// ✅ Fully aligned with Shiper R2 environment
+// ✅ Returns a clean array of valid public URLs for mergeProcessor
 // ============================================================
 
 import {
@@ -64,6 +64,8 @@ export async function ttsProcessor(sessionId, chunkList = []) {
   const tasks = chunkList.map((chunk, index) =>
     limit(async () => {
       const chunkNumber = index + 1;
+      const key = `${sessionId}/audio-${String(chunkNumber).padStart(3, "0")}.mp3`;
+
       try {
         // -----------------------------------------------------------
         // 🔍 Fetch text from R2_PUBLIC_BASE_URL_RAW_TEXT
@@ -98,9 +100,8 @@ export async function ttsProcessor(sessionId, chunkList = []) {
         );
 
         // -----------------------------------------------------------
-        // ☁️ Upload to R2_BUCKET_CHUNKS (podcast-chunks)
+        // ☁️ Upload to R2_BUCKET_CHUNKS
         // -----------------------------------------------------------
-        const key = `${sessionId}/audio-${String(chunkNumber).padStart(3, "0")}.mp3`;
         await putObject("chunks", key, audioBuffer, "audio/mpeg");
 
         const publicUrl = `${R2_PUBLIC_BASE_URL_CHUNKS}/${encodeURIComponent(key)}`;
@@ -121,7 +122,14 @@ export async function ttsProcessor(sessionId, chunkList = []) {
           { sessionId, index: chunkNumber, message: err.message },
           "❌ TTS Chunk Failure"
         );
-        results.push({ success: false, index: chunkNumber, error: err.message });
+        // Push placeholder entry to preserve index order
+        results.push({
+          success: false,
+          index: chunkNumber,
+          key,
+          url: null,
+          error: err.message,
+        });
       }
     })
   );
@@ -129,21 +137,21 @@ export async function ttsProcessor(sessionId, chunkList = []) {
   await Promise.all(tasks);
 
   // ------------------------------------------------------------------
-  // 📊 Summary
+  // 📊 Summary + Sanitize
   // ------------------------------------------------------------------
-  const successCount = results.filter((r) => r.success).length;
-  const failCount = results.filter((r) => !r.success).length;
+  const successChunks = results.filter((r) => r.success && r.url);
+  const failCount = results.length - successChunks.length;
 
   info(
-    { sessionId, total: results.length, successCount, failCount },
+    { sessionId, total: results.length, success: successChunks.length, failed: failCount },
     "🎧 TTS Summary"
   );
 
-  if (successCount === 0)
-    throw new Error("No TTS chunks were produced or returned.");
+  if (successChunks.length === 0)
+    throw new Error("No valid TTS chunks produced — all failed.");
 
   info({ sessionId }, "🗣️ TTS complete");
-  return results;
+  return successChunks;
 }
 
 // ------------------------------------------------------------------
