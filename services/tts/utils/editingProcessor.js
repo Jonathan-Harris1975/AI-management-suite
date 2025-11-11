@@ -5,8 +5,8 @@
 // 🎯 Goals:
 //   • Add warmth and body (~150–350 Hz boost)
 //   • Slightly soften top-end (~6–8 kHz rolloff)
-//   • Preserve clarity and avoid metallic artifacts
-//   • Maintain podcast-level loudness (-16 LUFS)
+//   • Maintain clarity and natural tone
+//   • Normalize loudness to −16 LUFS (podcast standard)
 // ============================================================
 
 import { info, warn } from "#logger.js";
@@ -33,20 +33,13 @@ async function findFfmpeg() {
 }
 
 // ------------------------------------------------------------
-// 🎧 EQ / compression chain tuned for "mature" tone
+// 🎧 EQ / compression chain tuned for deeper, mature tone
 // ------------------------------------------------------------
-//
-//  equalizer=f=200:width_type=o:width=2:g=4   -> warmth boost
-//  equalizer=f=3000:width_type=o:width=2:g=-2 -> soften harshness
-//  bass=g=4                                   -> low-end reinforcement
-//  treble=g=-1                                -> gentle high rolloff
-//  loudnorm + compressor                      -> controlled loudness
-//
 const FILTERS = [
   "highpass=f=70",
   "lowpass=f=14000",
-  "equalizer=f=200:width_type=o:width=2:g=4",
-  "equalizer=f=3000:width_type=o:width=2:g=-2",
+  "equalizer=f=200:width_type=o:width=2:g=4",   // warmth boost
+  "equalizer=f=3000:width_type=o:width=2:g=-2", // soften harshness
   "bass=g=4",
   "treble=g=-1",
   "acompressor=threshold=-20dB:ratio=3:attack=15:release=200:makeup=5",
@@ -104,4 +97,4 @@ export async function editingProcessor(sessionId, merged) {
   return edited;
 }
 
-export default { editingProcessor };,
+export default { editingProcessor };
