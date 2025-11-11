@@ -10,8 +10,7 @@ import { mergeProcessor } from "./mergeProcessor.js";
 import { editingProcessor } from "./editingProcessor.js";
 import { podcastProcessor } from "./podcastProcessor.js";
 import { putObject } from "#shared/r2-client.js";
-import startHeartbeat from "../../shared/utils/heartbeat.js"; // ✅ fixed verified path
-
+import { startKeepAlive } from "../../shared/utils/heartbeat.js";
 // ------------------------------------------------------------
 // ⚙️ Environment Configuration
 // ------------------------------------------------------------
@@ -36,7 +35,7 @@ export async function orchestrateTTS(session) {
   info({ sessionId }, "🎬 Orchestration begin");
 
   try {
-    startHeartbeat("ttsProcessor", sessionId);
+    startKeepAlive("ttsProcessor", sessionId);
 
     // 1️⃣ Generate TTS chunks (returns array of PUBLIC URLs)
     const t1 = Date.now();
