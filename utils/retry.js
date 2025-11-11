@@ -1,4 +1,4 @@
-import { log as logger } from "./logger.js";
+import { log as logger } from "#logger.js";
 export async function withRetries(name, fn, tries = 3, delayMs = 2000) {
   let lastErr;
   for (let i=1; i<=tries; i++) {
