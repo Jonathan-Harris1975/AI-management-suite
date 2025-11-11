@@ -5,9 +5,10 @@
 //
 // ✅ Includes:
 //   - Amazon S3-compatible client
-//   - Full alias support (rss-feeds, transcript, rawtext)
+//   - Full alias + normalization support
 //   - Flat key uploads (no nested folders)
-//   - Restored `putObject` for backward compatibility
+//   - Safe fallback handling for unknown keys
+//   - Restored legacy aliases (putObject, getObject, etc.)
 // ============================================================
 
 import {
@@ -51,7 +52,37 @@ const {
 } = process.env;
 
 // ------------------------------------------------------------
-// 🧠 Client Initialization
+// 🧩 Key Normalizer (Bullet-Proof Alias Resolver)
+// ------------------------------------------------------------
+function normalizeBucketKey(key = "") {
+  const cleaned = key.toString().trim().toLowerCase().replace(/[-_]/g, "");
+
+  const map = {
+    podcast: "podcast",
+    raw: "rawtext",
+    rawtext: "rawtext",
+    rawtxt: "rawtext",
+    rawtextbucket: "rawtext",
+    meta: "meta",
+    merged: "merged",
+    merge: "merged",
+    art: "art",
+    artwork: "art",
+    rss: "rss-feeds",
+    rssfeed: "rss-feeds",
+    rssfeeds: "rss-feeds",
+    rssfeedsbucket: "rss-feeds",
+    podcastrss: "podcastRss",
+    rssfeedsalt: "rss-feeds",
+    transcript: "transcripts",
+    transcripts: "transcripts",
+  };
+
+  return map[cleaned] || cleaned;
+}
+
+// ------------------------------------------------------------
+// 🧠 S3 Client Initialization
 // ------------------------------------------------------------
 export const s3 = new S3Client({
   region: R2_REGION || "auto",
@@ -63,26 +94,17 @@ export const s3 = new S3Client({
 });
 
 // ------------------------------------------------------------
-// 🪣 Bucket Registry (includes rss-feeds alias)
+// 🪣 Bucket Registry (includes all aliases)
 // ------------------------------------------------------------
 export const R2_BUCKETS = {
   podcast: R2_BUCKET_PODCAST,
-  raw: R2_BUCKET_RAW,
-  rawtext: R2_BUCKET_RAW_TEXT,
-  rawText: R2_BUCKET_RAW_TEXT,
+  rawtext: R2_BUCKET_RAW_TEXT || R2_BUCKET_RAW,
   meta: R2_BUCKET_META,
   merged: R2_BUCKET_MERGED,
   art: R2_BUCKET_ART,
-
-  // ✅ RSS aliases
-  rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
-  "rss-feeds": R2_BUCKET_RSS_FEEDS || "rss-feeds",
-  podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS || R2_BUCKET_RSS_FEEDS || "rss-feeds",
-  rssfeeds: R2_BUCKET_RSS_FEEDS || "rss-feeds",
-
-  // ✅ Transcript aliases
+  "rss-feeds": R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS,
+  podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS || R2_BUCKET_RSS_FEEDS,
   transcripts: R2_BUCKET_TRANSCRIPTS,
-  transcript: R2_BUCKET_TRANSCRIPTS,
 };
 
 // ------------------------------------------------------------
@@ -90,24 +112,27 @@ export const R2_BUCKETS = {
 // ------------------------------------------------------------
 export const R2_PUBLIC_URLS = {
   podcast: R2_PUBLIC_BASE_URL_PODCAST,
-  raw: R2_PUBLIC_BASE_URL_RAW,
-  rawText: R2_PUBLIC_BASE_URL_RAW_TEXT,
+  rawtext: R2_PUBLIC_BASE_URL_RAW_TEXT || R2_PUBLIC_BASE_URL_RAW,
   meta: R2_PUBLIC_BASE_URL_META,
   merged: R2_PUBLIC_BASE_URL_MERGE,
   art: R2_PUBLIC_BASE_URL_ART,
-  rss: R2_PUBLIC_BASE_URL_RSS,
-  transcript: R2_PUBLIC_BASE_URL_TRANSCRIPT,
+  "rss-feeds": R2_PUBLIC_BASE_URL_RSS,
+  transcripts: R2_PUBLIC_BASE_URL_TRANSCRIPT,
 };
 
 // ------------------------------------------------------------
-// 🧩 Bucket Validator
+// 🧩 Bucket Validator (with normalization + auto-fallback)
 // ------------------------------------------------------------
 export function ensureBucketKey(bucketKey) {
-  const bucket = R2_BUCKETS[bucketKey];
+  const canonical = normalizeBucketKey(bucketKey);
+  const bucket = R2_BUCKETS[canonical];
+
   if (!bucket) {
     const valid = Object.keys(R2_BUCKETS).join(", ");
+    log.error({ bucketKey, canonical }, "❌ Unknown R2 bucket key");
     throw new Error(`❌ Unknown R2 bucket key: ${bucketKey} — valid keys: ${valid}`);
   }
+
   return bucket;
 }
 
@@ -124,7 +149,8 @@ export async function uploadBuffer(bucketKey, key, buffer, contentType = "applic
       ContentType: contentType,
     })
   );
-  return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
+  const canonical = normalizeBucketKey(bucketKey);
+  return `${R2_PUBLIC_URLS[canonical]}/${encodeURIComponent(key)}`;
 }
 
 export async function uploadText(bucketKey, key, text, contentType = "text/plain") {
@@ -140,10 +166,10 @@ export async function getObjectAsText(bucketKey, key) {
 }
 
 // ------------------------------------------------------------
-// 🔁 Aliases (Restored Legacy Exports)
+// 🔁 Legacy + Compatibility Aliases
 // ------------------------------------------------------------
 export const r2Put = uploadBuffer;
-export const putObject = uploadBuffer; // ✅ Restored legacy alias for orchestrator.js
+export const putObject = uploadBuffer;
 export const putJson = async (bucketKey, key, obj) =>
   uploadText(bucketKey, key, JSON.stringify(obj, null, 2), "application/json");
 export const putText = uploadText;
@@ -172,14 +198,19 @@ export async function deleteObject(bucketKey, key) {
 }
 
 export function buildPublicUrl(bucketKey, key) {
-  return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
+  const canonical = normalizeBucketKey(bucketKey);
+  return `${R2_PUBLIC_URLS[canonical]}/${encodeURIComponent(key)}`;
 }
 
 // ------------------------------------------------------------
 // 🧾 Startup Log
 // ------------------------------------------------------------
 log.info(
-  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.values(R2_BUCKETS) },
+  {
+    endpoint: R2_ENDPOINT,
+    region: R2_REGION,
+    buckets: Object.entries(R2_BUCKETS),
+  },
   "r2-client.initialized"
 );
 
@@ -197,11 +228,12 @@ export default {
   listKeys,
   getR2ReadStream,
   buildPublicUrl,
-  // ✅ Legacy aliases
   r2Put,
   putObject,
   putJson,
   putText,
   getObject,
   r2Get,
+  ensureBucketKey,
+  normalizeBucketKey,
 };
