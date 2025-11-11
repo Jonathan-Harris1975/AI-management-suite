@@ -1,66 +1,66 @@
 // ============================================================
-// ❤️ Heartbeat Utility — Keeps container alive during long tasks
+// ❤️ Robust Heartbeat Utility — Keeps container alive reliably
 // ============================================================
 
 import { info } from "#logger.js";
 
-// Use a global symbol to ensure only ONE heartbeat across all imports
-const HEARTBEAT_KEY = Symbol.for('__app_heartbeat_interval__');
+const HEARTBEAT_KEY = Symbol.for("__app_heartbeat_interval__");
 
 /**
- * Gets the global interval reference
+ * Accessor for global heartbeat ID
  */
 function getInterval() {
-  return globalThis[HEARTBEAT_KEY];
+  return globalThis[HEARTBEAT_KEY] || null;
+}
+
+function setIntervalId(id) {
+  globalThis[HEARTBEAT_KEY] = id;
 }
 
 /**
- * Sets the global interval reference
- */
-function setInterval(val) {
-  globalThis[HEARTBEAT_KEY] = val;
-}
-
-/**
- * Starts a heartbeat log every N seconds to prevent idle timeout.
- * @param {string} label - Identifier for logs, e.g. "TTS Pipeline"
- * @param {number} intervalSeconds - Interval in SECONDS (default: 120s / 2 minutes)
+ * Starts a single global heartbeat
+ * @param {string} label - Label for log output
+ * @param {number} intervalSeconds - Time in seconds (default: 120)
  */
 export function startHeartbeat(label = "Heartbeat", intervalSeconds = 120) {
-  // Stop any existing heartbeat first
+  // Always stop any previous interval before creating a new one
   stopHeartbeat();
-  
-  // Safety check: minimum 5 seconds to prevent runaway logs
-  const safeInterval = Math.max(intervalSeconds, 5);
-  const ms = safeInterval * 1000;
-  
-  if (intervalSeconds < 5) {
-    info({ label }, `⚠️ Heartbeat interval too low (${intervalSeconds}s), using minimum of 5s`);
-  }
-  
-  info({ label }, `💚 Starting heartbeat for ${label} (every ${safeInterval}s, ${ms}ms)`);
-  
-  // Create the interval
-  const intervalId = global.setInterval(() => {
+
+  // Clamp to minimum interval (avoid log spam)
+  const safeSeconds = Math.max(intervalSeconds, 5);
+  const ms = safeSeconds * 1000;
+
+  info({ label }, `💚 Starting heartbeat for "${label}" — every ${safeSeconds}s (${ms}ms)`);
+
+  const intervalId = setInterval(() => {
     info({ label, time: new Date().toISOString() }, "♥️ Heartbeat tick");
   }, ms);
-  
-  // Store it globally
-  setInterval(intervalId);
-  
-  // Log confirmation with interval ID
-  info({ label, intervalId }, `✅ Heartbeat interval created with ID: ${intervalId}`);
+
+  setIntervalId(intervalId);
+
+  info({ label, intervalId }, `✅ Heartbeat started (interval ID: ${intervalId})`);
 }
 
 /**
- * Stops any active heartbeat interval.
+ * Stops the global heartbeat interval
  */
 export function stopHeartbeat() {
-  const intervalId = getInterval();
-  if (intervalId) {
-    info({}, `🛑 Stopping heartbeat (interval ID: ${intervalId})`);
-    global.clearInterval(intervalId);
-    setInterval(null);
+  const id = getInterval();
+  if (id) {
+    clearInterval(id);
+    setIntervalId(null);
+    info({}, `🛑 Heartbeat stopped (interval ID: ${id})`);
+  }
+}
+
+/**
+ * Ensures heartbeat isn’t accidentally duplicated
+ */
+export function ensureHeartbeat(label = "Heartbeat", intervalSeconds = 120) {
+  if (!getInterval()) {
+    startHeartbeat(label, intervalSeconds);
+  } else {
+    info({ label }, "ℹ️ Heartbeat already running, skipping start");
   }
 }
 
