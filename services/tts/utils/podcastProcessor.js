@@ -1,76 +1,106 @@
 // ============================================================
-// 🎵 Podcast Processor — Add Intro/Outro & Final Mastering
+// 🎧 podcastProcessor — Final master mix (intro/outro, fade, normalization)
 // ============================================================
 
-import fs from "fs";
-import path from "path";
-import { execSync } from "child_process";
-import { log } from "#logger.js";
-import { uploadBuffer } from "#shared/r2-client.js";
-import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
+import { info, error } from "#logger.js";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { startKeepAlive, stopKeepAlive } from "../../shared/utils/keepalive.js";
+import { putObject, buildPublicUrl } from "#shared/r2-client.js";
 
-const TMP_DIR = "/tmp/podcast_final";
+const INTRO_URL = process.env.PODCAST_INTRO_URL;
+const OUTRO_URL = process.env.PODCAST_OUTRO_URL;
+const FINAL_BUCKET_KEY = "podcast";
 
-function ensureTmpDir() {
-  if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
-  return TMP_DIR;
+async function findFfmpeg() {
+  try {
+    await new Promise((res, rej) => {
+      const p = spawn("ffmpeg", ["-version"]);
+      p.once("error", rej);
+      p.once("exit", c => (c === 0 ? res() : rej(new Error("ffmpeg exit"))));
+    });
+    return "ffmpeg";
+  } catch {
+    const mod = await import("ffmpeg-static").catch(() => null);
+    if (mod?.default) return mod.default;
+    throw new Error("❌ ffmpeg not found");
+  }
 }
 
-// 🎚️ Mastering filters — light version for full mix
-const masterFilters = [
-  "acompressor=threshold=-18dB:ratio=2:attack=20:release=250:makeup=4",
-  "dynaudnorm=f=200:n=1:p=0.7",
-  "equalizer=f=150:width_type=o:width=2:g=1.5",
-  "equalizer=f=8000:width_type=o:width=2:g=1.5",
-  "aecho=0.8:0.88:60:0.2,asetrate=44100,aresample=44100",
-];
-
-export async function podcastProcessor(sessionId, mainAudioPath) {
-  startHeartbeat(`podcastProcessor:${sessionId}`, 25000);
-  ensureTmpDir();
-  log.info({ sessionId }, "🎵 Starting podcastProcessor");
+export async function podcastProcessor(sessionId, editedBuffer) {
+  const label = `podcastProcessor:${sessionId}`;
+  startKeepAlive(label, 20000);
+  info({ sessionId }, "🎧 Starting Podcast Processor (keep-alive active)");
 
   try {
-    const introUrl = process.env.PODCAST_INTRO_URL;
-    const outroUrl = process.env.PODCAST_OUTRO_URL;
-    const intro = path.join(TMP_DIR, `${sessionId}_intro.mp3`);
-    const outro = path.join(TMP_DIR, `${sessionId}_outro.mp3`);
+    const tmpDir = path.join(os.tmpdir(), "tts_podcast", sessionId);
+    await fs.mkdir(tmpDir, { recursive: true });
+    const mainPath = path.join(tmpDir, "edited.mp3");
+    const introPath = path.join(tmpDir, "intro.mp3");
+    const outroPath = path.join(tmpDir, "outro.mp3");
+    const outputPath = path.join(tmpDir, `${sessionId}_final.mp3`);
+
+    await fs.writeFile(mainPath, editedBuffer);
 
     // Download intro/outro
-    fs.writeFileSync(intro, Buffer.from(await (await fetch(introUrl)).arrayBuffer()));
-    fs.writeFileSync(outro, Buffer.from(await (await fetch(outroUrl)).arrayBuffer()));
+    await downloadIfExists(INTRO_URL, introPath);
+    await downloadIfExists(OUTRO_URL, outroPath);
 
-    const preMaster = path.join(TMP_DIR, `${sessionId}_premaster.mp3`);
-    const finalFile = path.join(TMP_DIR, `${sessionId}_final.mp3`);
+    // Build concat list
+    const parts = [introPath, mainPath, outroPath].filter(f => fs.stat(f).catch(() => null));
+    const concatList = path.join(tmpDir, "concat.txt");
+    await fs.writeFile(concatList, parts.map(p => `file '${p}'`).join("\n"));
 
-    // Join with fades
-    const fadeComplex =
-      "[0:a]afade=t=in:ss=0:d=3[a0];" +
-      "[2:a]afade=t=out:st=0:d=3[a2];" +
-      "[a0][1:a][a2]concat=n=3:v=0:a=1[aout]";
+    const ffmpegPath = await findFfmpeg();
+    const args = [
+      "-y",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      concatList,
+      "-af",
+      "loudnorm=I=-16:TP=-1.5:LRA=11,highpass=f=80,lowpass=f=14000",
+      "-b:a",
+      "192k",
+      outputPath
+    ];
 
-    execSync(
-      `ffmpeg -y -i ${intro} -i ${mainAudioPath} -i ${outro} -filter_complex "${fadeComplex}" -map "[aout]" ${preMaster}`,
-      { stdio: "ignore" }
-    );
+    info({ sessionId }, "🎛️ Mixing intro/outro and normalizing");
+    await runFfmpeg(ffmpegPath, args);
 
-    // Apply final mastering filters
-    const filterStr = masterFilters.join(",");
-    execSync(`ffmpeg -y -i ${preMaster} -af "${filterStr}" -ar 44100 -b:a 192k ${finalFile}`, {
-      stdio: "ignore",
-    });
-
-    // Upload to R2
-    const buffer = fs.readFileSync(finalFile);
-    const key = `${sessionId}_final.mp3`;
-    await uploadBuffer("podcast", key, buffer, "audio/mpeg");
-
-    log.info({ sessionId, key }, "💾 Uploaded final mastered podcast MP3 to R2");
-    stopHeartbeat();
-    return finalFile;
+    const finalBuf = await fs.readFile(outputPath);
+    await putObject(FINAL_BUCKET_KEY, `${sessionId}.mp3`, finalBuf, "audio/mpeg");
+    const url = buildPublicUrl(FINAL_BUCKET_KEY, `${sessionId}.mp3`);
+    info({ sessionId, url }, "✅ Final podcast uploaded");
+    return finalBuf;
   } catch (err) {
-    log.error({ sessionId, error: err.message }, "💥 podcastProcessor failed");
-    stopHeartbeat();
+    error({ sessionId, err: err.message }, "💥 podcastProcessor failed");
     throw err;
+  } finally {
+    stopKeepAlive(label);
   }
-       }
+}
+
+async function runFfmpeg(ffmpeg, args) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(ffmpeg, args);
+    let stderr = "";
+    p.stderr.on("data", d => (stderr += d.toString()));
+    p.on("exit", c => (c === 0 ? resolve() : reject(new Error(stderr))));
+  });
+}
+
+async function downloadIfExists(url, dest) {
+  if (!url) return;
+  const res = await fetch(url);
+  if (res.ok) {
+    const buf = Buffer.from(await res.arrayBuffer());
+    await fs.writeFile(dest, buf);
+  }
+}
+
+export default { podcastProcessor };
