@@ -4,7 +4,7 @@
 
 import fs from "fs";
 import path from "path";
-import { logger } from '../logger.js';
+import { log } from "#logger.js";
 
 const TEMP_DIR = path.resolve("/app/tmp");
 
@@ -13,4 +13,4 @@ if (!fs.existsSync(TEMP_DIR)) {
   log.info("temp.dir.created", { TEMP_DIR });
 }
 
-info("temp.dir.verified", { TEMP_DIR });
+log.info("temp.dir.verified", { TEMP_DIR });

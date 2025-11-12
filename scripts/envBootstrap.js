@@ -1,4 +1,3 @@
-import { logger } from #logger.js';
 // ============================================================
 // 🌍 AI Podcast Suite — Environment Bootstrap (Shiper-Aligned Final)
 // ============================================================
@@ -25,8 +24,8 @@ function validateEnv(requiredKeys = []) {
   }
 
   if (missing.length > 0) {
-    logger.error({ missing }, "❌ Missing required environment variables");
-    logger.error("Missing required environment variables:", missing.join(", "));
+    log.error({ missing }, "❌ Missing required environment variables");
+    console.error("Missing required environment variables:", missing.join(", "));
     process.exit(1);
   }
 
@@ -36,9 +35,9 @@ function validateEnv(requiredKeys = []) {
 // ------------------------------------------------------------------
 // 🧠 Bootstrap startup diagnostics
 // ------------------------------------------------------------------
-logger.info({}, "=============================================");
-logger.info({}, "🧠 AI Podcast Suite - Environment Bootstrap");
-logger.info({}, "=============================================");
+log.info({}, "=============================================");
+log.info({}, "🧠 AI Podcast Suite - Environment Bootstrap");
+log.info({}, "=============================================");
 
 const systemInfo = {
   time: new Date().toISOString(),
@@ -51,7 +50,7 @@ const systemInfo = {
   env: process.env.NODE_ENV || "development",
 };
 
-logger.info(systemInfo, "🩺 Startup Health Check");
+log.info(systemInfo, "🩺 Startup Health Check");
 
 // ⚠️ Resource warnings
 const free = parseFloat(systemInfo.freeMemGB);
@@ -115,5 +114,5 @@ validateEnv([
 // ------------------------------------------------------------------
 // 🌍 Done
 // ------------------------------------------------------------------
-logger.info({}, "🌍 All environment variables validated successfully.");
-logger.info({}, "✅ Environment Bootstrap complete.\n");
+log.info({}, "🌍 All environment variables validated successfully.");
+log.info({}, "✅ Environment Bootstrap complete.\n");

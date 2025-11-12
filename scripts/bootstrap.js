@@ -6,22 +6,21 @@
 // ============================================================
 
 import { execSync } from "child_process";
-
-import { logger} from '#logger.js';
+import { log } from "#logger.js";
 
 async function run(cmd, label) {
   try {
-    info(`🚀 Running ${label}...`);
+    log.info(`🚀 Running ${label}...`);
     execSync(cmd, { stdio: "inherit" });
-    info(`✅ ${label} completed successfully.`);
+    log.info(`✅ ${label} completed successfully.`);
   } catch (err) {
-    error(`❌ ${label} failed: ${err.message}`);
+    log.error(`❌ ${label} failed: ${err.message}`);
   }
 }
 
 (async () => {
-  info("🧩 Starting AI Podcast Suite bootstrap sequence...");
-  info("---------------------------------------------");
+  log.info("🧩 Starting AI Podcast Suite bootstrap sequence...");
+  log.info("---------------------------------------------");
 
   // 1️⃣ Load and validate environment variables
   await run("node ./scripts/envBootstrap.js", "Environment Bootstrap");
@@ -38,6 +37,6 @@ async function run(cmd, label) {
   // 5️⃣ Launch the main web server
   await run("node ./server.js", "Start Server");
 
-  info("---------------------------------------------");
-  info("💤 Bootstrap complete — container entering idle mode.");
+  log.info("---------------------------------------------");
+  log.info("💤 Bootstrap complete — container entering idle mode.");
 })();
