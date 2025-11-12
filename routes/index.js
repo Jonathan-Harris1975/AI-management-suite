@@ -13,7 +13,7 @@ import podcastRoutes from "../services/podcast/index.js"; // ✅ Correct route i
 
 const router = express.Router();
 
-info("🚀 Starting route registration");
+info("🚀 Starting route registration...");
 
 try {
   // ─────────────────────────────
@@ -58,7 +58,7 @@ try {
   router.use("/podcast", podcastRoutes);
   info("🎧 Mounted: /podcast");
 
-  info("✅ Routes mounted successfully.");
+  info("✅ All routes mounted successfully.");
 } catch (err) {
   error("💥 Failed during route registration", { error: err.stack });
 }
