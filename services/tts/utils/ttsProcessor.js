@@ -1,9 +1,10 @@
 // ============================================================
-// 🎙️ TTS Processor — Hardened Production Version
+// 🎙️ TTS Processor — Hardened Production Version with Retry Logic
 // ============================================================
 //
 // ✅ Cleans & truncates text before Polly
 // ✅ Retries transient failures (rate limits, throttling)
+// ✅ Chunk-level retry with exponential backoff
 // ✅ Logs precise AWS error messages
 // ✅ Uploads all successful chunks to R2
 // ============================================================
@@ -20,6 +21,11 @@ const REGION = process.env.AWS_REGION || "eu-west-2";
 const VOICE_ID = process.env.POLLY_VOICE_ID || "Brian";
 const CONCURRENCY = parseInt(process.env.TTS_CONCURRENCY || "2", 10);
 const MAX_CHARS = 2950; // safe limit for Neural engine
+
+// Retry configuration
+const MAX_CHUNK_RETRIES = parseInt(process.env.MAX_CHUNK_RETRIES || "3", 10);
+const RETRY_DELAY_MS = parseInt(process.env.RETRY_DELAY_MS || "2000", 10);
+const RETRY_BACKOFF_MULTIPLIER = parseFloat(process.env.RETRY_BACKOFF_MULTIPLIER || "2", 10);
 
 const R2_BUCKET_CHUNKS = process.env.R2_BUCKET_CHUNKS || "podcast-chunks";
 const R2_PUBLIC_BASE_URL_CHUNKS =
@@ -40,7 +46,12 @@ const polly = new PollyClient({
   },
 });
 
-info({ region: REGION, voice: VOICE_ID, concurrency: CONCURRENCY }, "🧩 Polly configuration");
+info({ 
+  region: REGION, 
+  voice: VOICE_ID, 
+  concurrency: CONCURRENCY,
+  maxChunkRetries: MAX_CHUNK_RETRIES 
+}, "🧩 Polly configuration");
 
 // ------------------------------------------------------------
 // 🧹 Text Cleaner
@@ -73,10 +84,143 @@ async function synthesizeTextWithRetry(text, retries = 3) {
       return buffer;
     } catch (err) {
       const msg = err?.message || err.toString();
-      warn({ attempt, msg }, "⚠️ Polly synthesis failed");
+      const isRetryable = isRetryableError(err);
+      
+      warn({ 
+        attempt, 
+        msg, 
+        isRetryable,
+        errorCode: err?.name || err?.code 
+      }, "⚠️ Polly synthesis failed");
+      
       if (attempt === retries) throw err;
-      await new Promise((r) => setTimeout(r, 1000 * attempt)); // backoff
+      
+      // Exponential backoff
+      const delay = 1000 * Math.pow(2, attempt - 1);
+      await new Promise((r) => setTimeout(r, delay));
     }
+  }
+}
+
+// ------------------------------------------------------------
+// 🔍 Check if error is retryable
+// ------------------------------------------------------------
+function isRetryableError(err) {
+  const retryableErrors = [
+    'ThrottlingException',
+    'TooManyRequestsException',
+    'ServiceUnavailable',
+    'RequestTimeout',
+    'NetworkingError',
+    'TimeoutError',
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'ENOTFOUND'
+  ];
+  
+  const errorCode = err?.name || err?.code || '';
+  const errorMessage = err?.message || '';
+  
+  return retryableErrors.some(retryable => 
+    errorCode.includes(retryable) || errorMessage.includes(retryable)
+  );
+}
+
+// ------------------------------------------------------------
+// 🎯 Process Single Chunk with Full Retry Logic
+// ------------------------------------------------------------
+async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1) {
+  try {
+    const textUrl =
+      chunk.url ||
+      `${R2_PUBLIC_BASE_URL_RAW_TEXT}/${sessionId}/chunk-${String(
+        chunkNumber
+      ).padStart(3, "0")}.txt`;
+
+    // Fetch text content
+    const res = await fetch(textUrl);
+    if (!res.ok) {
+      throw new Error(`Failed to fetch chunk ${chunkNumber}: ${res.status}`);
+    }
+
+    const rawText = await res.text();
+    const cleaned = cleanText(rawText);
+    
+    if (!cleaned) {
+      throw new Error(`Empty or invalid text in chunk ${chunkNumber}`);
+    }
+
+    // Synthesize speech with Polly
+    const audioBuffer = await synthesizeTextWithRetry(cleaned, 3);
+
+    // Upload to R2
+    const key = `${sessionId}/audio-${String(chunkNumber).padStart(3, "0")}.mp3`;
+    await putObject("chunks", key, audioBuffer, "audio/mpeg");
+
+    const publicUrl = `${R2_PUBLIC_BASE_URL_CHUNKS}/${encodeURIComponent(key)}`;
+    
+    info(
+      { 
+        sessionId, 
+        key, 
+        bytes: audioBuffer.length,
+        attempt: attempt > 1 ? attempt : undefined
+      },
+      `✅ TTS chunk ${chunkNumber} uploaded${attempt > 1 ? ` (retry ${attempt})` : ''}`
+    );
+
+    return { 
+      success: true, 
+      index: chunkNumber, 
+      url: publicUrl,
+      attempts: attempt 
+    };
+    
+  } catch (err) {
+    const isRetryable = isRetryableError(err);
+    
+    warn(
+      { 
+        sessionId, 
+        chunk: chunkNumber, 
+        attempt,
+        message: err.message,
+        isRetryable,
+        errorCode: err?.name || err?.code
+      },
+      `⚠️ TTS chunk ${chunkNumber} failed (attempt ${attempt}/${MAX_CHUNK_RETRIES})`
+    );
+
+    // Retry if possible and error is retryable
+    if (attempt < MAX_CHUNK_RETRIES && isRetryable) {
+      const delay = RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
+      
+      info(
+        { sessionId, chunk: chunkNumber, delayMs: delay },
+        `🔄 Retrying chunk ${chunkNumber} after ${delay}ms`
+      );
+      
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return processChunkWithRetry(sessionId, chunk, chunkNumber, attempt + 1);
+    }
+
+    // Final failure
+    error(
+      { 
+        sessionId, 
+        chunk: chunkNumber, 
+        message: err.message,
+        totalAttempts: attempt 
+      },
+      `❌ TTS chunk ${chunkNumber} permanently failed after ${attempt} attempts`
+    );
+    
+    return { 
+      success: false, 
+      index: chunkNumber, 
+      error: err.message,
+      attempts: attempt 
+    };
   }
 }
 
@@ -84,10 +228,11 @@ async function synthesizeTextWithRetry(text, retries = 3) {
 // 🎧 TTS Processor
 // ------------------------------------------------------------
 export async function ttsProcessor(sessionId, chunkList = []) {
-  info({ sessionId }, "🎙 TTS Processor Start");
+  info({ sessionId, totalChunks: chunkList.length }, "🎙 TTS Processor Start");
 
-  if (!Array.isArray(chunkList) || chunkList.length === 0)
+  if (!Array.isArray(chunkList) || chunkList.length === 0) {
     throw new Error("No text chunks provided to ttsProcessor");
+  }
 
   const limit = pLimit(CONCURRENCY);
   const results = [];
@@ -95,49 +240,55 @@ export async function ttsProcessor(sessionId, chunkList = []) {
   const tasks = chunkList.map((chunk, index) =>
     limit(async () => {
       const chunkNumber = index + 1;
-      try {
-        const textUrl =
-          chunk.url ||
-          `${R2_PUBLIC_BASE_URL_RAW_TEXT}/${sessionId}/chunk-${String(
-            chunkNumber
-          ).padStart(3, "0")}.txt`;
-
-        const res = await fetch(textUrl);
-        if (!res.ok)
-          throw new Error(`Failed to fetch chunk ${chunkNumber}: ${res.status}`);
-
-        const rawText = await res.text();
-        const cleaned = cleanText(rawText);
-        if (!cleaned) throw new Error(`Empty or invalid text in chunk ${chunkNumber}`);
-
-        const audioBuffer = await synthesizeTextWithRetry(cleaned, 3);
-
-        const key = `${sessionId}/audio-${String(chunkNumber).padStart(3, "0")}.mp3`;
-        await putObject("chunks", key, audioBuffer, "audio/mpeg");
-
-        const publicUrl = `${R2_PUBLIC_BASE_URL_CHUNKS}/${encodeURIComponent(key)}`;
-        info(
-          { sessionId, key, bytes: audioBuffer.length },
-          `✅ TTS chunk ${chunkNumber} uploaded`
-        );
-
-        results.push({ success: true, index: chunkNumber, url: publicUrl });
-      } catch (err) {
-        error({ sessionId, chunk: chunkNumber, message: err.message }, "❌ TTS Chunk Failure");
-        results.push({ success: false, index: chunkNumber, error: err.message });
-      }
+      const result = await processChunkWithRetry(sessionId, chunk, chunkNumber);
+      results.push(result);
+      return result;
     })
   );
 
   await Promise.all(tasks);
 
-  const success = results.filter((r) => r.success).length;
-  const fail = results.filter((r) => !r.success).length;
+  // Sort results by index to maintain order
+  results.sort((a, b) => a.index - b.index);
 
-  info({ sessionId, success, fail }, "🎧 TTS Summary");
+  const successfulChunks = results.filter((r) => r.success);
+  const failedChunks = results.filter((r) => !r.success);
+  
+  const totalAttempts = results.reduce((sum, r) => sum + (r.attempts || 1), 0);
 
-  if (success === 0) throw new Error("No TTS chunks were produced or returned.");
-  return results.filter((r) => r.success);
+  info(
+    { 
+      sessionId, 
+      total: results.length,
+      success: successfulChunks.length,
+      failed: failedChunks.length,
+      totalAttempts,
+      failedIndices: failedChunks.map(f => f.index)
+    },
+    "🎧 TTS Processing Complete"
+  );
+
+  // Log detailed failure information
+  if (failedChunks.length > 0) {
+    warn(
+      { 
+        sessionId,
+        failures: failedChunks.map(f => ({
+          index: f.index,
+          error: f.error,
+          attempts: f.attempts
+        }))
+      },
+      `⚠️ ${failedChunks.length} chunk(s) failed permanently`
+    );
+  }
+
+  if (successfulChunks.length === 0) {
+    throw new Error("No TTS chunks were successfully produced. All chunks failed.");
+  }
+
+  // Return only successful chunks with their URLs
+  return successfulChunks;
 }
 
 export default { ttsProcessor };
