@@ -7,15 +7,15 @@
 
 import { execSync } from "child_process";
 
-import { info} from '#logger.js';
+import { logger} from '#logger.js';
 
 async function run(cmd, label) {
   try {
     info(`🚀 Running ${label}...`);
     execSync(cmd, { stdio: "inherit" });
-    log.info(`✅ ${label} completed successfully.`);
+    info(`✅ ${label} completed successfully.`);
   } catch (err) {
-    log.error(`❌ ${label} failed: ${err.message}`);
+    error(`❌ ${label} failed: ${err.message}`);
   }
 }
 
