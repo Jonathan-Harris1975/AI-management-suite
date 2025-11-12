@@ -1,59 +1,227 @@
 // ============================================================
 // 🎧 services/script/utils/chunkText.js
 // ============================================================
-// Smarter chunker for TTS + SSML pipelines
-// - Splits by paragraph first, then sentence if too large
-// - Ensures each chunk ≤ MAX_SSML_CHUNK_BYTES (default 4200)
-// - Never cuts a sentence mid-way
-// - Returns clean array of text chunks ready for upload
+// Production-grade text chunker for AWS Polly Natural TTS
+// - AWS Polly Natural limit: 6000 characters (plain text)
+// - Character-based splitting optimized for natural voices
+// - Preserves sentence integrity and paragraph structure
+// - Zero dependencies, optimal memory usage
+// - Comprehensive edge case handling
 // ============================================================
 
 import { info } from "#logger.js";
 
-export default function chunkText(text, maxBytes = Number(process.env.MAX_SSML_CHUNK_BYTES || 4200)) {
+/**
+ * Chunks text for AWS Polly Natural voice synthesis with intelligent splitting
+ * @param {string} text - Input text to chunk
+ * @param {number} maxChars - Maximum characters per chunk (AWS Polly Natural limit: 6000)
+ * @returns {string[]} Array of text chunks
+ */
+export default function chunkText(text, maxChars = Number(process.env.MAX_POLLY_NATURAL_CHUNK_CHARS || 5800)) {
+  // Input validation
   if (!text || typeof text !== "string") return [];
+  if (text.trim().length === 0) return [];
 
   const chunks = [];
-  let current = "";
+  const getCharLength = (str) => str.length;
+  
+  // Normalize text: standardize line breaks, remove excessive whitespace
+  const normalized = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 
-  // First pass — split by paragraphs (or sentences if none)
-  const hasParagraphs = text.includes("\n\n");
-  const blocks = hasParagraphs
-    ? text.split(/\n\s*\n/)
-    : text.split(/(?<=[.!?])\s+/); // fallback: sentence split
+  // Handle text smaller than max size
+  if (getCharLength(normalized) <= maxChars) {
+    info("tts.chunk", { 
+      total: 1, 
+      chars: getCharLength(normalized),
+      strategy: "single"
+    });
+    return [normalized];
+  }
 
-  const getBytes = (str) => Buffer.byteLength(str, "utf8");
+  // Strategy selection: paragraph-first, then sentence-based
+  const hasParagraphs = /\n\s*\n/.test(normalized);
+  const primaryBlocks = hasParagraphs
+    ? normalized.split(/\n\s*\n/)
+    : splitIntoSentences(normalized);
 
-  for (const block of blocks) {
-    const blockBytes = getBytes(block);
+  let currentChunk = "";
+  let chunkCount = 0;
 
-    // if block itself too long, further subdivide by sentences
-    if (blockBytes > maxBytes) {
-      const sentences = block.split(/(?<=[.!?])\s+/);
-      for (const s of sentences) {
-        if (getBytes(current + s) > maxBytes) {
-          if (current.trim()) chunks.push(current.trim());
-          current = "";
+  for (let i = 0; i < primaryBlocks.length; i++) {
+    const block = primaryBlocks[i].trim();
+    if (!block) continue;
+
+    const blockSize = getCharLength(block);
+    
+    // Handle oversized blocks (longer than maxChars)
+    if (blockSize > maxChars) {
+      // Flush current chunk if exists
+      if (currentChunk.trim()) {
+        chunks.push(currentChunk.trim());
+        chunkCount++;
+        currentChunk = "";
+      }
+
+      // Subdivide oversized block by sentences
+      const sentences = splitIntoSentences(block);
+      
+      for (const sentence of sentences) {
+        const sentenceSize = getCharLength(sentence);
+        
+        // Emergency: if single sentence exceeds limit, split by words
+        if (sentenceSize > maxChars) {
+          const wordChunks = splitByWords(sentence, maxChars, getCharLength);
+          wordChunks.forEach(wc => {
+            chunks.push(wc);
+            chunkCount++;
+          });
+          continue;
         }
-        current += s + " ";
+
+        // Try to add sentence to current chunk
+        const testChunk = currentChunk 
+          ? `${currentChunk} ${sentence}`
+          : sentence;
+
+        if (getCharLength(testChunk) > maxChars) {
+          if (currentChunk.trim()) {
+            chunks.push(currentChunk.trim());
+            chunkCount++;
+          }
+          currentChunk = sentence;
+        } else {
+          currentChunk = testChunk;
+        }
       }
       continue;
     }
 
-    // normal case
-    if (getBytes(current + block) > maxBytes) {
-      chunks.push(current.trim());
-      current = "";
+    // Normal block processing
+    const separator = hasParagraphs ? "\n\n" : " ";
+    const testChunk = currentChunk 
+      ? `${currentChunk}${separator}${block}`
+      : block;
+    
+    const testSize = getCharLength(testChunk);
+
+    if (testSize > maxChars) {
+      // Flush current chunk
+      if (currentChunk.trim()) {
+        chunks.push(currentChunk.trim());
+        chunkCount++;
+      }
+      currentChunk = block;
+    } else {
+      currentChunk = testChunk;
     }
-    current += block + "\n\n";
   }
 
-  if (current.trim()) chunks.push(current.trim());
+  // Push final chunk
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+    chunkCount++;
+  }
 
-  // Log chunk metadata
-  chunks.forEach((c, i) => {
-    info("tts.chunk", { index: i + 1, bytes: getBytes(c), preview: c.slice(0, 60) + "..." });
+  // Validation pass: ensure no chunk exceeds limit
+  const validatedChunks = [];
+  for (const chunk of chunks) {
+    if (getCharLength(chunk) > maxChars) {
+      // Emergency re-split
+      const subChunks = splitByWords(chunk, maxChars, getCharLength);
+      validatedChunks.push(...subChunks);
+    } else {
+      validatedChunks.push(chunk);
+    }
+  }
+
+  // Enhanced logging
+  validatedChunks.forEach((chunk, idx) => {
+    const chars = getCharLength(chunk);
+    const preview = chunk.length > 60 
+      ? `${chunk.slice(0, 60)}...` 
+      : chunk;
+    
+    info("tts.chunk", {
+      index: idx + 1,
+      total: validatedChunks.length,
+      chars,
+      utilization: `${((chars / maxChars) * 100).toFixed(1)}%`,
+      preview
+    });
   });
 
+  return validatedChunks;
+}
+
+/**
+ * Split text into sentences using multiple delimiters
+ * Handles abbreviations and edge cases
+ */
+function splitIntoSentences(text) {
+  // Enhanced regex: captures sentences ending with .!? followed by space or end
+  // Handles common abbreviations (Mr., Dr., etc.)
+  const sentences = [];
+  
+  // Pattern: sentence-ending punctuation followed by whitespace or EOL
+  // Negative lookbehind for common abbreviations
+  const regex = /(?<!\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|Inc|Ltd|Co|approx)\.)([.!?]+)(?=\s+[A-Z]|\s*$)/g;
+  
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    const endIndex = match.index + match[0].length;
+    sentences.push(text.slice(lastIndex, endIndex).trim());
+    lastIndex = endIndex;
+  }
+
+  // Capture remaining text
+  if (lastIndex < text.length) {
+    const remaining = text.slice(lastIndex).trim();
+    if (remaining) sentences.push(remaining);
+  }
+
+  return sentences.length > 0 ? sentences : [text];
+}
+
+/**
+ * Emergency word-based splitting for extremely long sentences
+ * Ensures no chunk exceeds maxChars
+ */
+function splitByWords(text, maxChars, getCharLength) {
+  const words = text.split(/\s+/);
+  const chunks = [];
+  let current = "";
+
+  for (const word of words) {
+    const test = current ? `${current} ${word}` : word;
+    
+    if (getCharLength(test) > maxChars) {
+      if (current) {
+        chunks.push(current);
+        current = word;
+      } else {
+        // Single word exceeds limit (rare): truncate with ellipsis
+        const truncated = truncateToChars(word, maxChars - 3, getCharLength) + "...";
+        chunks.push(truncated);
+        current = "";
+      }
+    } else {
+      current = test;
+    }
+  }
+
+  if (current) chunks.push(current);
   return chunks;
 }
+
+/**
+ * Truncate string to specified character length
+ */
+function truncateToChars(str, maxChars, getCharLength) {
+  if (getCharLength(str) <= maxChars) return str;
+  return str.slice(0, maxChars);
+  }
