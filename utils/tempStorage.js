@@ -1,0 +1,16 @@
+// ============================================================
+// 🧠 AI Podcast Suite — Temporary Storage Check (Fixed)
+// ============================================================
+
+import fs from "fs";
+import path from "path";
+import { info, warn, error, debug } from "#logger.js";
+
+const TEMP_DIR = path.resolve("/app/tmp");
+
+if (!fs.existsSync(TEMP_DIR)) {
+  fs.mkdirSync(TEMP_DIR, { recursive: true });
+  info("temp.dir.created", { TEMP_DIR });
+}
+
+info("temp.dir.verified", { TEMP_DIR });
