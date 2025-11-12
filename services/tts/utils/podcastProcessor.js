@@ -14,7 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, execFile } from "node:child_process";
 import { startKeepAlive, stopKeepAlive } from "../../shared/utils/keepalive.js";
-import { uploadBuffer, buildPublicUrl, getObjectAsText } from "#shared/utils/r2-client.js";
+import { uploadBuffer, buildPublicUrl, getObjectAsText } from "#shared/r2-client.js;
 import ffprobePath from "ffprobe-static";
 
 const INTRO_URL = process.env.PODCAST_INTRO_URL;
