@@ -7,7 +7,7 @@ import path from "path";
 import { execSync } from "child_process";
 import { log } from "#logger.js";
 import { uploadBuffer } from "#shared/r2-client.js";
-import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
+import { startKeepAlive, stopKeepAlive } from "#shared/heartbeat.js";
 
 const TMP_DIR = "/tmp/podcast_final";
 
@@ -26,7 +26,7 @@ const masterFilters = [
 ];
 
 export async function podcastProcessor(sessionId, mainAudioPath) {
-  startHeartbeat(`podcastProcessor:${sessionId}`, 25000);
+  startKeepAlive(`podcastProcessor:${sessionId}`, 25000);
   ensureTmpDir();
   log.info({ sessionId }, "🎵 Starting podcastProcessor");
 
@@ -66,11 +66,11 @@ export async function podcastProcessor(sessionId, mainAudioPath) {
     await uploadBuffer("podcast", key, buffer, "audio/mpeg");
 
     log.info({ sessionId, key }, "💾 Uploaded final mastered podcast MP3 to R2");
-    stopHeartbeat();
+    stopKeepAlive();
     return finalFile;
   } catch (err) {
     log.error({ sessionId, error: err.message }, "💥 podcastProcessor failed");
-    stopHeartbeat();
+    stopKeepAlive();
     throw err;
   }
        }
