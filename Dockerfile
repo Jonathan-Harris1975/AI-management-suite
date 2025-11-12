@@ -1,12 +1,15 @@
 # ────────────────────────────────────────────────
 # 🧠 AI Podcast Suite — Shiper Ultra-Stable Build
-# Handles nested or flat repo structures automatically
+# Now with ffmpeg installed properly
 # ────────────────────────────────────────────────
 
 FROM node:22-slim AS base
 ENV NODE_ENV=production
 ENV PORT=3000
 WORKDIR /app
+
+# 🔥 Install ffmpeg HERE (BUILD STAGE)
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 # 1️⃣ Install dependencies
 COPY package*.json* ./
@@ -32,6 +35,9 @@ FROM node:22-slim AS runtime
 ENV NODE_ENV=production
 ENV PORT=3000
 WORKDIR /app
+
+# 🔥 Install ffmpeg HERE TOO (RUNTIME STAGE)
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 COPY --from=base /app /app
 
