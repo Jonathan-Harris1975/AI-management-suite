@@ -3,8 +3,8 @@ export function cleanTranscript(text) {
   return s
     .replace(/\n{3,}/g, "\n\n")
     .replace(/ {2,}/g, " ")
-    .replace(/[“”]/g, '"')
-    .replace(/[’]/g, "'")
+    .replace(/[""]/g, '"')
+    .replace(/[']/g, "'")
     .trim();
 }
 
@@ -51,4 +51,8 @@ export function humanizeIntro(text, seed = 0) {
 
   // Strict-mode safe backreference ($1 not \1)
   out = out.replace(/(\bAI\b[^.!?]{0,60}[.!?])/i, (m) =>
-    Math.random() < 0.
+    Math.random() < 0.3 ? m : m
+  );
+
+  return out;
+}
