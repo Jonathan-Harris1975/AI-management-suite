@@ -14,7 +14,7 @@ import { mergeProcessor } from "./mergeProcessor.js";
 import { editingProcessor } from "./editingProcessor.js";
 import { podcastProcessor } from "./podcastProcessor.js";
 import { putObject } from "#shared/r2-client.js";
-import { startKeepAlive } from "../../shared/utils/heartbeat.js";
+import { startKeepAlive } from "#shared/keepalive.js";
 
 // ------------------------------------------------------------
 // ⚙️ Environment Configuration
