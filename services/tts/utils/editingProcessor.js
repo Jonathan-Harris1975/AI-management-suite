@@ -1,93 +1,68 @@
 // ============================================================
-// 🎚️ editingProcessor — TTS Audio Enhancement for AWS Polly (Brian Voice)
-// ============================================================
-//
-// ✅ Applies EQ + compression to enhance Polly TTS output
-// ✅ Removes loudnorm and filtering (handled in final mix)
-// ✅ Uses ffmpeg or ffmpeg-static fallback
-// ✅ Automatically triggers silent keep-alive pings to avoid Render idle timeout
+// 🎚️ Editing Processor — Apply Audio Enhancements & Mastering
 // ============================================================
 
-import { info, error } from "#logger.js";
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { spawn } from "node:child_process";
-import { startKeepAlive, stopKeepAlive } from "../../shared/utils/keepalive.js";
-
-// 🎧 EQ chain optimized for AWS Polly Brian voice
-// Adds warmth, body, and reduces synthetic artifacts
-const FILTERS = [
-  "bass=g=6",                                          // Boost low-end warmth
-  "treble=g=-2",                                       // Smooth harsh highs
-  "equalizer=f=180:width_type=o:width=2:g=4",         // Add body/fullness
-  "equalizer=f=2800:width_type=o:width=2:g=-3",       // Reduce nasal quality
-  "acompressor=threshold=-20dB:ratio=4:attack=15:release=200:makeup=6" // Control dynamics
-].join(",");
+import fs from "fs";
+import path from "path";
+import { execSync } from "child_process";
+import { log } from "#logger.js";
+import { startHeartbeat, stopHeartbeat } from "#shared/heartbeat.js";
+import { uploadBuffer } from "#shared/r2-client.js";
 
 // ------------------------------------------------------------
-// 🧩 Helper — Locate ffmpeg (system or static)
+// 🧠 Setup
 // ------------------------------------------------------------
-async function findFfmpeg() {
-  try {
-    await new Promise((res, rej) => {
-      const p = spawn("ffmpeg", ["-version"]);
-      p.once("error", rej);
-      p.once("exit", c => (c === 0 ? res() : rej(new Error("ffmpeg exit"))));
-    });
-    return "ffmpeg";
-  } catch {
-    const mod = await import("ffmpeg-static").catch(() => null);
-    if (mod?.default) return mod.default;
-    throw new Error("❌ ffmpeg binary not found (system or static)");
-  }
+const TMP_DIR = "/tmp/tts_editing";
+
+function ensureTmpDir() {
+  if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+  return TMP_DIR;
 }
 
 // ------------------------------------------------------------
-// 🚀 Core Processor — Applies EQ and compression to TTS audio
+// 🎛️ Audio Enhancement Filters (Warm + Clean + Controlled)
 // ------------------------------------------------------------
-export async function editingProcessor(sessionId, merged) {
-  const label = `editingProcessor:${sessionId}`;
-  startKeepAlive(label, 20000); // 🟢 ping every 20s during ffmpeg run
+const filters = [
+  // Stage 1: Clean noise, shape tone, and balance frequencies
+  "highpass=f=100,lowpass=f=10000,afftdn=nr=10:tn=1,firequalizer=gain_entry='entry(150,3);entry(2500,2)',deesser=f=7000:i=0.7,acompressor=threshold=-24dB:ratio=4:attack=10:release=200:makeup=5,dynaudnorm=f=100:n=0:p=0.9,aresample=44100,aconvolution=reverb=0.1:0.1:0.9:0.9",
 
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "edit-"));
-  const inputPath = path.join(tmpDir, "input.wav");
-  const outputPath = path.join(tmpDir, "output.wav");
+  // Stage 2: Gentle tonal lift (warmth and brightness)
+  "equalizer=f=120:width_type=o:width=2:g=3",
 
-  await fs.writeFile(inputPath, merged.buffer);
+  // Stage 3: Presence boost for clarity
+  "equalizer=f=9000:width_type=o:width=2:g=2",
+];
+
+// ------------------------------------------------------------
+// 🧩 Main Processor
+// ------------------------------------------------------------
+export async function editingProcessor(sessionId, inputPath) {
+  startHeartbeat(`editingProcessor:${sessionId}`, 25000);
+  
+  startHeartbeat(`editingProcessor:${sessionId}`, 25000);
+  ensureTmpDir();
+  log.info({ sessionId }, "🎚️ Starting editingProcessor");
 
   try {
-    const ffmpegPath = await findFfmpeg();
-    info({ sessionId, ffmpegPath }, "🎧 TTS EditingProcessor started — enhancing Polly audio");
+    const editedFile = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
+    const filterStr = filters.join(",");
 
-    await new Promise((resolve, reject) => {
-      const proc = spawn(ffmpegPath, [
-        "-i", inputPath,
-        "-af", FILTERS,
-        outputPath,
-        "-y"
-      ]);
-
-      proc.stdout.on("data", d => process.stdout.write(d.toString()));
-      proc.stderr.on("data", d => process.stderr.write(d.toString()));
-
-      proc.once("close", code => {
-        if (code === 0) resolve();
-        else reject(new Error(`ffmpeg exited with code ${code}`));
-      });
+    // Run FFmpeg with the advanced audio filter chain
+    execSync(`ffmpeg -y -i ${inputPath} -af "${filterStr}" -ar 44100 -b:a 192k ${editedFile}`, {
+      stdio: "ignore",
     });
 
-    const edited = await fs.readFile(outputPath);
-    info({ sessionId, bytes: edited.length }, "🎚️ TTS editing stage complete");
-    return edited;
+    // Upload to R2
+    const buffer = fs.readFileSync(editedFile);
+    const key = `${sessionId}_edited.mp3`;
+    await uploadBuffer("merged", key, buffer, "audio/mpeg");
 
+    log.info({ sessionId, key }, "💾 Uploaded edited MP3 to R2");
+    return editedFile;
   } catch (err) {
-    error({ sessionId, err: err.message }, "💥 TTS editing failed");
+    log.error({ sessionId, error: err.message }, "💥 editingProcessor failed");
+    stopHeartbeat();
+    stopHeartbeat();
     throw err;
-
-  } finally {
-    stopKeepAlive(label); // 🛑 ensure cleanup even if error occurs
-    await fs.rm(tmpDir, { recursive: true, force: true });
-    info({ sessionId }, "🌙 Keep-alive stopped, temp files cleaned up");
   }
 }
