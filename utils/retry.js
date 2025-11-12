@@ -1,16 +1,45 @@
-import { log as logger } from "#logger.js";
-export async function withRetries(name, fn, tries = 3, delayMs = 2000) {
-  let lastErr;
-  for (let i=1; i<=tries; i++) {
+// utils/retry.js
+import { warn, error } from "#logger.js";
+
+/**
+ * Generic async retry utility.
+ * @param {Function} fn - Function to execute (must return a Promise)
+ * @param {Object} options - Retry configuration
+ * @param {number} [options.retries=3] - Max retry attempts
+ * @param {number} [options.delay=1000] - Initial delay in ms
+ * @param {number} [options.factor=2] - Backoff multiplier
+ * @param {string} [options.context='retry'] - Context for logs
+ * @returns {Promise<*>}
+ */
+export async function retry(fn, {
+  retries = 3,
+  delay = 1000,
+  factor = 2,
+  context = "retry",
+} = {}) {
+  if (typeof fn !== "function") {
+    const msg = `❌ Invalid argument passed to retry(): expected function, got ${typeof fn}`;
+    error({ context }, msg);
+    throw new TypeError(msg);
+  }
+
+  let attempt = 0;
+  while (attempt < retries) {
     try {
-      const res = await fn();
-      if (i>1) logger.info({ attempt: i, name }, "✅ Succeeded after retry");
-      return res;
+      return await fn();
     } catch (err) {
-      lastErr = err;
-      logger.warn({ attempt: i, name, err: String(err.message || err) }, "⚠️ Step failed");
-      if (i < tries) await new Promise(r => setTimeout(r, delayMs));
+      attempt++;
+      if (attempt < retries) {
+        warn(
+          { context, attempt, retries, err: err?.message },
+          `↻ Retrying (${attempt}/${retries}) after ${delay}ms...`
+        );
+        await new Promise((res) => setTimeout(res, delay));
+        delay *= factor;
+      } else {
+        error({ context, err: err?.message }, "💥 All retries failed");
+        throw err;
+      }
     }
   }
-  throw lastErr;
 }
