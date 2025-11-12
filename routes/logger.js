@@ -1,6 +1,5 @@
 import pino from "pino";
 import pinoHttp from "pino-http";
-import { logger } from '../logger.js';
 
 const level = process.env.LOG_LEVEL || "info";
 
