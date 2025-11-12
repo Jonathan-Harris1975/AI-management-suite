@@ -1,5 +1,4 @@
 // scripts/startupCheck.js
-import { info } from "#logger.js";
 import { logger } from '../logger.js';
 
 try {
