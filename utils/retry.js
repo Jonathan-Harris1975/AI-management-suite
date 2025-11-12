@@ -2,7 +2,7 @@
 import { warn, error } from "#logger.js";
 
 /**
- * Generic async retry utility.
+ * Core retry handler.
  * @param {Function} fn - Function to execute (must return a Promise)
  * @param {Object} options - Retry configuration
  * @param {number} [options.retries=3] - Max retry attempts
@@ -43,3 +43,9 @@ export async function retry(fn, {
     }
   }
 }
+
+/**
+ * Alias for backward compatibility — used in ttsProcessor and others.
+ */
+export const withRetries = retry;
+export default retry;
