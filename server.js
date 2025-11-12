@@ -4,7 +4,6 @@ import cors from "cors";
 import os from "os";
 import { info } from "#logger.js";
 import routes from "./routes/index.js";
-import { logger } from './logger.js';
 
 const app = express();
 app.use(cors());

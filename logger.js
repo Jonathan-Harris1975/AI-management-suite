@@ -1,99 +1,64 @@
-/**
- * Centralized logger (ESM) using pino + pino-pretty
- * - Console: pretty, colorized output
- * - Emoji prefixes by level
- * - Optional shipper stub via LOG_SHIP_ENDPOINT (HTTP POST)
- */
-import pino from 'pino';
+// ============================================================
+// 🧠 AI Podcast Suite — Final Unified Logger (Pino)
+// ============================================================
+//
+// - Works in both production (JSON logs) and local dev (pretty logs)
+// - Prevents redeclaration errors by using a single export symbol
+// - No global collisions or duplicate imports
+// - Safe for Shiper, Render, and local dev
+// ============================================================
 
-const levelEmoji = {
-  fatal: '💥',
-  error: '❌',
-  warn:  '⚠️',
-  info:  'ℹ️',
-  debug: '🔍',
-  trace: '🧭'
-};
+import pino from "pino";
 
-// pretty transport only in non-production by default
-const isProd = process.env.NODE_ENV === 'production';
-const transport = isProd
-  ? undefined
-  : {
-      target: 'pino-pretty',
-      options: {
-        colorize: true,
-        translateTime: 'SYS:standard',
-        singleLine: false,
-        ignore: 'pid,hostname'
-      }
-    };
+const isProd =
+  process.env.NODE_ENV === "production" || process.env.SHIPER === "true";
 
-function withEmoji(level, msg) {
-  const emoji = levelEmoji[level] || '';
-  if (!msg) return emoji;
-  return `${emoji} ${msg}`.trim();
-}
+// 🔒 Global singleton to prevent duplicate instances across imports
+let loggerInstance = globalThis.__AI_PODCAST_LOGGER__;
+if (!loggerInstance) {
+  const baseConfig = {
+    level: process.env.LOG_LEVEL || (isProd ? "info" : "debug"),
+    base: { service: "ai-podcast-suite" },
+  };
 
-export const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  base: undefined,
-  redact: {
-    paths: ['password', 'token', 'authorization', 'auth', 'Authorization'],
-    remove: true
-  },
-  transport
-});
-
-// Wrap core methods to inject emoji automatically
-const core = {
-  info: logger.info.bind(logger),
-  warn: logger.warn.bind(logger),
-  error: logger.error.bind(logger),
-  debug: logger.debug.bind(logger),
-  trace: logger.trace?.bind(logger) || (()=>{})
-};
-
-logger.info = (...args) => core.info(withEmoji('info', args[0]), ...args.slice(1));
-logger.warn = (...args) => core.warn(withEmoji('warn', args[0]), ...args.slice(1));
-logger.error = (...args) => core.error(withEmoji('error', args[0]), ...args.slice(1));
-logger.debug = (...args) => core.debug(withEmoji('debug', args[0]), ...args.slice(1));
-logger.trace = (...args) => core.trace(withEmoji('trace', args[0]), ...args.slice(1));
-
-// Optional shipper stub — disabled by default
-const shipEndpoint = process.env.LOG_SHIP_ENDPOINT; // e.g., https://logs.example.com/ingest
-const shipEnabled = !!shipEndpoint;
-
-export async function shipLog(level, message, meta = {}) {
-  if (!shipEnabled) return;
-  try {
-    const payload = {
-      ts: new Date().toISOString(),
-      level,
-      message,
-      meta
-    };
-    // Node 18+/22+ has global fetch
-    const res = await fetch(shipEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      keepalive: true
+  if (isProd) {
+    // ✅ JSON logs for production / Shiper
+    loggerInstance = pino({
+      ...baseConfig,
+      timestamp: pino.stdTimeFunctions.isoTime,
     });
-    if (!res.ok) {
-      core.warn('Shipper HTTP non-OK', { status: res.status });
-    }
-  } catch (err) {
-    core.error('Shipper failed', { err: err?.message });
+  } else {
+    // 🧩 Pretty logs for local development
+    loggerInstance = pino({
+      ...baseConfig,
+      transport: {
+        target: "pino-pretty",
+        options: {
+          colorize: true,
+          singleLine: true,
+          ignore: "pid,hostname",
+          translateTime: "SYS:standard",
+          messageFormat: "{levelLabel} {msg}",
+          // ✅ Remove customPrettifiers - they cause DataCloneError
+          // Emojis can be added directly in log messages if needed
+        },
+      },
+    });
   }
+
+  globalThis.__AI_PODCAST_LOGGER__ = loggerInstance;
 }
 
-// Convenience helpers to ship explicitly
-export const ship = {
-  info: (msg, meta) => shipLog('info', msg, meta),
-  warn: (msg, meta) => shipLog('warn', msg, meta),
-  error: (msg, meta) => shipLog('error', msg, meta),
-  debug: (msg, meta) => shipLog('debug', msg, meta)
-};
+// ✅ Consistent singleton export
+const log = loggerInstance;
 
-export default logger;
+// --- FIXED WRAPPERS ---
+// Always put the context object first, then the message string.
+// This ensures Pino serialises metadata (message, stack, etc.)
+export const info = (msg, obj = {}) => log.info(obj, msg);
+export const warn = (msg, obj = {}) => log.warn(obj, msg);
+export const error = (msg, obj = {}) => log.error(obj, msg);
+export const debug = (msg, obj = {}) => log.debug(obj, msg);
+
+export { log };
+export default log;
