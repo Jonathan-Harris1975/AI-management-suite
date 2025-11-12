@@ -8,6 +8,7 @@ import { info, error } from "#logger.js";
 import rssRoutes from "../services/rss-feed-creator/routes/rewrite.js";
 import scriptRoutes from "../services/script/routes/index.js";
 import ttsRoutes from "../services/tts/routes/tts.js";
+import { logger } from '../logger.js';
 import artworkRoutes from "../services/artwork/index.js";
 import podcastRoutes from "../services/podcast/index.js"; // ✅ Correct route import
 

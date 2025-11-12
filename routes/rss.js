@@ -1,6 +1,7 @@
 // /routes/rss.js — AI Podcast Suite (Final Stable 2025-10-11)
 import express from "express";
 import { getObject } from "../services/shared/utils/r2-client.js";
+import { logger } from '../logger.js';
 
 const router = express.Router();
 
