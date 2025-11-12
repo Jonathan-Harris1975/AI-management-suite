@@ -1,22 +1,31 @@
 // ============================================================
-// 🎛️ mergeProcessor — Reliable ffmpeg concat with low-memory streaming
+// 🎛️ mergeProcessor — Crash-proof ffmpeg concat on Render
 // ============================================================
-// - Accepts { url } | { key } | direct strings
-// - Resolves ffmpeg binary (ffmpeg-static -> @ffmpeg-installer/ffmpeg -> system)
-// - Streams output to a temp file to avoid OOM (Render 512–1024 MB dynos)
-// - Uploads to R2 using a Readable stream (no in-memory Buffer)
-// - Retries on transient failures with clear error messages
+// Fixes:
+//  - Avoids ffmpeg-static SIGSEGV by preferring @ffmpeg-installer/system
+//  - Falls back across binaries automatically on failure
+//  - Re-encodes to MP3 (libmp3lame) to prevent copy/mux issues
+//  - Uses a temp concat list file (not stdin)
+//  - Streams upload to R2 (no large in-memory buffers)
+//  - Clear error reporting: code vs signal
 // ============================================================
 
-import { info, warn, error } from "#logger.js";
-import { putObject } from "#shared/r2-client.js";
-import { startKeepAlive, stopKeepAlive } from "../../shared/utils/keepalive.js";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import ffmpegStatic from "ffmpeg-static";
+import { info, warn, error } from "#logger.js";
+import { putObject } from "#shared/r2-client.js";
 import * as retryModule from "../../../utils/retry.js";
+
+// Optional — keepalive imports if you have them; safe to no-op if not present
+let startKeepAlive = () => null;
+let stopKeepAlive = () => null;
+try {
+  const ka = await import("../../shared/utils/keepalive.js");
+  startKeepAlive = ka.startKeepAlive ?? startKeepAlive;
+  stopKeepAlive = ka.stopKeepAlive ?? stopKeepAlive;
+} catch (_) {}
 
 const withRetries = retryModule.withRetries || retryModule.default;
 
@@ -51,67 +60,84 @@ function normalizeUrls(items) {
   return out;
 }
 
-function buildListStdin(urls) {
-  return urls.map((u) => `file '${u.replace(/'/g, "'\\''")}'`).join("\n");
-}
-
-// ------------------------------------------------------------
-// 🧩 Robust ffmpeg finder with fallbacks
-// ------------------------------------------------------------
-async function findFfmpeg() {
-  // Try ffmpeg-static first
-  try {
-    if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
-      fs.accessSync(ffmpegStatic, fs.constants.X_OK);
-      info("Using ffmpeg-static binary");
-      return ffmpegStatic;
-    }
-  } catch (err) {
-    warn(`mergeProcessor: ffmpeg-static not executable: ${err.message}`);
-  }
-
-  // Try @ffmpeg-installer/ffmpeg
-  try {
-    const ffmpegInstaller = await import("@ffmpeg-installer/ffmpeg");
-    const installerPath = ffmpegInstaller.path;
-    if (installerPath && fs.existsSync(installerPath)) {
-      fs.accessSync(installerPath, fs.constants.X_OK);
-      info("Using @ffmpeg-installer/ffmpeg binary");
-      return installerPath;
-    }
-  } catch (err) {
-    warn(`mergeProcessor: @ffmpeg-installer/ffmpeg not available: ${err.message}`);
-  }
-
-  // System fallback
-  info("Falling back to system ffmpeg");
-  return "ffmpeg";
-}
-
-// ------------------------------------------------------------
-// 🧵 Low-memory concat: write stdout to a temp file
-// ------------------------------------------------------------
-async function runFfmpegConcatToFile(urls) {
-  const ffmpegPath = await findFfmpeg();
+function writeConcatListFile(urls) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "merge-"));
-  const outPath = path.join(tmpDir, "merged.mp3");
+  const listPath = path.join(tmpDir, "list.txt");
+  const safe = (u) => u.replace(/'/g, "'\\''");
+  const content = urls.map((u) => `file '${safe(u)}'`).join("\n");
+  fs.writeFileSync(listPath, content, "utf8");
+  return { tmpDir, listPath };
+}
+
+// ---------- ffmpeg binary resolution with blacklisting ----------
+let cachedChoices = null;
+const blacklist = new Set();
+
+async function resolveCandidates() {
+  if (cachedChoices) return cachedChoices;
+  const candidates = [];
+
+  // Prefer @ffmpeg-installer/ffmpeg
+  try {
+    const inst = await import("@ffmpeg-installer/ffmpeg");
+    if (inst?.path && fs.existsSync(inst.path)) {
+      fs.accessSync(inst.path, fs.constants.X_OK);
+      candidates.push({ label: "@ffmpeg-installer/ffmpeg", path: inst.path });
+    }
+  } catch (e) {
+    warn(`@ffmpeg-installer/ffmpeg not available: ${e.message}`);
+  }
+
+  // Then system ffmpeg
+  candidates.push({ label: "system ffmpeg", path: "ffmpeg" });
+
+  // Last resort: ffmpeg-static (prone to SIGSEGV on some stacks)
+  try {
+    const staticPath = (await import("ffmpeg-static")).default;
+    if (staticPath && fs.existsSync(staticPath)) {
+      fs.accessSync(staticPath, fs.constants.X_OK);
+      candidates.push({ label: "ffmpeg-static", path: staticPath });
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  cachedChoices = candidates;
+  return candidates;
+}
+
+async function findFfmpeg() {
+  const candidates = await resolveCandidates();
+  const usable = candidates.find((c) => !blacklist.has(c.label));
+  if (!usable) throw new Error("No usable ffmpeg binary found (all candidates blacklisted).");
+  info(`Using ${usable.label} binary`);
+  return usable;
+}
+
+// ---------- run ffmpeg with re-encode (stable) ----------
+async function runConcatEncode(listPath) {
+  const { label, path: ffmpegPath } = await findFfmpeg();
+  const outPath = path.join(path.dirname(listPath), "merged.mp3");
 
   return new Promise((resolve, reject) => {
+    // Re-encode to MP3 to normalize all chunks; avoids -c copy mux issues
     const args = [
       "-hide_banner",
       "-loglevel", "error",
+      "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
       "-f", "concat",
       "-safe", "0",
-      "-protocol_whitelist", "file,http,https,tcp,tls,pipe,crypto",
-      "-i", "pipe:0",
-      "-c", "copy",
-      "-movflags", "faststart",
-      "-f", "mp3",
+      "-i", listPath,
+      "-vn",
+      "-acodec", "libmp3lame",
+      "-b:a", process.env.MERGE_MP3_BITRATE || "160k",
+      "-ar", process.env.MERGE_MP3_AR || "44100",
+      "-ac", process.env.MERGE_MP3_CHANNELS || "2",
+      "-y",
       outPath,
     ];
 
-    const ff = spawn(ffmpegPath, args, { stdio: ["pipe", "ignore", "pipe"] });
-
+    const ff = spawn(ffmpegPath, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderrLog = "";
 
     ff.stderr.on("data", (d) => {
@@ -122,87 +148,78 @@ async function runFfmpegConcatToFile(urls) {
 
     ff.on("error", (err) => {
       error(`ffmpeg spawn error: ${err.message}`);
-      reject(new Error(`ffmpeg spawn failed: ${err.message}`));
+      // Blacklist the binary on spawn error
+      blacklist.add(label);
+      reject(new Error(`ffmpeg spawn failed (${label}): ${err.message}`));
     });
 
     ff.on("close", (code, signal) => {
       if (code === 0) {
         try {
-          const stat = fs.statSync(outPath);
-          if (stat.size <= 0) {
-            return reject(new Error("ffmpeg produced empty output file"));
-          }
-          return resolve(outPath);
+          const st = fs.statSync(outPath);
+          if (st.size <= 0) return reject(new Error("ffmpeg produced empty output file"));
+          return resolve({ outPath, label });
         } catch (e) {
           return reject(new Error(`Output file missing: ${e.message}`));
         }
       }
-      const reason =
-        stderrLog.trim() ||
-        (signal ? `ffmpeg terminated by signal ${signal}` : `ffmpeg exited with code ${code}`);
+      const reason = signal
+        ? `ffmpeg terminated by signal ${signal}`
+        : `ffmpeg exited with code ${code}`;
       error(`ffmpeg failed: ${reason}`);
-      reject(new Error(reason));
+      // Blacklist this binary if it segfaults / closes abnormally
+      blacklist.add(label);
+      const details = stderrLog.trim() ? ` — ${stderrLog.trim()}` : "";
+      reject(new Error(`${reason}${details ? ` | ${details}` : ""}`));
     });
-
-    try {
-      const listText = buildListStdin(urls);
-      ff.stdin.write(listText);
-      ff.stdin.end();
-    } catch (err) {
-      error(`Failed to write to ffmpeg stdin: ${err.message}`);
-      reject(new Error(`Failed to send URL list to ffmpeg: ${err.message}`));
-    }
   });
 }
 
-// ------------------------------------------------------------
-// 🚀 mergeProcessor main
-// ------------------------------------------------------------
+// ---------- public API ----------
 export async function mergeProcessor(sessionId, inputs, outputKeyOpt) {
   const keepAliveId = `mergeProcessor:${sessionId}`;
-  const keepAlive = startKeepAlive(keepAliveId, 15_000, " ⏳Silent keep-alive active for mergeProcessor");
+  const keep = startKeepAlive(keepAliveId, 15_000, "🔋 merge keep-alive");
+  const urls = normalizeUrls(inputs);
+  info({ count: urls.length }, "🎯 Merge URL list prepared");
+
+  const outputKey = outputKeyOpt || `${sessionId}/merged.mp3`;
+  const { tmpDir, listPath } = writeConcatListFile(urls);
 
   try {
     info("🎛️ Launching ffmpeg concat");
 
-    const urls = normalizeUrls(inputs);
-    info({ count: urls.length }, "🎯 Merge URL list prepared");
-
-    const outputKey = outputKeyOpt || `${sessionId}/merged.mp3`;
-
-    const outPath = await withRetries(
-      () => runFfmpegConcatToFile(urls),
+    // Try up to 3 different binaries (installer -> system -> static) via retries
+    const { outPath, label } = await withRetries(
+      () => runConcatEncode(listPath),
       { retries: 3, delay: 2500, label: "ffmpeg:concat" }
     );
 
-    // Stream upload to R2 (avoid buffering in memory)
+    // Upload as stream to keep memory low
     await putObject(
-      "merged",
+      MERGED_BUCKET,
       outputKey,
       fs.createReadStream(outPath),
       "audio/mpeg"
     );
 
-    const publicUrl = `${PUBLIC_BASE_URL_MERGED}/${encodeURIComponent(outputKey)}`;
+    const publicUrl = `${trimRight(PUBLIC_BASE_URL_MERGED)}/${encodeURIComponent(outputKey)}`;
+    info({ outputKey, publicUrl, ffmpeg: label }, "✅ Merge complete & uploaded");
 
-    // Clean up temp file / folder
-    try {
-      fs.rmSync(path.dirname(outPath), { recursive: true, force: true });
-    } catch (e) {
-      warn(`Temp cleanup failed: ${e.message}`);
-    }
-
-    info({ outputKey, publicUrl }, "✅ Merge complete & uploaded");
     return { key: outputKey, url: publicUrl };
   } catch (err) {
     error("💥 Streamed mergeProcessor failed", {
       service: "ai-podcast-suite",
       sessionId,
-      err: err.message || err
+      err: err.message || String(err),
     });
     throw err;
   } finally {
-    stopKeepAlive(keepAlive);
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch (e) {
+      warn(`Temp cleanup failed: ${e.message}`);
+    }
+    stopKeepAlive(keep);
     info("⏳Keep-alive stopped.", { service: "ai-podcast-suite", sessionId });
   }
 }
