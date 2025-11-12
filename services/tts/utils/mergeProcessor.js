@@ -56,31 +56,38 @@ function buildListStdin(urls) {
 // 🧩 Robust ffmpeg spawn with fallbacks
 // ------------------------------------------------------------
 async function findFfmpeg() {
+  // Try ffmpeg-static first
   try {
     if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
       fs.accessSync(ffmpegStatic, fs.constants.X_OK);
+      info("Using ffmpeg-static binary");
       return ffmpegStatic;
     }
-  } catch {
-    warn("mergeProcessor: ffmpeg-static not executable");
+  } catch (err) {
+    warn(`mergeProcessor: ffmpeg-static not executable: ${err.message}`);
   }
 
+  // Try @ffmpeg-installer/ffmpeg
   try {
-    const { path: installerPath } = await import("@ffmpeg-installer/ffmpeg");
+    const ffmpegInstaller = await import("@ffmpeg-installer/ffmpeg");
+    const installerPath = ffmpegInstaller.path;
     if (installerPath && fs.existsSync(installerPath)) {
       fs.accessSync(installerPath, fs.constants.X_OK);
+      info("Using @ffmpeg-installer/ffmpeg binary");
       return installerPath;
     }
-  } catch {
-    warn("mergeProcessor: @ffmpeg-installer/ffmpeg not available");
+  } catch (err) {
+    warn(`mergeProcessor: @ffmpeg-installer/ffmpeg not available: ${err.message}`);
   }
 
-  // system fallback
+  // System fallback
+  info("Falling back to system ffmpeg");
   return "ffmpeg";
 }
 
 async function runFfmpegConcat(urls) {
   const ffmpegPath = await findFfmpeg();
+  
   return new Promise((resolve, reject) => {
     const args = [
       "-hide_banner",
@@ -96,22 +103,35 @@ async function runFfmpegConcat(urls) {
     ];
 
     const ff = spawn(ffmpegPath, args, { stdio: ["pipe", "pipe", "pipe"] });
-    let stdoutChunks = [];
+    const stdoutChunks = [];
     let stderrLog = "";
 
     ff.stdout.on("data", (d) => stdoutChunks.push(d));
+    
     ff.stderr.on("data", (d) => {
       const msg = d.toString();
       stderrLog += msg;
+      // Log errors in real-time for debugging
+      if (msg.toLowerCase().includes("error")) {
+        error(`ffmpeg stderr: ${msg.trim()}`);
+      }
     });
 
     ff.on("error", (err) => {
+      error(`ffmpeg spawn error: ${err.message}`);
       reject(new Error(`ffmpeg spawn failed: ${err.message}`));
     });
 
     ff.on("close", (code) => {
-      if (code === 0) return resolve(Buffer.concat(stdoutChunks));
+      if (code === 0) {
+        const merged = Buffer.concat(stdoutChunks);
+        if (merged.length === 0) {
+          return reject(new Error("ffmpeg produced empty output"));
+        }
+        return resolve(merged);
+      }
       const reason = stderrLog.trim() || `ffmpeg exited with code ${code}`;
+      error(`ffmpeg failed: ${reason}`);
       reject(new Error(reason));
     });
 
@@ -120,6 +140,7 @@ async function runFfmpegConcat(urls) {
       ff.stdin.write(listText);
       ff.stdin.end();
     } catch (err) {
+      error(`Failed to write to ffmpeg stdin: ${err.message}`);
       reject(new Error(`Failed to send URL list to ffmpeg: ${err.message}`));
     }
   });
@@ -130,7 +151,7 @@ async function runFfmpegConcat(urls) {
 // ------------------------------------------------------------
 export async function mergeProcessor(sessionId, inputs, outputKeyOpt) {
   const keepAliveId = `mergeProcessor:${sessionId}`;
-  const keepAlive = startKeepAlive(keepAliveId, 15_000, "🌙 Silent keep-alive active for mergeProcessor");
+  const keepAlive = startKeepAlive(keepAliveId, 15_000, " ⏳Silent keep-alive active for mergeProcessor");
 
   try {
     info("🎛️ Launching ffmpeg concat");
@@ -145,21 +166,27 @@ export async function mergeProcessor(sessionId, inputs, outputKeyOpt) {
       { retries: 3, delay: 2500, label: "ffmpeg:concat" }
     );
 
+    if (!mergedBuffer || mergedBuffer.length === 0) {
+      throw new Error("Merge produced empty buffer");
+    }
+
     await putObject(MERGED_BUCKET, outputKey, mergedBuffer, { "Content-Type": "audio/mpeg" });
 
     const publicUrl = joinUrl(PUBLIC_BASE_URL_MERGED, outputKey);
-    info("✅ Merge complete", { sessionId, publicUrl });
+    info("✅ Merge complete", { sessionId, publicUrl, bytes: mergedBuffer.length });
+    
     return { key: outputKey, url: publicUrl, bytes: mergedBuffer.length };
 
   } catch (err) {
     error("💥 Streamed mergeProcessor failed", {
       service: "ai-podcast-suite",
+      sessionId,
       err: err.message || err
     });
     throw err;
   } finally {
     stopKeepAlive(keepAlive);
-    info("🌙 Keep-alive stopped.", { service: "ai-podcast-suite" });
+    info("⏳Keep-alive stopped.", { service: "ai-podcast-suite", sessionId });
   }
 }
 
