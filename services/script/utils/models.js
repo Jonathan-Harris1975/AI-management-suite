@@ -6,7 +6,7 @@ import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
 import fetchFeedArticles from "./fetchFeeds.js";
 import { putText, putJson } from "../../shared/utils/r2-client.js";
-import { cleanTranscript } from "./textHelpers.js";
+import { cleanTranscript, humanizeIntro, humanizeForDetection, stripUrlProtocols } from "./textHelpers.js";
 import { calculateDuration } from "./durationCalculator.js";
 import { getWeatherSummary } from "./getWeatherSummary.js";
 import getTuringQuote from "./getTuringQuote.js";
@@ -48,7 +48,10 @@ export async function generateIntro(sessionIdLike) {
     section: "intro",
     messages: [{ role: "system", content: prompt }],
   });
-  return sanitizeOutput(res);
+  const raw = sanitizeOutput(res);
+  const seeded = (sessionMeta && sessionMeta.sessionId) ? Array.from(String(sessionMeta.sessionId)).reduce((a,c)=>a+c.charCodeAt(0),0) : 0;
+  const human = humanizeForDetection(humanizeIntro(raw, seeded), seeded);
+  return human;
 }
 
 export async function generateMain(sessionIdLike) {
@@ -69,7 +72,9 @@ export async function generateMain(sessionIdLike) {
     section: "main",
     messages: [{ role: "system", content: prompt }],
   });
-  return sanitizeOutput(res);
+  const raw = sanitizeOutput(res);
+  const seeded = (sessionMeta && sessionMeta.sessionId) ? Array.from(String(sessionMeta.sessionId)).reduce((a,c)=>a+c.charCodeAt(0),0) : 0;
+  return humanizeForDetection(raw, seeded);
 }
 
 export async function generateOutro(sessionIdLike) {
@@ -80,7 +85,11 @@ export async function generateOutro(sessionIdLike) {
     section: "outro",
     messages: [{ role: "system", content: prompt }],
   });
-  return sanitizeOutput(res);
+  const raw = sanitizeOutput(res);
+  const withoutProto = stripUrlProtocols(raw);
+  const seeded = (sessionMeta && sessionMeta.sessionId) ? Array.from(String(sessionMeta.sessionId)).reduce((a,c)=>a+c.charCodeAt(0),0) : 0;
+  const human = humanizeForDetection(withoutProto, seeded);
+  return human;
 }
 
 export async function generateComposedEpisode(sessionIdLike) {

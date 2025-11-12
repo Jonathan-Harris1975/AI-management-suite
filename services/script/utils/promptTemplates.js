@@ -36,7 +36,7 @@ export function getIntroPrompt({ weatherSummary, turingQuote, sessionMeta }) {
   return `
 You are ${persona.host}, hosting "${persona.show}".
 Write a short, engaging INTRO for an AI news podcast.
-Tone: dry, witty, British, reflective, conversational.
+Tone: dry, witty, British, reflective, conversational. Avoid list-y phrasing, keep sentence lengths varied, prefer contractions.
 
 - Begin with a wry British comment about the weather using: "${weatherSummary}".
   Even if the weather is nice, sound mildly unimpressed or ironic.
