@@ -12,11 +12,10 @@ import { info, error } from "#logger.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { startKeepAlive, stopKeepAlive } from "../../shared/utils/keepalive.js";
-import { putObject, buildPublicUrl, getObjectBuffer } from "#shared/r2-client.js";
+import { uploadBuffer, buildPublicUrl, getObjectAsText } from "#shared/utils/r2-client.js";
 import ffprobePath from "ffprobe-static";
-import { execFile } from "node:child_process";
 
 const INTRO_URL = process.env.PODCAST_INTRO_URL;
 const OUTRO_URL = process.env.PODCAST_OUTRO_URL;
@@ -39,7 +38,6 @@ const STUDIO_FILTERS = [
   "loudnorm=I=-14:TP=-1:LRA=11"
 ];
 
-// Helper: run ffmpeg
 async function runFfmpeg(ffmpegPath, args) {
   return new Promise((resolve, reject) => {
     const ff = spawn(ffmpegPath, args);
@@ -47,16 +45,12 @@ async function runFfmpeg(ffmpegPath, args) {
   });
 }
 
-// Helper: find ffmpeg binary
 async function findFfmpeg() {
   const mod = await import("ffmpeg-static");
   if (mod?.default) return mod.default;
   throw new Error("❌ ffmpeg not found");
 }
 
-// ------------------------------------------------------------
-// 🎧 Main processor
-// ------------------------------------------------------------
 export async function podcastProcessor(sessionId, editedBuffer) {
   const label = `podcastProcessor:${sessionId}`;
   startKeepAlive(label, 20000);
@@ -73,39 +67,28 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     const outputPath = path.join(tmpDir, `${sessionId}_final.mp3`);
 
     await fs.writeFile(mainPath, editedBuffer);
-
     const ffmpegPath = await findFfmpeg();
 
-    // Download and process intro/outro with musical fades
     const parts = [mainPath];
-
     if (INTRO_URL) {
       try {
-        const introResp = await fetch(INTRO_URL);
-        const introData = Buffer.from(await introResp.arrayBuffer());
-        await fs.writeFile(introPath, introData);
-        const introExists = await fs.stat(introPath).catch(() => null);
-        if (introExists) {
-          await applyFadeOut(ffmpegPath, introPath, introFadedPath, MIN_INTRO_DURATION);
-          parts.unshift(introFadedPath);
-        }
+        const res = await fetch(INTRO_URL);
+        const buf = Buffer.from(await res.arrayBuffer());
+        await fs.writeFile(introPath, buf);
+        await applyFadeOut(ffmpegPath, introPath, introFadedPath, MIN_INTRO_DURATION);
+        parts.unshift(introFadedPath);
       } catch {}
     }
-
     if (OUTRO_URL) {
       try {
-        const outroResp = await fetch(OUTRO_URL);
-        const outroData = Buffer.from(await outroResp.arrayBuffer());
-        await fs.writeFile(outroPath, outroData);
-        const outroExists = await fs.stat(outroPath).catch(() => null);
-        if (outroExists) {
-          await applyFadeIn(ffmpegPath, outroPath, outroFadedPath, MIN_OUTRO_DURATION);
-          parts.push(outroFadedPath);
-        }
+        const res = await fetch(OUTRO_URL);
+        const buf = Buffer.from(await res.arrayBuffer());
+        await fs.writeFile(outroPath, buf);
+        await applyFadeIn(ffmpegPath, outroPath, outroFadedPath, MIN_OUTRO_DURATION);
+        parts.push(outroFadedPath);
       } catch {}
     }
 
-    // Build concat list
     const listFile = path.join(tmpDir, "concat.txt");
     const concatLines = parts.map(p => `file '${p}'`).join("\n");
     await fs.writeFile(listFile, concatLines);
@@ -119,33 +102,28 @@ export async function podcastProcessor(sessionId, editedBuffer) {
       "-compression_level", "0",
       outputPath
     ];
-
     await runFfmpeg(ffmpegPath, args);
 
     const finalBuf = await fs.readFile(outputPath);
-    await putObject(FINAL_BUCKET_KEY, `${sessionId}.mp3`, finalBuf, "audio/mpeg");
+    await uploadBuffer(FINAL_BUCKET_KEY, `${sessionId}.mp3`, finalBuf, "audio/mpeg");
     const url = buildPublicUrl(FINAL_BUCKET_KEY, `${sessionId}.mp3`);
 
-    // --------------------------------------------------------
     // 🕵️ Silent metadata update after upload
-    // --------------------------------------------------------
     try {
       const duration = await getAudioDuration(outputPath);
       const stats = await fs.stat(outputPath);
       const fileSizeMB = +(stats.size / (1024 * 1024)).toFixed(1);
 
-      // Fetch existing meta JSON
       let meta = {};
       try {
-        const metaBuffer = await getObjectBuffer(META_BUCKET_KEY, `${sessionId}.json`);
-        meta = JSON.parse(metaBuffer.toString());
+        const metaText = await getObjectAsText(META_BUCKET_KEY, `${sessionId}.json`);
+        meta = JSON.parse(metaText);
       } catch {}
 
-      // Merge in new fields
       meta.audioDuration = duration;
       meta.fileSizeMB = fileSizeMB;
 
-      await putObject(META_BUCKET_KEY, `${sessionId}.json`, Buffer.from(JSON.stringify(meta, null, 2)), "application/json");
+      await uploadBuffer(META_BUCKET_KEY, `${sessionId}.json`, Buffer.from(JSON.stringify(meta, null, 2)), "application/json");
     } catch {}
 
     info({ sessionId, url }, "✅ Studio-quality podcast uploaded");
@@ -160,7 +138,7 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 }
 
 // ------------------------------------------------------------
-// Helpers for fade effects and metadata
+// Helpers
 // ------------------------------------------------------------
 async function applyFadeOut(ffmpeg, inputPath, outputPath, duration) {
   const args = ["-i", inputPath, "-af", `afade=t=out:st=0:d=${duration}`, outputPath];
@@ -189,4 +167,4 @@ async function getAudioDuration(filePath) {
       resolve(`${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`);
     });
   });
-          }
+                                 }
