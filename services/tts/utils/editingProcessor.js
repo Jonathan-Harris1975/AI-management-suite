@@ -1,8 +1,9 @@
 // ============================================================
-// 🎚️ editingProcessor — Deep & Mature Tone + Render-Safe Keep-Alive
+// 🎚️ editingProcessor — TTS Audio Enhancement for AWS Polly (Brian Voice)
 // ============================================================
 //
-// ✅ Applies EQ + compression filters for a mature voice tone
+// ✅ Applies EQ + compression to enhance Polly TTS output
+// ✅ Removes loudnorm and filtering (handled in final mix)
 // ✅ Uses ffmpeg or ffmpeg-static fallback
 // ✅ Automatically triggers silent keep-alive pings to avoid Render idle timeout
 // ============================================================
@@ -14,17 +15,14 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { startKeepAlive, stopKeepAlive } from "../../shared/utils/keepalive.js";
 
-// 🎧 EQ tuned for deeper male/mature tone
+// 🎧 EQ chain optimized for AWS Polly Brian voice
+// Adds warmth, body, and reduces synthetic artifacts
 const FILTERS = [
-  "highpass=f=60",
-  "lowpass=f=14000",
-  "bass=g=6",
-  "treble=g=-2",
-  "equalizer=f=180:width_type=o:width=2:g=4",
-  "equalizer=f=2800:width_type=o:width=2:g=-3",
-  "acompressor=threshold=-20dB:ratio=4:attack=15:release=200:makeup=6",
-  "loudnorm=I=-16:TP=-1.5:LRA=11",
-  "volume=1.1"
+  "bass=g=6",                                          // Boost low-end warmth
+  "treble=g=-2",                                       // Smooth harsh highs
+  "equalizer=f=180:width_type=o:width=2:g=4",         // Add body/fullness
+  "equalizer=f=2800:width_type=o:width=2:g=-3",       // Reduce nasal quality
+  "acompressor=threshold=-20dB:ratio=4:attack=15:release=200:makeup=6" // Control dynamics
 ].join(",");
 
 // ------------------------------------------------------------
@@ -46,7 +44,7 @@ async function findFfmpeg() {
 }
 
 // ------------------------------------------------------------
-// 🚀 Core Processor — Applies EQ / compression / loudnorm
+// 🚀 Core Processor — Applies EQ and compression to TTS audio
 // ------------------------------------------------------------
 export async function editingProcessor(sessionId, merged) {
   const label = `editingProcessor:${sessionId}`;
@@ -60,7 +58,7 @@ export async function editingProcessor(sessionId, merged) {
 
   try {
     const ffmpegPath = await findFfmpeg();
-    info({ sessionId, ffmpegPath }, "🎧 EditingProcessor started — applying EQ chain");
+    info({ sessionId, ffmpegPath }, "🎧 TTS EditingProcessor started — enhancing Polly audio");
 
     await new Promise((resolve, reject) => {
       const proc = spawn(ffmpegPath, [
@@ -80,11 +78,11 @@ export async function editingProcessor(sessionId, merged) {
     });
 
     const edited = await fs.readFile(outputPath);
-    info({ sessionId, bytes: edited.length }, "🎚️ Editing stage complete");
+    info({ sessionId, bytes: edited.length }, "🎚️ TTS editing stage complete");
     return edited;
 
   } catch (err) {
-    error({ sessionId, err: err.message }, "💥 Editing failed");
+    error({ sessionId, err: err.message }, "💥 TTS editing failed");
     throw err;
 
   } finally {
@@ -92,4 +90,4 @@ export async function editingProcessor(sessionId, merged) {
     await fs.rm(tmpDir, { recursive: true, force: true });
     info({ sessionId }, "🌙 Keep-alive stopped, temp files cleaned up");
   }
-                                                       }
+}
