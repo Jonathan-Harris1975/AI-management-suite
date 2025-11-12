@@ -10,7 +10,7 @@
 
 import { info } from "#logger.js";
 
-export default function chunkText(text, maxBytes = 4200) {
+export default function chunkText(text, maxBytes = 4000) {
   if (!text || typeof text !== "string") return [];
 
   const chunks = [];
