@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 // ============================================================
 // 🌍 AI Podcast Suite — Environment Bootstrap (Shiper-Aligned Final)
 // ============================================================
@@ -25,7 +26,7 @@ function validateEnv(requiredKeys = []) {
 
   if (missing.length > 0) {
     log.error({ missing }, "❌ Missing required environment variables");
-    console.error("Missing required environment variables:", missing.join(", "));
+    logger.error("Missing required environment variables:", missing.join(", "));
     process.exit(1);
   }
 

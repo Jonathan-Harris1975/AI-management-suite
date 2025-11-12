@@ -5,6 +5,7 @@
 import fs from "fs";
 import path from "path";
 import { log } from "#logger.js";
+import { logger } from '../logger.js';
 
 const TEMP_DIR = path.resolve("/app/tmp");
 
