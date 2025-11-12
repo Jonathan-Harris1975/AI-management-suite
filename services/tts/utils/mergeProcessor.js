@@ -12,7 +12,10 @@ import { putObject } from "#shared/r2-client.js";
 import { startKeepAlive, stopKeepAlive } from "../../shared/utils/keepalive.js";
 import { spawn } from "node:child_process";
 import ffmpegPath from "ffmpeg-static";
-import { withRetries } from "../../../utils/retry.js";
+
+// ✅ Support both default and named export from retry.js
+import * as retryModule from "../../../utils/retry.js";
+const withRetries = retryModule.withRetries || retryModule.default;
 
 const MERGED_BUCKET = process.env.R2_BUCKET_MERGED || "podcast-merged";
 const PUBLIC_BASE_URL_MERGED =
@@ -74,6 +77,11 @@ export async function mergeProcessor(sessionId, urls, outputKey) {
 
   try {
     info("🎛️ Launching ffmpeg concat");
+
+    // 🌀 Ensure retry wrapper is valid
+    if (typeof withRetries !== "function") {
+      throw new Error("Retry utility 'withRetries' is not a valid function export");
+    }
 
     // 🌀 Run with retries (3x backoff)
     const mergedBuffer = await withRetries(
