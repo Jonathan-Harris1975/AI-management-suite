@@ -7,7 +7,7 @@ import path from "path";
 import { execSync } from "child_process";
 import { log } from "#logger.js";
 import { uploadBuffer } from "#shared/r2-client.js";
-import { startKeepAlive, stopKeepAlive } from "#shared/heartbeat.js";
+import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 
 const TMP_DIR = "/tmp/podcast_final";
 
