@@ -4,16 +4,23 @@
 // - Uses concat demuxer via stdin file list (avoids multiple pipes)
 // - Retries on ECONNRESET/stream errors with backoff
 // - Clean keep-alive lifecycle
+// - Uses ffmpeg-static binary for full portability
 // ============================================================
 
 import { info, warn, error } from "#logger.js";
 import { putObject } from "#shared/r2-client.js";
 import { startKeepAlive, stopKeepAlive } from "../../shared/utils/keepalive.js";
 import { spawn } from "node:child_process";
-import { withRetries } from "../../../utils/retry.js";
+import ffmpegPath from "ffmpeg-static";
+
+// ✅ Support both default and named export from retry.js
+import * as retryModule from "../../../utils/retry.js";
+const withRetries = retryModule.withRetries || retryModule.default;
 
 const MERGED_BUCKET = process.env.R2_BUCKET_MERGED || "podcast-merged";
-const PUBLIC_BASE_URL_MERGED = process.env.R2_PUBLIC_BASE_URL_MERGED || process.env.R2_PUBLIC_BASE_URL_PODCAST;
+const PUBLIC_BASE_URL_MERGED =
+  process.env.R2_PUBLIC_BASE_URL_MERGED ||
+  process.env.R2_PUBLIC_BASE_URL_PODCAST;
 
 function requireEnv(name, val) {
   if (!val) throw new Error(`Missing required env: ${name}`);
@@ -23,7 +30,7 @@ requireEnv("R2_PUBLIC_BASE_URL_MERGED", PUBLIC_BASE_URL_MERGED);
 
 function buildListStdin(urls) {
   // ffmpeg concat demuxer expects lines: file 'URL' — allow remote with -safe 0
-  return urls.map(u => `file '${u.replace(/'/g, "'\\''")}'`).join("\n");
+  return urls.map(u => `file '${u.replace(/'/g, "'\\\\''")}'`).join("\n");
 }
 
 async function runFfmpegConcat(urls) {
@@ -41,15 +48,17 @@ async function runFfmpegConcat(urls) {
       "pipe:1"
     ];
 
-    const ff = spawn("ffmpeg", args, { stdio: ["pipe", "pipe", "pipe"] });
+    // ✅ Use ffmpeg-static absolute path
+    const ff = spawn(ffmpegPath, args, { stdio: ["pipe", "pipe", "pipe"] });
 
     let chunks = [];
     let stderr = "";
-    ff.stdout.on("data", (d) => chunks.push(d));
-    ff.stderr.on("data", (d) => { stderr += d.toString(); });
 
-    ff.on("error", (e) => reject(e));
-    ff.on("close", (code) => {
+    ff.stdout.on("data", d => chunks.push(d));
+    ff.stderr.on("data", d => { stderr += d.toString(); });
+
+    ff.on("error", e => reject(e));
+    ff.on("close", code => {
       if (code === 0) return resolve(Buffer.concat(chunks));
       const err = new Error(stderr || `ffmpeg exited with code ${code}`);
       reject(err);
@@ -62,32 +71,38 @@ async function runFfmpegConcat(urls) {
   });
 }
 
-export async function mergeProcessor(sessionId, chunkResultsOrUrls) {
-  const label = `mergeProcessor:${sessionId}`;
-  startKeepAlive(label, 15000);
+export async function mergeProcessor(sessionId, urls, outputKey) {
+  const keepAliveId = `mergeProcessor:${sessionId}`;
+  const keepAlive = startKeepAlive(keepAliveId, 15_000, "🌙 Silent keep-alive active for mergeProcessor");
+
   try {
-    // Accept array of {url} or string URLs
-    const urls = (chunkResultsOrUrls || [])
-      .map((x) => (typeof x === "string" ? x : x?.url))
-      .filter(Boolean);
+    info("🎛️ Launching ffmpeg concat");
 
-    if (!urls.length) throw new Error("mergeProcessor received empty URL list");
-    info({ sessionId, count: urls.length }, "🎛️ Launching ffmpeg concat");
+    // 🌀 Ensure retry wrapper is valid
+    if (typeof withRetries !== "function") {
+      throw new Error("Retry utility 'withRetries' is not a valid function export");
+    }
 
-    const mergedBuffer = await withRetries("ffmpeg:concat", () => runFfmpegConcat(urls), 3, 3000);
+    // 🌀 Run with retries (3x backoff)
+    const mergedBuffer = await withRetries(
+      () => runFfmpegConcat(urls),
+      { retries: 3, delay: 2500, label: "ffmpeg:concat" }
+    );
 
-    const key = `${sessionId}/merged.mp3`;
-    await putObject("merged", key, mergedBuffer, "audio/mpeg");
-    const publicUrl = `${PUBLIC_BASE_URL_MERGED}/${encodeURIComponent(key)}`;
-    info({ sessionId, size: mergedBuffer.length, publicUrl }, "💾 Streamed merge uploaded to R2");
+    info("📤 Uploading merged output to R2", { bucket: MERGED_BUCKET });
+    await putObject(MERGED_BUCKET, outputKey, mergedBuffer, {
+      "Content-Type": "audio/mpeg"
+    });
 
-    return { key, url: publicUrl, count: urls.length };
+    const publicUrl = `${PUBLIC_BASE_URL_MERGED}/${outputKey}`;
+    info("✅ Merge complete", { sessionId, publicUrl });
+    return publicUrl;
+
   } catch (err) {
-    error({ sessionId, err: err?.message || String(err) }, "💥 Streamed mergeProcessor failed");
+    error("💥 Streamed mergeProcessor failed", { service: "ai-podcast-suite", err: err.message });
     throw err;
   } finally {
-    stopKeepAlive(label);
+    stopKeepAlive(keepAlive);
+    info("🌙 Keep-alive stopped.", { service: "ai-podcast-suite" });
   }
 }
-
-export default { mergeProcessor };
