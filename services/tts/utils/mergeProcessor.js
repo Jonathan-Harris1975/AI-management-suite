@@ -1,10 +1,11 @@
 // ============================================================
-// 🎛️ mergeProcessor — Reliable ffmpeg concat with Retries
+// 🎛️ mergeProcessor — Reliable ffmpeg concat with low-memory streaming
 // ============================================================
 // - Accepts { url } | { key } | direct strings
-// - Validates ffmpeg binary before spawn
-// - Falls back to system ffmpeg / installer if static binary fails
-// - Returns { key, url, bytes } or throws descriptive error
+// - Resolves ffmpeg binary (ffmpeg-static -> @ffmpeg-installer/ffmpeg -> system)
+// - Streams output to a temp file to avoid OOM (Render 512–1024 MB dynos)
+// - Uploads to R2 using a Readable stream (no in-memory Buffer)
+// - Retries on transient failures with clear error messages
 // ============================================================
 
 import { info, warn, error } from "#logger.js";
@@ -12,6 +13,8 @@ import { putObject } from "#shared/r2-client.js";
 import { startKeepAlive, stopKeepAlive } from "../../shared/utils/keepalive.js";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import ffmpegStatic from "ffmpeg-static";
 import * as retryModule from "../../../utils/retry.js";
 
@@ -53,7 +56,7 @@ function buildListStdin(urls) {
 }
 
 // ------------------------------------------------------------
-// 🧩 Robust ffmpeg spawn with fallbacks
+// 🧩 Robust ffmpeg finder with fallbacks
 // ------------------------------------------------------------
 async function findFfmpeg() {
   // Try ffmpeg-static first
@@ -85,9 +88,14 @@ async function findFfmpeg() {
   return "ffmpeg";
 }
 
-async function runFfmpegConcat(urls) {
+// ------------------------------------------------------------
+// 🧵 Low-memory concat: write stdout to a temp file
+// ------------------------------------------------------------
+async function runFfmpegConcatToFile(urls) {
   const ffmpegPath = await findFfmpeg();
-  
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "merge-"));
+  const outPath = path.join(tmpDir, "merged.mp3");
+
   return new Promise((resolve, reject) => {
     const args = [
       "-hide_banner",
@@ -99,22 +107,17 @@ async function runFfmpegConcat(urls) {
       "-c", "copy",
       "-movflags", "faststart",
       "-f", "mp3",
-      "pipe:1"
+      outPath,
     ];
 
-    const ff = spawn(ffmpegPath, args, { stdio: ["pipe", "pipe", "pipe"] });
-    const stdoutChunks = [];
+    const ff = spawn(ffmpegPath, args, { stdio: ["pipe", "ignore", "pipe"] });
+
     let stderrLog = "";
 
-    ff.stdout.on("data", (d) => stdoutChunks.push(d));
-    
     ff.stderr.on("data", (d) => {
       const msg = d.toString();
       stderrLog += msg;
-      // Log errors in real-time for debugging
-      if (msg.toLowerCase().includes("error")) {
-        error(`ffmpeg stderr: ${msg.trim()}`);
-      }
+      if (msg.toLowerCase().includes("error")) error(`ffmpeg stderr: ${msg.trim()}`);
     });
 
     ff.on("error", (err) => {
@@ -122,15 +125,21 @@ async function runFfmpegConcat(urls) {
       reject(new Error(`ffmpeg spawn failed: ${err.message}`));
     });
 
-    ff.on("close", (code) => {
+    ff.on("close", (code, signal) => {
       if (code === 0) {
-        const merged = Buffer.concat(stdoutChunks);
-        if (merged.length === 0) {
-          return reject(new Error("ffmpeg produced empty output"));
+        try {
+          const stat = fs.statSync(outPath);
+          if (stat.size <= 0) {
+            return reject(new Error("ffmpeg produced empty output file"));
+          }
+          return resolve(outPath);
+        } catch (e) {
+          return reject(new Error(`Output file missing: ${e.message}`));
         }
-        return resolve(merged);
       }
-      const reason = stderrLog.trim() || `ffmpeg exited with code ${code}`;
+      const reason =
+        stderrLog.trim() ||
+        (signal ? `ffmpeg terminated by signal ${signal}` : `ffmpeg exited with code ${code}`);
       error(`ffmpeg failed: ${reason}`);
       reject(new Error(reason));
     });
@@ -161,22 +170,30 @@ export async function mergeProcessor(sessionId, inputs, outputKeyOpt) {
 
     const outputKey = outputKeyOpt || `${sessionId}/merged.mp3`;
 
-    const mergedBuffer = await withRetries(
-      () => runFfmpegConcat(urls),
+    const outPath = await withRetries(
+      () => runFfmpegConcatToFile(urls),
       { retries: 3, delay: 2500, label: "ffmpeg:concat" }
     );
 
-    if (!mergedBuffer || mergedBuffer.length === 0) {
-      throw new Error("Merge produced empty buffer");
+    // Stream upload to R2 (avoid buffering in memory)
+    await putObject(
+      "merged",
+      outputKey,
+      fs.createReadStream(outPath),
+      "audio/mpeg"
+    );
+
+    const publicUrl = `${PUBLIC_BASE_URL_MERGED}/${encodeURIComponent(outputKey)}`;
+
+    // Clean up temp file / folder
+    try {
+      fs.rmSync(path.dirname(outPath), { recursive: true, force: true });
+    } catch (e) {
+      warn(`Temp cleanup failed: ${e.message}`);
     }
 
-    await putObject(MERGED_BUCKET, outputKey, mergedBuffer, { "Content-Type": "audio/mpeg" });
-
-    const publicUrl = joinUrl(PUBLIC_BASE_URL_MERGED, outputKey);
-    info("✅ Merge complete", { sessionId, publicUrl, bytes: mergedBuffer.length });
-    
-    return { key: outputKey, url: publicUrl, bytes: mergedBuffer.length };
-
+    info({ outputKey, publicUrl }, "✅ Merge complete & uploaded");
+    return { key: outputKey, url: publicUrl };
   } catch (err) {
     error("💥 Streamed mergeProcessor failed", {
       service: "ai-podcast-suite",
