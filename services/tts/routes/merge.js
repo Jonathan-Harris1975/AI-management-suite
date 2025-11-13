@@ -34,7 +34,7 @@ router.post("/", async (req, res) => {
 
     res.json({ success: true, ...result });
   } catch (err) {
-    log.error({ sessionId, err: err.message }, "merge failed");
+    log.error("merge failed", { sessionId, err: err.message });
     res.status(500).json({ success: false, error: err.message });
   }
 });

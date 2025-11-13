@@ -32,11 +32,11 @@ router.post("/orchestrate", async (req, res) => {
   // Run the heavy work out-of-band
   (async () => {
     try {
-      info({ sessionId }, "🏁 Detached TTS job started");
+      info("🏁 Detached TTS job started", { sessionId });
       await orchestrateTTS(sessionId);
-      info({ sessionId }, "🏁 Detached TTS job completed");
+      info("🏁 Detached TTS job completed", { sessionId });
     } catch (err) {
-      error({ sessionId, error: err?.stack || err?.message }, "💥 Detached TTS job failed");
+      error("💥 Detached TTS job failed", { sessionId, error: err?.stack || err?.message });
     }
   })();
 });

@@ -7,7 +7,7 @@ const router = express.Router();
 router.post("/", async (req, res) => {
   const { sessionId } = req.body || {};
   if (!sessionId) return res.status(400).json({ error: "sessionId is required" });
-  log.info({ sessionId }, "📣 podcast final ack");
+  log.info("📣 podcast final ack", { sessionId });
   res.json({ success: true, sessionId });
 });
 
