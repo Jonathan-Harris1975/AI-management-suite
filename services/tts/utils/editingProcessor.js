@@ -13,7 +13,9 @@ import { uploadBuffer } from "#shared/r2-client.js";
 const TMP_DIR = "/tmp/tts_editing";
 
 function ensureTmpDir() {
-  if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+  if (!fs.existsSync(TMP_DIR)) {
+    fs.mkdirSync(TMP_DIR, { recursive: true });
+  }
 }
 
 // ------------------------------------------------------------
@@ -38,12 +40,10 @@ const filters = [
   "deesser=i=0.3:m=0.4:f=6000:s=o",
 
   // 5️⃣ Gentle broadcast compression (slower attack = more natural)
-  "acompressor=threshold=-20dB:ratio=3:attack=20:release=250:makeup=3:knee=3",
+  "acompressor=threshold=-20dB:ratio=3:attack=20:release=250:makeup=3",
 
   // 6️⃣ Gentle limiting for safety
-  "alimiter=level_in=1:level_out=0.95:limit=0.95:attack=7:release=100",
-
-  
+  "alimiter=level_in=1:level_out=0.95:limit=0.95:attack=7:release=100"
 ];
 
 // ------------------------------------------------------------
@@ -84,6 +84,15 @@ export async function editingProcessor(sessionId, inputPathObj) {
   const editedPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
   const filterStr = filters.join(",");
   let ffmpegSucceeded = false;
+
+  // Clean up any existing file
+  if (fs.existsSync(editedPath)) {
+    try {
+      fs.unlinkSync(editedPath);
+    } catch (cleanupErr) {
+      log.warn({ sessionId, error: cleanupErr.message }, "⚠️ Could not clean up existing edited file");
+    }
+  }
 
   try {
     const ffmpeg = spawn("ffmpeg", [
@@ -141,10 +150,14 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
         try {
           ffmpeg.stdin.end();
-        } catch {}
+        } catch (e) {
+          // Ignore EPIPE errors during cleanup
+        }
         try {
           inputStream.destroy();
-        } catch {}
+        } catch (e) {
+          // Ignore stream destruction errors
+        }
 
         reject(err);
       };
@@ -190,6 +203,16 @@ export async function editingProcessor(sessionId, inputPathObj) {
       });
     });
 
+    // Verify the output file was created and has content
+    if (!fs.existsSync(editedPath)) {
+      throw new Error("Edited file was not created");
+    }
+
+    const editedStats = fs.statSync(editedPath);
+    if (!editedStats.size) {
+      throw new Error("Edited file is empty");
+    }
+
     // Upload edited version
     const buffer = fs.readFileSync(editedPath);
     const key = `${sessionId}_edited.mp3`;
@@ -212,8 +235,10 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
     try {
       if (!ffmpegSucceeded) {
+        // Ensure we have a file to upload
         if (!fs.existsSync(editedPath)) {
           fs.copyFileSync(inputPath, editedPath);
+          log.info({ sessionId }, "🔄 Created fallback copy of original audio");
         }
 
         const buffer = fs.readFileSync(editedPath);
@@ -221,7 +246,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
         await uploadBuffer("merged", key, buffer, "audio/mpeg");
 
         log.info(
-          { sessionId, key },
+          { sessionId, key, fallback: true },
           "💾 Uploaded fallback (unedited) MP3 to R2"
         );
       }
