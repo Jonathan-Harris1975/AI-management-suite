@@ -1,5 +1,5 @@
 // ============================================================
-// 🎚️ STREAMING Editing Processor — Zero OOM Version
+// 🎚️ STREAMING Editing Processor — Zero OOM Version (Final)
 // ============================================================
 
 import fs from "fs";
@@ -27,33 +27,56 @@ const filters = [
 // ------------------------------------------------------------
 // 🧩 Streaming Editing Processor
 // ------------------------------------------------------------
-export async function editingProcessor(sessionId, inputPath) {
+export async function editingProcessor(sessionId, inputPathObj) {
   startKeepAlive(`editingProcessor:${sessionId}`, 25000);
   ensureTmpDir();
 
-  log.info({ sessionId }, "🎚️ Starting streaming editingProcessor");
+  // --------------------------------------------------------
+  // 🔧 FIX: extract correct input path from object or string
+  // --------------------------------------------------------
+  const inputPath =
+    typeof inputPathObj === "string"
+      ? inputPathObj
+      : inputPathObj?.localPath;
+
+  if (!inputPath || typeof inputPath !== "string") {
+    stopKeepAlive();
+    throw new Error(
+      `Invalid inputPath passed to editingProcessor. Received: ${JSON.stringify(
+        inputPathObj
+      )}`
+    );
+  }
+
+  log.info({ sessionId, inputPath }, "🎚️ Starting streaming editingProcessor");
 
   const editedPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
   const filterStr = filters.join(",");
 
   try {
-    // 🔥 Create ffmpeg streaming process
+    // 🔥 Spawn ffmpeg
     const ffmpeg = spawn("ffmpeg", [
       "-hide_banner",
-      "-loglevel", "error",
+      "-loglevel",
+      "error",
 
-      // Input will be piped in
-      "-i", "pipe:0",
+      // STREAM INPUT
+      "-i",
+      "pipe:0",
 
-      // Apply filter chain
-      "-af", filterStr,
+      // FILTER CHAIN
+      "-af",
+      filterStr,
 
-      // Output format
-      "-ar", "44100",
-      "-b:a", "192k",
+      // Output settings
+      "-ar",
+      "44100",
+      "-b:a",
+      "192k",
 
-      // Output written to file
-      "-y", editedPath,
+      // Save output
+      "-y",
+      editedPath,
     ]);
 
     let ffmpegErr = "";
@@ -67,7 +90,7 @@ export async function editingProcessor(sessionId, inputPath) {
     });
 
     // --------------------------------------------------------
-    // 📥 STREAM INPUT FILE → ffmpeg stdin (avoids huge buffers)
+    // 📥 STREAM INPUT FILE → FFMPEG STDIN
     // --------------------------------------------------------
     await new Promise((resolve, reject) => {
       const inputStream = fs.createReadStream(inputPath);
@@ -83,9 +106,12 @@ export async function editingProcessor(sessionId, inputPath) {
       });
 
       inputStream.on("end", () => ffmpeg.stdin.end());
+
       ffmpeg.on("close", (code) => {
         if (code !== 0) {
-          reject(new Error(`ffmpeg exited with ${code}: ${ffmpegErr}`));
+          reject(
+            new Error(`ffmpeg exited with code ${code} — ${ffmpegErr || "no stderr"}`)
+          );
         } else {
           resolve();
         }
@@ -93,7 +119,7 @@ export async function editingProcessor(sessionId, inputPath) {
     });
 
     // --------------------------------------------------------
-    // 📤 Upload edited file
+    // 📤 Upload edited audio to R2
     // --------------------------------------------------------
     const buffer = fs.readFileSync(editedPath);
     const key = `${sessionId}_edited.mp3`;
