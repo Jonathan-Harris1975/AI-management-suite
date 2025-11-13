@@ -53,8 +53,8 @@ if (!loggerInstance) {
 const log = loggerInstance;
 
 // --- FIXED WRAPPERS ---
-// Always put the context object first, then the message string.
-// This ensures Pino serialises metadata (message, stack, etc.)
+// Call signature: info("message", { context })
+// Always pass the human-readable message first, then an optional metadata object.
 export const info = (msg, obj = {}) => log.info(obj, msg);
 export const warn = (msg, obj = {}) => log.warn(obj, msg);
 export const error = (msg, obj = {}) => log.error(obj, msg);
