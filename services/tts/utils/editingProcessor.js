@@ -45,8 +45,9 @@ const filters = [
   // 3️⃣ Slight presence (British radio clarity)
   "equalizer=f=2600:t=q:w=1.5:g=1.2",
 
-  // 4️⃣ Stable de-esser (no crashing)
-  "deesser=i=6:m=3:f=5500",
+  // 4️⃣ Stable de-esser (moderate, within valid ranges)
+  // i = intensity [0–1], m = max de-essing [0–1], f = normalized freq [0–1]
+  "deesser=i=0.35:m=0.7:f=0.55",
 
   // 5️⃣ Natural compression
   "acompressor=threshold=-18dB:ratio=3.5:attack=18:release=260:makeup=2",
