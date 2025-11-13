@@ -1,6 +1,6 @@
 // ============================================================
 // 🎙️ STREAMING Editing Processor — Premium Radio Host Version
-// Zero OOM • Full ffmpeg Protection • Safe Fallback
+// FIXED: Natural, Warm, Professional Broadcast Voice
 // ============================================================
 
 import fs from "fs";
@@ -17,26 +17,33 @@ function ensureTmpDir() {
 }
 
 // ------------------------------------------------------------
-// ⭐ PREMIUM RADIO HOST FILTER CHAIN
+// ⭐ CORRECTED PREMIUM RADIO HOST FILTER CHAIN
+// Natural Human Voice + Broadcast Polish
 // ------------------------------------------------------------
 const filters = [
-  // Slight mature depth (safe pitch)
-  "asetrate=44100*0.982,aresample=44100",
+  // 1️⃣ Subtle pitch deepening (more mature, less synthetic)
+  // FIXED: Use 1.018 to LOWER pitch (was 0.982 which raised it!)
+  "asetrate=44100*1.018,aresample=44100,atempo=0.982",
 
-  // Warmth + De-harshing
-  "firequalizer=gain_entry='entry(85,4);entry(180,3);entry(320,2);entry(900,-2);entry(2800,-1)'",
+  // 2️⃣ Warmth EQ: Roll off harsh highs, add body
+  "equalizer=f=120:t=q:w=1.2:g=3",      // Add chest resonance
+  "equalizer=f=250:t=q:w=1.0:g=2",      // Warmth/body
+  "equalizer=f=3500:t=q:w=2.0:g=-2",    // Reduce harshness
+  "equalizer=f=8000:t=h:g=-3",          // Gentle high rolloff
 
-  // Presence boost (radio clarity)
-  "equalizer=f=4500:width_type=o:width=1.5:g=2",
+  // 3️⃣ Broadcast presence (much gentler than before)
+  "equalizer=f=2800:t=q:w=1.5:g=1.5",   // Clarity (not harshness)
 
-  // Smooth de-essing
-  "deesser=i=0.4",
+  // 4️⃣ De-esser to tame sibilance
+  "deesser=i=0.3:m=0.4:f=6000:s=o",
 
-  // Broadcast compression
-  "acompressor=threshold=-17dB:ratio=4:attack=8:release=200:makeup=4",
+  // 5️⃣ Gentle broadcast compression (slower attack = more natural)
+  "acompressor=threshold=-20dB:ratio=3:attack=20:release=250:makeup=3:knee=3",
 
-  // Leveling to radio consistency
-  "dynaudnorm=f=200:n=0:p=0.80:s=10",
+  // 6️⃣ Gentle limiting for safety
+  "alimiter=level_in=1:level_out=0.95:limit=0.95:attack=7:release=100",
+
+  
 ];
 
 // ------------------------------------------------------------
@@ -71,7 +78,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
   log.info(
     { sessionId, inputPath },
-    "🎚️ Starting streaming editingProcessor (Premium Radio Host Tone)"
+    "🎚️ Starting streaming editingProcessor (Premium Radio Host - CORRECTED)"
   );
 
   const editedPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
@@ -91,6 +98,10 @@ export async function editingProcessor(sessionId, inputPathObj) {
       "44100",
       "-b:a",
       "192k",
+      "-codec:a",
+      "libmp3lame",
+      "-q:a",
+      "2",  // High quality VBR
       "-y",
       editedPath,
     ]);
@@ -120,7 +131,9 @@ export async function editingProcessor(sessionId, inputPathObj) {
     });
 
     await new Promise((resolve, reject) => {
-      const inputStream = fs.createReadStream(inputPath);
+      const inputStream = fs.createReadStream(inputPath, {
+        highWaterMark: 64 * 1024  // 64KB chunks for smooth streaming
+      });
 
       const safeReject = (err) => {
         if (settled) return;
@@ -184,8 +197,8 @@ export async function editingProcessor(sessionId, inputPathObj) {
     await uploadBuffer("merged", key, buffer, "audio/mpeg");
 
     log.info(
-      { sessionId, key },
-      "💾 Uploaded edited MP3 to R2 (Premium Radio Host Tone)"
+      { sessionId, key, size: buffer.length },
+      "💾 Uploaded edited MP3 to R2 (Natural Professional Voice)"
     );
 
     stopKeepAlive();
