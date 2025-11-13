@@ -52,7 +52,7 @@ function __maybePrintSummary(sessionId, routeName) {
   const sep = "────────────────────────────────────────────";
   const lines = calls.map(({ routeName, provider }) => `${routeName.padEnd(18)}→ ${provider}`);
   const body = [header, sep, ...lines, sep, `Total Calls: ${calls.length}`].join("\n");
-  try { info(body); } catch { console.log(body); }
+  info(body);
   __aiRouteCallsBySession.delete(sid);
 }
 

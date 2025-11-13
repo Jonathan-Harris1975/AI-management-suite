@@ -28,7 +28,7 @@ export function stopKeepAlive(label) {
   if (id) {
     clearInterval(id);
     KA_MAP.delete(label);
-    info({ label }, "🌙 Keep-alive stopped.");
+    info("🌙 Keep-alive stopped.", { label });
   }
 }
 

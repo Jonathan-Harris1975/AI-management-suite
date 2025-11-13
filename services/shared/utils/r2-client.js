@@ -178,16 +178,13 @@ export async function listKeys(bucketKey, prefix = "") {
 export async function deleteObject(bucketKey, key) {
   const bucket = ensureBucketKey(bucketKey);
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
-  log.info({ bucket, key }, "🗑️ R2 object deleted");
+  log.info("🗑️ R2 object deleted", { bucket, key });
 }
 
 // ------------------------------------------------------------
 // 🧾 Startup Log
 // ------------------------------------------------------------
-log.info(
-  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.keys(R2_BUCKETS) },
-  "r2-client.initialized"
-);
+log.info("r2-client.initialized", { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.keys(R2_BUCKETS) });
 
 // ------------------------------------------------------------
 // 📦 Default Export
