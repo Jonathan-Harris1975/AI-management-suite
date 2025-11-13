@@ -28,7 +28,7 @@ const masterFilters = [
 export async function podcastProcessor(sessionId, mainAudioPath) {
   startKeepAlive(`podcastProcessor:${sessionId}`, 25000);
   ensureTmpDir();
-  log.info({ sessionId }, "🎵 Starting podcastProcessor");
+  log.info("🎵 Starting podcastProcessor", { sessionId });
 
   try {
     const introUrl = process.env.PODCAST_INTRO_URL;
@@ -65,11 +65,11 @@ export async function podcastProcessor(sessionId, mainAudioPath) {
     const key = `${sessionId}_final.mp3`;
     await uploadBuffer("podcast", key, buffer, "audio/mpeg");
 
-    log.info({ sessionId, key }, "💾 Uploaded final mastered podcast MP3 to R2");
+    log.info("💾 Uploaded final mastered podcast MP3 to R2", { sessionId, key });
     stopKeepAlive();
     return finalFile;
   } catch (err) {
-    log.error({ sessionId, error: err.message }, "💥 podcastProcessor failed");
+    log.error("💥 podcastProcessor failed", { sessionId, error: err.message });
     stopKeepAlive();
     throw err;
   }

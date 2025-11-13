@@ -89,10 +89,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
     throw new Error(`Input file is empty: ${inputPath}`);
   }
 
-  log.info(
-    { sessionId, inputPath },
-    "🎚️ Starting streaming editingProcessor (UK Premium Radio Host)"
-  );
+  log.info("🎚️ Starting streaming editingProcessor (UK Premium Radio Host)", { sessionId, inputPath });
 
   const editedPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
   const filterStr = filters.join(",");
@@ -102,10 +99,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
     try {
       fs.unlinkSync(editedPath);
     } catch (cleanupErr) {
-      log.warn(
-        { sessionId, error: cleanupErr.message },
-        "⚠️ Could not clean up existing edited file"
-      );
+      log.warn("⚠️ Could not clean up existing edited file", { sessionId, error: cleanupErr.message });
     }
   }
 
@@ -134,10 +128,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       if (settled) return;
       settled = true;
 
-      log.error(
-        { sessionId, error: err.message, ffmpegErr },
-        "💥 editingProcessor ffmpeg failure"
-      );
+      log.error("💥 editingProcessor ffmpeg failure", { sessionId, error: err.message, ffmpegErr });
     };
 
     ffmpeg.stderr.on("data", (d) => (ffmpegErr += d.toString()));
@@ -145,7 +136,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
     ffmpeg.stdin.on("error", (err) => {
       if (err.code !== "EPIPE") {
-        log.error({ sessionId, err }, "💥 ffmpeg stdin error");
+        log.error("💥 ffmpeg stdin error", { sessionId, err });
       }
       fail(err);
     });
@@ -169,7 +160,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       };
 
       inputStream.on("error", (err) => {
-        log.error({ sessionId, err }, "💥 inputStream error");
+        log.error("💥 inputStream error", { sessionId, err });
         safeReject(err);
       });
 
@@ -217,25 +208,19 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
     await uploadBuffer("merged", key, buffer, "audio/mpeg");
 
-    log.info(
-      { sessionId, key, size: buffer.length },
-      "💾 Uploaded edited MP3 to R2 (UK Premium Host)"
-    );
+    log.info("💾 Uploaded edited MP3 to R2 (UK Premium Host)", { sessionId, key, size: buffer.length });
 
     stopKeepAlive();
     return editedPath;
   } catch (err) {
     // Fallback
-    log.error(
-      { sessionId, error: err.message },
-      "💥 editingProcessor failed — fallback to unedited audio"
-    );
+    log.error("💥 editingProcessor failed — fallback to unedited audio", { sessionId, error: err.message });
 
     try {
       if (!ffmpegSucceeded) {
         if (!fs.existsSync(editedPath)) {
           fs.copyFileSync(inputPath, editedPath);
-          log.info({ sessionId }, "🔄 Created fallback copy of original audio");
+          log.info("🔄 Created fallback copy of original audio", { sessionId });
         }
 
         const buffer = fs.readFileSync(editedPath);
@@ -243,16 +228,10 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
         await uploadBuffer("merged", key, buffer, "audio/mpeg");
 
-        log.info(
-          { sessionId, key, fallback: true },
-          "💾 Uploaded fallback (unedited) MP3 to R2"
-        );
+        log.info("💾 Uploaded fallback (unedited) MP3 to R2", { sessionId, key, fallback: true });
       }
     } catch (fallbackErr) {
-      log.error(
-        { sessionId, error: fallbackErr.message },
-        "💥 editingProcessor fallback also failed"
-      );
+      log.error("💥 editingProcessor fallback also failed", { sessionId, error: fallbackErr.message });
       stopKeepAlive();
       throw fallbackErr;
     }

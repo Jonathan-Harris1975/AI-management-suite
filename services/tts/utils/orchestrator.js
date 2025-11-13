@@ -35,7 +35,7 @@ export async function orchestrateTTS(session) {
   const sessionId =
     typeof session === "object" && session?.sessionId ? session.sessionId : session;
   const t0 = Date.now();
-  info({ sessionId }, "🎬 Orchestration begin");
+  info("🎬 Orchestration begin", { sessionId });
 
   try {
     startKeepAlive("ttsProcessor", 120000);
@@ -43,7 +43,7 @@ export async function orchestrateTTS(session) {
     // -----------------------------------------------------------
     // 1️⃣ Build chunk list from R2 raw-text bucket
     // -----------------------------------------------------------
-    info({ sessionId }, "🔍 Listing text chunks from R2...");
+    info("🔍 Listing text chunks from R2...", { sessionId });
     const chunkKeys = await listKeys(RAW_TEXT_BUCKET, `${sessionId}/chunk-`);
 
     if (!chunkKeys || chunkKeys.length === 0) {
@@ -58,7 +58,7 @@ export async function orchestrateTTS(session) {
         url: `${RAW_TEXT_BASE_URL}/${encodeURIComponent(key)}`,
       }));
 
-    info({ sessionId, count: chunkList.length }, "🧩 Text chunks collected");
+    info("🧩 Text chunks collected", { sessionId, count: chunkList.length });
 
     // -----------------------------------------------------------
     // 2️⃣ Generate TTS chunks
@@ -71,7 +71,7 @@ export async function orchestrateTTS(session) {
 
     if (successUrls.length === 0)
       throw new Error("No valid TTS chunks were produced.");
-    info({ sessionId, count: successUrls.length, ms: Date.now() - t1 }, "🗣️ TTS complete");
+    info("🗣️ TTS complete", { sessionId, count: successUrls.length, ms: Date.now() - t1 });
 
     // -----------------------------------------------------------
     // 3️⃣ Merge those chunks locally with ffmpeg -> upload merged MP3
@@ -79,7 +79,7 @@ export async function orchestrateTTS(session) {
     const t2 = Date.now();
     const merged = await mergeProcessor(sessionId, successUrls);
     if (!merged?.key) throw new Error("Merge step failed to produce an R2 key.");
-    info({ sessionId, key: merged.key, ms: Date.now() - t2 }, "🧩 Merge complete");
+    info("🧩 Merge complete", { sessionId, key: merged.key, ms: Date.now() - t2 });
 
     // -----------------------------------------------------------
     // 4️⃣ Optional editing (normalize, apply intro/outro)
@@ -88,7 +88,7 @@ export async function orchestrateTTS(session) {
     const editedBuffer = await editingProcessor(sessionId, merged);
     if (!editedBuffer?.length)
       throw new Error("Editing step returned no audio data.");
-    info({ sessionId, bytes: editedBuffer.length, ms: Date.now() - t3 }, "✂️ Editing complete");
+    info("✂️ Editing complete", { sessionId, bytes: editedBuffer.length, ms: Date.now() - t3 });
 
     // -----------------------------------------------------------
     // 5️⃣ Mixdown & Mastering
@@ -97,7 +97,7 @@ export async function orchestrateTTS(session) {
     const finalAudio = await podcastProcessor(sessionId, editedBuffer);
     if (!finalAudio?.length)
       throw new Error("Mixdown step returned no audio data.");
-    info({ sessionId, bytes: finalAudio.length, ms: Date.now() - t4 }, "🎚️ Mixdown complete");
+    info("🎚️ Mixdown complete", { sessionId, bytes: finalAudio.length, ms: Date.now() - t4 });
 
     // -----------------------------------------------------------
     // 6️⃣ Upload final MP3 to R2
@@ -105,11 +105,11 @@ export async function orchestrateTTS(session) {
     const key = `${sessionId}.mp3`;
     await putObject(FINAL_BUCKET, key, finalAudio, "audio/mpeg");
     const publicUrl = `${PUBLIC_BASE_URL_PODCAST}/${encodeURIComponent(key)}`;
-    info({ sessionId, key, publicUrl, totalMs: Date.now() - t0 }, "💾 Uploaded final MP3 to R2");
+    info("💾 Uploaded final MP3 to R2", { sessionId, key, publicUrl, totalMs: Date.now() - t0 });
 
     return { ok: true, sessionId, file: key, url: publicUrl };
   } catch (err) {
-    error({ sessionId, error: err?.stack || err?.message }, "💥 TTS orchestration failed");
+    error("💥 TTS orchestration failed", { sessionId, error: err?.stack || err?.message });
     throw err;
   }
 }

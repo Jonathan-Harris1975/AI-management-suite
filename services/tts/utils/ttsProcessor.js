@@ -46,12 +46,12 @@ const polly = new PollyClient({
   },
 });
 
-info({ 
+info("🧩 Polly configuration", { 
   region: REGION, 
   voice: VOICE_ID, 
   concurrency: CONCURRENCY,
   maxChunkRetries: MAX_CHUNK_RETRIES 
-}, "🧩 Polly configuration");
+});
 
 // ------------------------------------------------------------
 // 🧹 Text Cleaner
@@ -86,12 +86,12 @@ async function synthesizeTextWithRetry(text, retries = 3) {
       const msg = err?.message || err.toString();
       const isRetryable = isRetryableError(err);
       
-      warn({ 
+      warn("⚠️ Polly synthesis failed", { 
         attempt, 
         msg, 
         isRetryable,
         errorCode: err?.name || err?.code 
-      }, "⚠️ Polly synthesis failed");
+      });
       
       if (attempt === retries) throw err;
       
@@ -228,7 +228,7 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
 // 🎧 TTS Processor
 // ------------------------------------------------------------
 export async function ttsProcessor(sessionId, chunkList = []) {
-  info({ sessionId, totalChunks: chunkList.length }, "🎙 TTS Processor Start");
+  info("🎙 TTS Processor Start", { sessionId, totalChunks: chunkList.length });
 
   if (!Array.isArray(chunkList) || chunkList.length === 0) {
     throw new Error("No text chunks provided to ttsProcessor");
@@ -256,17 +256,14 @@ export async function ttsProcessor(sessionId, chunkList = []) {
   
   const totalAttempts = results.reduce((sum, r) => sum + (r.attempts || 1), 0);
 
-  info(
-    { 
+  info("🎧 TTS Processing Complete", { 
       sessionId, 
       total: results.length,
       success: successfulChunks.length,
       failed: failedChunks.length,
       totalAttempts,
       failedIndices: failedChunks.map(f => f.index)
-    },
-    "🎧 TTS Processing Complete"
-  );
+    });
 
   // Log detailed failure information
   if (failedChunks.length > 0) {

@@ -52,7 +52,7 @@ async function downloadRemoteToBuffer(url, attempt = 1) {
     return Buffer.from(await res.arrayBuffer());
   } catch (err) {
     if (attempt < DOWNLOAD_RETRIES) {
-      warn({ url, attempt }, "Retrying remote download...");
+      warn("Retrying remote download...", { url, attempt });
       return downloadRemoteToBuffer(url, attempt + 1);
     }
     throw new Error(`Remote download failed after retries: ${url}`);
@@ -67,7 +67,7 @@ async function loadLocalToBuffer(localPath, attempt = 1) {
     return fs.readFileSync(localPath);
   } catch (err) {
     if (attempt < DOWNLOAD_RETRIES) {
-      warn({ localPath, attempt }, "Retrying local file read...");
+      warn("Retrying local file read...", { localPath, attempt });
       return loadLocalToBuffer(localPath, attempt + 1);
     }
     throw new Error(`Local file read failed after retries: ${localPath}`);
@@ -119,7 +119,7 @@ async function streamMergeBuffers(buffers, outputPath, attempt = 1) {
     return outputPath;
   } catch (err) {
     if (attempt < MERGE_RETRIES) {
-      warn({ outputPath, attempt }, "Retrying merge batch...");
+      warn("Retrying merge batch...", { outputPath, attempt });
       return streamMergeBuffers(buffers, outputPath, attempt + 1);
     }
     throw err;
@@ -134,7 +134,7 @@ async function modularMerge(sessionId, sources) {
   let current = sources;
 
   while (current.length > 1) {
-    info({ sessionId, round, groups: Math.ceil(current.length / BATCH_SIZE) }, "🔁 Batch merge round");
+    info("🔁 Batch merge round", { sessionId, round, groups: Math.ceil(current.length / BATCH_SIZE) });
 
     const next = [];
 
@@ -173,7 +173,7 @@ export async function mergeProcessor(sessionId, chunkUrls = []) {
   startKeepAlive(`mergeProcessor:${sid}`, 25000);
   ensureTmpDir();
 
-  info({ sessionId: sid, chunks: chunkUrls.length }, "🎧 Starting bomb-proof mergeProcessor");
+  info("🎧 Starting bomb-proof mergeProcessor", { sessionId: sid, chunks: chunkUrls.length });
 
   try {
     if (!Array.isArray(chunkUrls) || chunkUrls.length === 0) {
@@ -187,12 +187,12 @@ export async function mergeProcessor(sessionId, chunkUrls = []) {
 
     await uploadBuffer(MERGED_BUCKET, mergedKey, mergedBuf, "audio/mpeg");
 
-    info({ sessionId: sid, key: mergedKey }, "💾 Uploaded final merged MP3 to R2");
+    info("💾 Uploaded final merged MP3 to R2", { sessionId: sid, key: mergedKey });
 
     stopKeepAlive();
     return { key: mergedKey, localPath: finalPath };
   } catch (err) {
-    error({ sessionId: sid, error: err.message }, "💥 mergeProcessor failed");
+    error("💥 mergeProcessor failed", { sessionId: sid, error: err.message });
     stopKeepAlive();
     throw err;
   }
