@@ -1,5 +1,6 @@
 // utils/artwork.js
 import OpenAI from "openai";
+import { error } from "#logger.js";
 
 // Validate environment first
 const requiredEnv = ['OPENROUTER_API_KEY_ART'];
@@ -64,7 +65,7 @@ export async function generatePodcastArtwork(prompt) {
 
     throw new Error("No image data found in OpenRouter response structure");
   } catch (error) {
-    console.error("Artwork generation error:", error);
+    error("Artwork generation error", { error: error?.message || error });
     throw new Error(`Failed to generate artwork: ${error.message}`);
   }
 }
