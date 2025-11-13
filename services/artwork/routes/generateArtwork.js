@@ -61,11 +61,11 @@ export async function generateArtwork(sessionId, prompt = '') {
     await putObject("art", key, buffer, "image/png");
 
     const publicUrl = `${process.env.R2_PUBLIC_BASE_URL_ART}/${encodeURIComponent(key)}`;
-    info({ sessionId, key, publicUrl }, "🎨 Artwork saved to R2");
+    info("🎨 Artwork saved to R2", { sessionId, key, publicUrl });
 
     return publicUrl;
   } catch (err) {
-    error({ sessionId, error: err.message }, "💥 Artwork generation failed");
+    error("💥 Artwork generation failed", { sessionId, error: err.message });
     throw err;
   }
 }
@@ -80,7 +80,7 @@ router.post("/generate", async (req, res) => {
     const url = await generateArtwork(sessionId, prompt);
     res.json({ ok: true, sessionId, url });
   } catch (err) {
-    error({ sessionId, error: err.message }, "💥 Artwork route failed");
+    error("💥 Artwork route failed", { sessionId, error: err.message });
     res.status(500).json({ ok: false, error: err.message });
   }
 });
