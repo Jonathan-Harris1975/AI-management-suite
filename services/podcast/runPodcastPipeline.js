@@ -10,32 +10,32 @@ import { createPodcastArtwork } from "../artwork/createPodcastArtwork.js";
 import { uploadText } from "#shared/r2-client.js";
 
 export async function runPodcastPipeline(sessionId) {
-  log.info({ sessionId }, "🎧 Starting AI Podcast Pipeline...");
+  log.info("🎧 Starting AI Podcast Pipeline...", { sessionId });
 
   try {
     // 1️⃣ Script
     const script = await orchestrateScript(sessionId);
-    log.info({ sessionId, chunks: script?.chunks?.length }, "🧩 Script ready");
+    log.info("🧩 Script ready", { sessionId, chunks: script?.chunks?.length });
 
     // 2️⃣ Artwork
     const artwork = await createPodcastArtwork({
       sessionId,
       prompt: `Podcast cover for ${script?.metadata?.title || "AI Weekly"}`,
     });
-    log.info({ sessionId }, "🎨 Artwork ready");
+    log.info("🎨 Artwork ready", { sessionId });
 
     // 3️⃣ TTS
     const tts = await orchestrateTTS({ sessionId, chunkKeys: script.chunks });
-    log.info({ sessionId }, "🔊 TTS complete");
+    log.info("🔊 TTS complete", { sessionId });
 
     const summary = { sessionId, script, artwork, tts };
     await uploadText("podcast-meta", `${sessionId}.json`, JSON.stringify(summary), "application/json");
-    log.info({ sessionId }, "✅ Metadata saved");
+    log.info("✅ Metadata saved", { sessionId });
 
-    log.info({ sessionId }, "🏁 Podcast pipeline complete");
+    log.info("🏁 Podcast pipeline complete", { sessionId });
     return summary;
   } catch (err) {
-    log.error({ sessionId, error: err?.message }, "💥 Podcast pipeline failed");
+    log.error("💥 Podcast pipeline failed", { sessionId, error: err?.message });
     throw err;
   }
 }
