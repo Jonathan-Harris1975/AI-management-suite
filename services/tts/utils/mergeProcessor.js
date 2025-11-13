@@ -1,5 +1,6 @@
 // =======================================================================
-// 🎧 MODULAR STREAMING MERGE PROCESSOR (Batching + Retries)
+// 🎧 BOMB-PROOF MODULAR STREAMING MERGE PROCESSOR
+// Supports mixing remote URLs + local batch files safely
 // =======================================================================
 
 import fs from "fs";
@@ -12,50 +13,81 @@ import { uploadBuffer } from "#shared/r2-client.js";
 
 const TMP_DIR = "/tmp/podcast_merge";
 const MERGED_BUCKET = "merged";
+
 const DOWNLOAD_TIMEOUT_MS = 30000;
 const DOWNLOAD_RETRIES = 5;
 const MERGE_RETRIES = 6;
 const BATCH_SIZE = 2;
 
+// ------------------------------------------------------------
+// 🛡 Create merge directory
+// ------------------------------------------------------------
 function ensureTmpDir() {
   if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 }
 
-async function fetchWithTimeout(url, timeout = DOWNLOAD_TIMEOUT_MS) {
+// ------------------------------------------------------------
+// 🧠 Type Guard — remote URL or local file?
+// ------------------------------------------------------------
+function isRemote(input) {
+  return typeof input === "string" && /^https?:\/\//i.test(input);
+}
+
+// ------------------------------------------------------------
+// 🌐 Remote Download w/ Timeout + Retries
+// ------------------------------------------------------------
+async function fetchWithTimeout(url) {
   return Promise.race([
     fetch(url),
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout: ${url}`)), timeout)),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout fetching: ${url}`)), DOWNLOAD_TIMEOUT_MS)
+    ),
   ]);
 }
 
-async function downloadChunkToBuffer(url, attempt = 1) {
+async function downloadRemoteToBuffer(url, attempt = 1) {
   try {
     const res = await fetchWithTimeout(url);
     if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
     return Buffer.from(await res.arrayBuffer());
   } catch (err) {
     if (attempt < DOWNLOAD_RETRIES) {
-      warn({ url, attempt }, "Retrying buffer download...");
-      return downloadChunkToBuffer(url, attempt + 1);
+      warn({ url, attempt }, "Retrying remote download...");
+      return downloadRemoteToBuffer(url, attempt + 1);
     }
-    throw new Error(`Failed after retries: ${url}`);
+    throw new Error(`Remote download failed after retries: ${url}`);
   }
 }
 
-async function verifyFfmpeg() {
-  return new Promise((resolve, reject) => {
-    const ff = spawn("ffmpeg", ["-version"]);
-    ff.on("error", () => reject(new Error("ffmpeg missing")));
-    ff.on("close", () => resolve(true));
-  });
+// ------------------------------------------------------------
+// 📁 Local File Read w/ Retry
+// ------------------------------------------------------------
+async function loadLocalToBuffer(localPath, attempt = 1) {
+  try {
+    return fs.readFileSync(localPath);
+  } catch (err) {
+    if (attempt < DOWNLOAD_RETRIES) {
+      warn({ localPath, attempt }, "Retrying local file read...");
+      return loadLocalToBuffer(localPath, attempt + 1);
+    }
+    throw new Error(`Local file read failed after retries: ${localPath}`);
+  }
 }
 
-// ----------------------------------------------------------------------
-// 🧩 STREAM MERGE — low-level merge of an array of buffers
-// ----------------------------------------------------------------------
+// ------------------------------------------------------------
+// 🤝 Unified Buffer Loader (Remote or Local)
+// ------------------------------------------------------------
+async function loadChunk(input) {
+  if (isRemote(input)) return downloadRemoteToBuffer(input);
+  return loadLocalToBuffer(input);
+}
+
+// ------------------------------------------------------------
+// 🎧 STREAM MERGE — merge array of buffers into outputPath
+// ------------------------------------------------------------
 async function streamMergeBuffers(buffers, outputPath, attempt = 1) {
   try {
-    const ffmpeg = spawn("ffmpeg", [
+    const ff = spawn("ffmpeg", [
       "-hide_banner",
       "-loglevel", "error",
       "-f", "mp3",
@@ -67,53 +99,44 @@ async function streamMergeBuffers(buffers, outputPath, attempt = 1) {
 
     let stderr = "";
 
-    ffmpeg.stderr.on("data", (d) => {
-      stderr += d.toString();
-    });
-
-    ffmpeg.on("error", (err) => {
-      warn({ err }, "ffmpeg spawn error");
-    });
+    ff.stderr.on("data", (d) => (stderr += d.toString()));
 
     await new Promise((resolve, reject) => {
       for (const buf of buffers) {
-        const ok = ffmpeg.stdin.write(buf);
-        if (!ok) ffmpeg.stdin.once("drain", () => {});
+        const ok = ff.stdin.write(buf);
+        if (!ok) ff.stdin.once("drain", () => {});
       }
+      ff.stdin.end();
 
-      ffmpeg.stdin.end();
-
-      ffmpeg.on("close", (code) => {
+      ff.on("close", (code) => {
         if (code !== 0) {
-          reject(new Error(`ffmpeg exited with code ${code} — ${stderr}`));
-        } else {
-          resolve();
+          return reject(new Error(`FFmpeg failed (code ${code}): ${stderr}`));
         }
+        resolve();
       });
     });
 
     return outputPath;
   } catch (err) {
     if (attempt < MERGE_RETRIES) {
-      warn({ attempt }, `Retrying batch merge...`);
+      warn({ outputPath, attempt }, "Retrying merge batch...");
       return streamMergeBuffers(buffers, outputPath, attempt + 1);
     }
     throw err;
   }
 }
 
-// ----------------------------------------------------------------------
-// 🧩 MODULAR MERGE — merge chunk URLs in batches until 1 file remains
-// ----------------------------------------------------------------------
-async function modularMergeChunkUrls(sessionId, urls) {
+// ------------------------------------------------------------
+// 🧩 MODULAR BATCH MERGE (recursive, bulletproof)
+// ------------------------------------------------------------
+async function modularMerge(sessionId, sources) {
   let round = 1;
-
-  let current = urls;
+  let current = sources;
 
   while (current.length > 1) {
     info({ sessionId, round, groups: Math.ceil(current.length / BATCH_SIZE) }, "🔁 Batch merge round");
 
-    const nextRoundFiles = [];
+    const next = [];
 
     for (let i = 0; i < current.length; i += BATCH_SIZE) {
       const group = current.slice(i, i + BATCH_SIZE);
@@ -121,56 +144,53 @@ async function modularMergeChunkUrls(sessionId, urls) {
       info({ sessionId, group }, `📦 Merging batch ${i / BATCH_SIZE + 1}`);
 
       const buffers = [];
-      for (const url of group) {
-        buffers.push(await downloadChunkToBuffer(url));
+      for (const source of group) {
+        buffers.push(await loadChunk(source));
       }
 
-      const batchOut = path.join(TMP_DIR, `${sessionId}_batch_${round}_${i}.mp3`);
+      const batchOutput = path.join(
+        TMP_DIR,
+        `${sessionId}_batch_${round}_${i}.mp3`
+      );
 
-      await streamMergeBuffers(buffers, batchOut);
-
-      nextRoundFiles.push(batchOut);
+      await streamMergeBuffers(buffers, batchOutput);
+      next.push(batchOutput);
     }
 
-    // Next round replaces URLs with local batch files
-    current = nextRoundFiles;
+    current = next;
     round++;
   }
 
-  return current[0]; // The final single merged file
+  return current[0];
 }
 
-// ----------------------------------------------------------------------
-// 🧩 MAIN PROCESSOR
-// ----------------------------------------------------------------------
+// ------------------------------------------------------------
+// 🚀 MAIN PROCESSOR
+// ------------------------------------------------------------
 export async function mergeProcessor(sessionId, chunkUrls = []) {
   const sid = sessionId || `TT-${Date.now()}`;
 
   startKeepAlive(`mergeProcessor:${sid}`, 25000);
   ensureTmpDir();
 
-  info({ sessionId: sid, chunks: chunkUrls.length }, "🎧 Starting modular streaming mergeProcessor");
+  info({ sessionId: sid, chunks: chunkUrls.length }, "🎧 Starting bomb-proof mergeProcessor");
 
   try {
     if (!Array.isArray(chunkUrls) || chunkUrls.length === 0) {
       throw new Error("mergeProcessor requires chunk URLs.");
     }
 
-    await verifyFfmpeg();
+    const finalPath = await modularMerge(sid, chunkUrls);
 
-    // Perform modular merge (multi-stage, resilient)
-    const finalMergedPath = await modularMergeChunkUrls(sid, chunkUrls);
-
-    // Upload final file
-    const mergedBuf = fs.readFileSync(finalMergedPath);
+    const mergedBuf = fs.readFileSync(finalPath);
     const mergedKey = `${sid}.mp3`;
 
     await uploadBuffer(MERGED_BUCKET, mergedKey, mergedBuf, "audio/mpeg");
 
-    info({ sessionId: sid, key: mergedKey, bytes: mergedBuf.length }, "💾 Uploaded modular merged MP3 to R2");
+    info({ sessionId: sid, key: mergedKey }, "💾 Uploaded final merged MP3 to R2");
 
     stopKeepAlive();
-    return { key: mergedKey, localPath: finalMergedPath };
+    return { key: mergedKey, localPath: finalPath };
   } catch (err) {
     error({ sessionId: sid, error: err.message }, "💥 mergeProcessor failed");
     stopKeepAlive();
