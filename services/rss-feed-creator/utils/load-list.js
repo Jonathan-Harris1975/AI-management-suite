@@ -22,7 +22,7 @@ export function loadList(file) {
         const u = new URL(line).href;
         urls.push(u);
       } catch {
-        log.warn({ line, file }, "⚠️ Skipping invalid URL");
+        log.warn("⚠️ Skipping invalid URL", { line, file });
       }
     }
 
@@ -32,7 +32,7 @@ export function loadList(file) {
     );
     return urls;
   } catch (err) {
-    log.error({ file, err }, "❌ Failed to load list");
+    log.error("❌ Failed to load list", { file, err });
     return [];
   }
 }

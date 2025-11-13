@@ -1,3 +1,4 @@
+import { warn } from "#logger.js";
 import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
 // Fully isolated — not visible to Shiper build resolver
 export async function getSignedUrl(r2Client, bucket, key, expiresIn) {
@@ -10,7 +11,7 @@ export async function getSignedUrl(r2Client, bucket, key, expiresIn) {
     const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
     return await getSignedUrl(r2Client, cmd, { expiresIn });
   } catch (err) {
-    console.warn("⚙️ Presigner unavailable – safe mode active.", err.message);
+    warn("⚙️ Presigner unavailable – safe mode active.", { error: err.message });
     return null;
   }
 }
