@@ -12,10 +12,10 @@ import { uploadBuffer } from "#shared/r2-client.js";
 
 const TMP_DIR = "/tmp/podcast_merge";
 const MERGED_BUCKET = "merged";
-const DOWNLOAD_TIMEOUT_MS = 20000;
-const DOWNLOAD_RETRIES = 3;
-const MERGE_RETRIES = 3;
-const BATCH_SIZE = 3;
+const DOWNLOAD_TIMEOUT_MS = 30000;
+const DOWNLOAD_RETRIES = 5;
+const MERGE_RETRIES = 6;
+const BATCH_SIZE = 2;
 
 function ensureTmpDir() {
   if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
