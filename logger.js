@@ -1,10 +1,9 @@
 // ============================================================
-// 🧠 AI Podcast Suite — Clean Unified Logger (Pino v8)
+// 🧠 AI Podcast Suite — Ultra-Clean Logger (Pino v8)
 // ============================================================
-// - Minimal JSON logs in production (no level numbers, no timestamps)
-// - Human-readable pretty logs in development
-// - Message-first API with emojis
-// - No pid, hostname, or unnecessary metadata
+// - Production: ONLY the message (no JSON, no keys)
+// - Development: Pretty logs with colours
+// - Still supports metadata internally if needed
 // ============================================================
 
 import pino from "pino";
@@ -17,32 +16,41 @@ if (!loggerInstance) {
   loggerInstance = pino({
     level: process.env.LOG_LEVEL || (isProd ? "info" : "debug"),
 
-    // 🧹 REMOVE noisy fields
+    // No JSON fields, no timestamps, no pid/hostname
     base: null,
     timestamp: false,
 
-    // 🧹 Replace numeric levels with readable labels
     formatters: {
-      level(label) {
-        return { level: label }; // "info", "warn", "error"
-      },
+      level: () => ({}), // hide "level"
+      bindings: () => ({}), // hide internal bindings
+      log: (obj) => (obj), // pass through only user metadata
     },
 
     messageKey: "msg",
 
-    // 💻 Pretty local logs
-    transport: !isProd
+    // PRODUCTION: Log only the message, nothing else
+    transport: isProd
       ? {
           target: "pino-pretty",
           options: {
-            colorize: true,
-            ignore: "pid,hostname",
+            colorize: false,
             translateTime: false,
+            ignore: "pid,hostname,level,time",
+            singleLine: true,
+            messageFormat: "{msg}", // ONLY the message itself
+          },
+        }
+      : {
+          // DEV: Pretty with colours
+          target: "pino-pretty",
+          options: {
+            colorize: true,
+            translateTime: false,
+            ignore: "pid,hostname",
             singleLine: true,
             messageFormat: "{msg}",
           },
-        }
-      : undefined,
+        },
   });
 
   globalThis.__AI_PODCAST_LOGGER__ = loggerInstance;
@@ -51,7 +59,7 @@ if (!loggerInstance) {
 const log = loggerInstance;
 
 // ============================================================
-// 🔊 PUBLIC WRAPPERS — message-first
+// 🔊 PUBLIC LOG WRAPPERS — message-first API
 // ============================================================
 export const info = (msg, obj = {}) => log.info(obj, msg);
 export const warn = (msg, obj = {}) => log.warn(obj, msg);
