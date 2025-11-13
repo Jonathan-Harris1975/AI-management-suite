@@ -1,11 +1,10 @@
 // ============================================================
-// 🧠 AI Podcast Suite — Final Unified Logger (Pino)
+// 🧠 AI Podcast Suite — Clean Unified Logger (Pino v8)
 // ============================================================
-//
-// - Works in both production (JSON logs) and local dev (pretty logs)
-// - Prevents redeclaration errors by using a single export symbol
-// - No global collisions or duplicate imports
-// - Safe for Shiper, Render, and local dev
+// - Minimal JSON logs in production (no level numbers, no timestamps)
+// - Human-readable pretty logs in development
+// - Message-first API with emojis
+// - No pid, hostname, or unnecessary metadata
 // ============================================================
 
 import pino from "pino";
@@ -13,48 +12,47 @@ import pino from "pino";
 const isProd =
   process.env.NODE_ENV === "production" || process.env.SHIPER === "true";
 
-// 🔒 Global singleton to prevent duplicate instances across imports
 let loggerInstance = globalThis.__AI_PODCAST_LOGGER__;
 if (!loggerInstance) {
-  const baseConfig = {
+  loggerInstance = pino({
     level: process.env.LOG_LEVEL || (isProd ? "info" : "debug"),
-    base: { service: "ai-podcast-suite" },
-  };
 
-  if (isProd) {
-    // ✅ JSON logs for production / Shiper
-    loggerInstance = pino({
-      ...baseConfig,
-      timestamp: pino.stdTimeFunctions.isoTime,
-    });
-  } else {
-    // 🧩 Pretty logs for local development
-    loggerInstance = pino({
-      ...baseConfig,
-      transport: {
-        target: "pino-pretty",
-        options: {
-          colorize: true,
-          singleLine: true,
-          ignore: "pid,hostname",
-          translateTime: "SYS:standard",
-          messageFormat: "{levelLabel} {msg}",
-          // ✅ Remove customPrettifiers - they cause DataCloneError
-          // Emojis can be added directly in log messages if needed
-        },
+    // 🧹 REMOVE noisy fields
+    base: null,
+    timestamp: false,
+
+    // 🧹 Replace numeric levels with readable labels
+    formatters: {
+      level(label) {
+        return { level: label }; // "info", "warn", "error"
       },
-    });
-  }
+    },
+
+    messageKey: "msg",
+
+    // 💻 Pretty local logs
+    transport: !isProd
+      ? {
+          target: "pino-pretty",
+          options: {
+            colorize: true,
+            ignore: "pid,hostname",
+            translateTime: false,
+            singleLine: true,
+            messageFormat: "{msg}",
+          },
+        }
+      : undefined,
+  });
 
   globalThis.__AI_PODCAST_LOGGER__ = loggerInstance;
 }
 
-// ✅ Consistent singleton export
 const log = loggerInstance;
 
-// --- FIXED WRAPPERS ---
-// Call signature: info("message", { context })
-// Always pass the human-readable message first, then an optional metadata object.
+// ============================================================
+// 🔊 PUBLIC WRAPPERS — message-first
+// ============================================================
 export const info = (msg, obj = {}) => log.info(obj, msg);
 export const warn = (msg, obj = {}) => log.warn(obj, msg);
 export const error = (msg, obj = {}) => log.error(obj, msg);
