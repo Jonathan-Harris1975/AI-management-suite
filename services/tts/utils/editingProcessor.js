@@ -1,6 +1,6 @@
 // ============================================================
 // 🎙️ STREAMING Editing Processor — Premium Radio Host Version
-// FIXED: Natural, Warm, Professional Broadcast Voice
+// Mature UK Tone • Warm • Natural • Broadcast-Ready
 // ============================================================
 
 import fs from "fs";
@@ -19,42 +19,54 @@ function ensureTmpDir() {
 }
 
 // ------------------------------------------------------------
-// ⭐ CORRECTED PREMIUM RADIO HOST FILTER CHAIN
-// Natural Human Voice + Broadcast Polish
+// ⭐ FINAL UK-PREMIUM RADIO HOST FILTER CHAIN (Stable)
 // ------------------------------------------------------------
+//
+// ORDER MATTERS (this sequence avoids SIGSEGV + tonal artifacts)
+//
+// 1) Correct low-pitch adjustment
+// 2) Warm EQ
+// 3) Presence (light)
+// 4) De-esser (stable version)
+// 5) Compression
+// 6) Output limiting
+//
 const filters = [
-  // 1️⃣ Subtle pitch deepening (more mature, less synthetic)
-  // FIXED: Use 1.018 to LOWER pitch (was 0.982 which raised it!)
+  // 1️⃣ Pitch LOWERING — UK mature tone fix
+  // Correct: raise sample rate → lower pitch
   "asetrate=44100*1.018,aresample=44100,atempo=0.982",
 
-  // 2️⃣ Warmth EQ: Roll off harsh highs, add body
-  "equalizer=f=120:t=q:w=1.2:g=3",      // Add chest resonance
-  "equalizer=f=250:t=q:w=1.0:g=2",      // Warmth/body
-  "equalizer=f=3500:t=q:w=2.0:g=-2",    // Reduce harshness
-  "equalizer=f=8000:t=h:g=-3",          // Gentle high rolloff
+  // 2️⃣ Warm body
+  "equalizer=f=120:t=q:w=1.1:g=3",
+  "equalizer=f=250:t=q:w=1.0:g=2",
+  "equalizer=f=3500:t=q:w=2.0:g=-2",
+  "equalizer=f=7800:t=h:g=-2.5",
 
-  // 3️⃣ Broadcast presence (much gentler than before)
-  "equalizer=f=2800:t=q:w=1.5:g=1.5",   // Clarity (not harshness)
+  // 3️⃣ Slight presence (British radio clarity)
+  "equalizer=f=2600:t=q:w=1.5:g=1.2",
 
-  // 4️⃣ De-esser to tame sibilance
-  "deesser=i=0.3:m=0.4:f=6000:s=o",
+  // 4️⃣ Stable de-esser (no crashing)
+  "deesser=i=6:m=3:f=5500",
 
-  // 5️⃣ Gentle broadcast compression (slower attack = more natural)
-  "acompressor=threshold=-20dB:ratio=3:attack=20:release=250:makeup=3",
+  // 5️⃣ Natural compression
+  "acompressor=threshold=-18dB:ratio=3.5:attack=18:release=260:makeup=2",
 
-  // 6️⃣ Gentle limiting for safety
-  "alimiter=level_in=1:level_out=0.95:limit=0.95:attack=7:release=100"
+  // 6️⃣ Broadcast limiter
+  "alimiter=limit=0.92:attack=6:release=90"
 ];
 
+
 // ------------------------------------------------------------
-// 🧩 Bomb-proof Streaming Editor (with full fallback)
+// 🧩 Streaming Editing Processor
 // ------------------------------------------------------------
 export async function editingProcessor(sessionId, inputPathObj) {
   startKeepAlive(`editingProcessor:${sessionId}`, 25000);
   ensureTmpDir();
 
   const inputPath =
-    typeof inputPathObj === "string" ? inputPathObj : inputPathObj?.localPath;
+    typeof inputPathObj === "string"
+      ? inputPathObj
+      : inputPathObj?.localPath;
 
   if (!inputPath || typeof inputPath !== "string") {
     stopKeepAlive();
@@ -78,19 +90,21 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
   log.info(
     { sessionId, inputPath },
-    "🎚️ Starting streaming editingProcessor (Premium Radio Host - CORRECTED)"
+    "🎚️ Starting streaming editingProcessor (UK Premium Radio Host)"
   );
 
   const editedPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
   const filterStr = filters.join(",");
   let ffmpegSucceeded = false;
 
-  // Clean up any existing file
   if (fs.existsSync(editedPath)) {
     try {
       fs.unlinkSync(editedPath);
     } catch (cleanupErr) {
-      log.warn({ sessionId, error: cleanupErr.message }, "⚠️ Could not clean up existing edited file");
+      log.warn(
+        { sessionId, error: cleanupErr.message },
+        "⚠️ Could not clean up existing edited file"
+      );
     }
   }
 
@@ -103,14 +117,11 @@ export async function editingProcessor(sessionId, inputPathObj) {
       "pipe:0",
       "-af",
       filterStr,
-      "-ar",
-      "44100",
-      "-b:a",
-      "192k",
-      "-codec:a",
-      "libmp3lame",
-      "-q:a",
-      "2",  // High quality VBR
+
+      // Output
+      "-ar", "44100",
+      "-codec:a", "libmp3lame",
+      "-b:a", "192k",
       "-y",
       editedPath,
     ]);
@@ -121,6 +132,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
     const fail = (err) => {
       if (settled) return;
       settled = true;
+
       log.error(
         { sessionId, error: err.message, ffmpegErr },
         "💥 editingProcessor ffmpeg failure"
@@ -131,9 +143,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
     ffmpeg.on("error", (err) => fail(err));
 
     ffmpeg.stdin.on("error", (err) => {
-      if (err.code === "EPIPE") {
-        log.warn({ sessionId }, "⚠️ ffmpeg stdin EPIPE (ffmpeg closed early)");
-      } else {
+      if (err.code !== "EPIPE") {
         log.error({ sessionId, err }, "💥 ffmpeg stdin error");
       }
       fail(err);
@@ -141,23 +151,18 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
     await new Promise((resolve, reject) => {
       const inputStream = fs.createReadStream(inputPath, {
-        highWaterMark: 64 * 1024  // 64KB chunks for smooth streaming
+        highWaterMark: 64 * 1024,
       });
 
       const safeReject = (err) => {
         if (settled) return;
         settled = true;
-
         try {
           ffmpeg.stdin.end();
-        } catch (e) {
-          // Ignore EPIPE errors during cleanup
-        }
+        } catch {}
         try {
           inputStream.destroy();
-        } catch (e) {
-          // Ignore stream destruction errors
-        }
+        } catch {}
 
         reject(err);
       };
@@ -169,7 +174,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
       inputStream.on("data", (chunk) => {
         if (settled) return;
-
         const ok = ffmpeg.stdin.write(chunk);
         if (!ok) {
           inputStream.pause();
@@ -180,21 +184,14 @@ export async function editingProcessor(sessionId, inputPathObj) {
       });
 
       inputStream.on("end", () => {
-        if (settled) return;
-        ffmpeg.stdin.end();
+        if (!settled) ffmpeg.stdin.end();
       });
 
       ffmpeg.on("close", (code) => {
         if (settled) return;
 
         if (code !== 0) {
-          safeReject(
-            new Error(
-              `ffmpeg exited with code ${code} — ${
-                ffmpegErr || "no stderr"
-              }`
-            )
-          );
+          safeReject(new Error(`ffmpeg exited with ${code} — ${ffmpegErr}`));
         } else {
           settled = true;
           ffmpegSucceeded = true;
@@ -203,7 +200,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       });
     });
 
-    // Verify the output file was created and has content
+    // Validate output
     if (!fs.existsSync(editedPath)) {
       throw new Error("Edited file was not created");
     }
@@ -213,7 +210,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       throw new Error("Edited file is empty");
     }
 
-    // Upload edited version
+    // Upload
     const buffer = fs.readFileSync(editedPath);
     const key = `${sessionId}_edited.mp3`;
 
@@ -221,13 +218,13 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
     log.info(
       { sessionId, key, size: buffer.length },
-      "💾 Uploaded edited MP3 to R2 (Natural Professional Voice)"
+      "💾 Uploaded edited MP3 to R2 (UK Premium Host)"
     );
 
     stopKeepAlive();
     return editedPath;
   } catch (err) {
-    // HARD FALLBACK → Never break the pipeline
+    // Fallback
     log.error(
       { sessionId, error: err.message },
       "💥 editingProcessor failed — fallback to unedited audio"
@@ -235,7 +232,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
     try {
       if (!ffmpegSucceeded) {
-        // Ensure we have a file to upload
         if (!fs.existsSync(editedPath)) {
           fs.copyFileSync(inputPath, editedPath);
           log.info({ sessionId }, "🔄 Created fallback copy of original audio");
@@ -243,6 +239,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
         const buffer = fs.readFileSync(editedPath);
         const key = `${sessionId}_edited.mp3`;
+
         await uploadBuffer("merged", key, buffer, "audio/mpeg");
 
         log.info(
