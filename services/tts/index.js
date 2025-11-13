@@ -23,40 +23,37 @@ import { startKeepAlive, stopKeepAlive } from "../shared/utils/keepalive.js"; //
 export async function ttsOrchestrator(sessionId, chunkList) {
   const globalLabel = `TTS-Orchestration:${sessionId}`;
   startKeepAlive(globalLabel, 120000); // pulse every 2 minutes
-  info({ sessionId }, "🎬 Orchestration begin (global keep-alive active)");
+  info("🎬 Orchestration begin (global keep-alive active)", { sessionId });
 
   try {
     // ---------------------------------------------------------------------
     // 1️⃣  TEXT TO SPEECH
     // ---------------------------------------------------------------------
     const ttsResults = await ttsProcessor(sessionId, chunkList);
-    info({ sessionId, chunks: ttsResults.length }, "🎙️ TTS stage complete");
+    info("🎙️ TTS stage complete", { sessionId, chunks: ttsResults.length });
 
     // ---------------------------------------------------------------------
     // 2️⃣  MERGE AUDIO CHUNKS
     // ---------------------------------------------------------------------
     const merged = await mergeProcessor(sessionId, ttsResults);
-    info({ sessionId, url: merged.url }, "🎧 Merge stage complete");
+    info("🎧 Merge stage complete", { sessionId, url: merged.url });
 
     // ---------------------------------------------------------------------
     // 3️⃣  APPLY EDITING FILTERS (mature/deep tone)
     // ---------------------------------------------------------------------
     const editedBuffer = await editingProcessor(sessionId, merged);
-    info({ sessionId, size: editedBuffer.length }, "🎚️ Editing stage complete");
+    info("🎚️ Editing stage complete", { sessionId, size: editedBuffer.length });
 
     // ---------------------------------------------------------------------
     // 4️⃣  FINAL PODCAST MIX (intro/outro, normalization)
     // ---------------------------------------------------------------------
     const finalBuffer = await podcastProcessor(sessionId, editedBuffer);
-    info({ sessionId, bytes: finalBuffer.length }, "✅ Podcast processing complete");
+    info("✅ Podcast processing complete", { sessionId, bytes: finalBuffer.length });
 
     // ---------------------------------------------------------------------
     // 5️⃣  SUCCESS SUMMARY
     // ---------------------------------------------------------------------
-    info(
-      { sessionId, status: "success" },
-      "🎯 Full TTS pipeline completed successfully"
-    );
+    info("🎯 Full TTS pipeline completed successfully", { sessionId, status: "success" });
 
     return {
       sessionId,
@@ -69,7 +66,7 @@ export async function ttsOrchestrator(sessionId, chunkList) {
       },
     };
   } catch (err) {
-    error({ sessionId, err: err.message }, "💥 TTS orchestration failed");
+    error("💥 TTS orchestration failed", { sessionId, err: err.message });
     return {
       sessionId,
       success: false,
@@ -77,7 +74,7 @@ export async function ttsOrchestrator(sessionId, chunkList) {
     };
   } finally {
     stopKeepAlive(globalLabel);
-    info({ sessionId }, "🌙 Global keep-alive stopped, orchestration complete.");
+    info("🌙 Global keep-alive stopped, orchestration complete.", { sessionId });
   }
 }
 
@@ -94,11 +91,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   ttsOrchestrator(sessionId, sampleChunks)
     .then(() => {
-      info({ sessionId }, "🧩 Local orchestration complete");
+      info("🧩 Local orchestration complete", { sessionId });
       process.exit(0);
     })
     .catch((err) => {
-      error({ sessionId, err: err.message }, "💥 Local orchestration error");
+      error("💥 Local orchestration error", { sessionId, err: err.message });
       process.exit(1);
     });
 }
