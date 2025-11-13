@@ -1,5 +1,6 @@
 // ============================================================
-// 🎚️ STREAMING Editing Processor — Bomb-Proof Version
+// 🎙️ STREAMING Editing Processor — Premium Radio Host Version
+// Zero OOM • Full ffmpeg Protection • Safe Fallback
 // ============================================================
 
 import fs from "fs";
@@ -16,22 +17,35 @@ function ensureTmpDir() {
 }
 
 // ------------------------------------------------------------
-// 🎛️ Audio Enhancement Filters (Warm + Clean + Controlled)
+// ⭐ PREMIUM RADIO HOST FILTER CHAIN
 // ------------------------------------------------------------
 const filters = [
-  "highpass=f=100,lowpass=f=10000,afftdn=nr=10:tn=1,firequalizer=gain_entry='entry(150,3);entry(2500,2)',deesser=f=7000:i=0.7,acompressor=threshold=-24dB:ratio=4:attack=10:release=200:makeup=5,dynaudnorm=f=100:n=0:p=0.9,aresample=44100,aconvolution=reverb=0.1:0.1:0.9:0.9",
-  "equalizer=f=120:width_type=o:width=2:g=3",
-  "equalizer=f=9000:width_type=o:width=2:g=2",
+  // Slight mature depth (safe pitch)
+  "asetrate=44100*0.982,aresample=44100",
+
+  // Warmth + De-harshing
+  "firequalizer=gain_entry='entry(85,4);entry(180,3);entry(320,2);entry(900,-2);entry(2800,-1)'",
+
+  // Presence boost (radio clarity)
+  "equalizer=f=4500:width_type=o:width=1.5:g=2",
+
+  // Smooth de-essing
+  "deesser=i=0.4",
+
+  // Broadcast compression
+  "acompressor=threshold=-17dB:ratio=4:attack=8:release=200:makeup=4",
+
+  // Leveling to radio consistency
+  "dynaudnorm=f=200:n=0:p=0.80:s=10",
 ];
 
 // ------------------------------------------------------------
-// 🧩 Streaming Editing Processor
+// 🧩 Bomb-proof Streaming Editor (with full fallback)
 // ------------------------------------------------------------
 export async function editingProcessor(sessionId, inputPathObj) {
   startKeepAlive(`editingProcessor:${sessionId}`, 25000);
   ensureTmpDir();
 
-  // Support both string path and { localPath, key } object
   const inputPath =
     typeof inputPathObj === "string" ? inputPathObj : inputPathObj?.localPath;
 
@@ -44,7 +58,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
     );
   }
 
-  // Basic sanity checks
   if (!fs.existsSync(inputPath)) {
     stopKeepAlive();
     throw new Error(`Input file does not exist: ${inputPath}`);
@@ -56,10 +69,14 @@ export async function editingProcessor(sessionId, inputPathObj) {
     throw new Error(`Input file is empty: ${inputPath}`);
   }
 
-  log.info({ sessionId, inputPath }, "🎚️ Starting streaming editingProcessor");
+  log.info(
+    { sessionId, inputPath },
+    "🎚️ Starting streaming editingProcessor (Premium Radio Host Tone)"
+  );
 
   const editedPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
   const filterStr = filters.join(",");
+  let ffmpegSucceeded = false;
 
   try {
     const ffmpeg = spawn("ffmpeg", [
@@ -90,15 +107,9 @@ export async function editingProcessor(sessionId, inputPathObj) {
       );
     };
 
-    ffmpeg.stderr.on("data", (d) => {
-      ffmpegErr += d.toString();
-    });
+    ffmpeg.stderr.on("data", (d) => (ffmpegErr += d.toString()));
+    ffmpeg.on("error", (err) => fail(err));
 
-    ffmpeg.on("error", (err) => {
-      fail(err);
-    });
-
-    // 🔑 Handle EPIPE and other stdin errors so Node doesn't crash
     ffmpeg.stdin.on("error", (err) => {
       if (err.code === "EPIPE") {
         log.warn({ sessionId }, "⚠️ ffmpeg stdin EPIPE (ffmpeg closed early)");
@@ -114,12 +125,14 @@ export async function editingProcessor(sessionId, inputPathObj) {
       const safeReject = (err) => {
         if (settled) return;
         settled = true;
+
         try {
           ffmpeg.stdin.end();
         } catch {}
         try {
           inputStream.destroy();
         } catch {}
+
         reject(err);
       };
 
@@ -129,7 +142,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       });
 
       inputStream.on("data", (chunk) => {
-        if (settled) return; // ffmpeg already died, stop pushing
+        if (settled) return;
 
         const ok = ffmpeg.stdin.write(chunk);
         if (!ok) {
@@ -147,33 +160,69 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
       ffmpeg.on("close", (code) => {
         if (settled) return;
+
         if (code !== 0) {
           safeReject(
             new Error(
-              `ffmpeg exited with code ${code} — ${ffmpegErr || "no stderr"}`
+              `ffmpeg exited with code ${code} — ${
+                ffmpegErr || "no stderr"
+              }`
             )
           );
         } else {
           settled = true;
+          ffmpegSucceeded = true;
           resolve();
         }
       });
     });
 
-    // Upload edited file
+    // Upload edited version
     const buffer = fs.readFileSync(editedPath);
     const key = `${sessionId}_edited.mp3`;
 
     await uploadBuffer("merged", key, buffer, "audio/mpeg");
 
-    log.info({ sessionId, key }, "💾 Uploaded edited MP3 to R2");
+    log.info(
+      { sessionId, key },
+      "💾 Uploaded edited MP3 to R2 (Premium Radio Host Tone)"
+    );
 
     stopKeepAlive();
     return editedPath;
   } catch (err) {
-    log.error({ sessionId, error: err.message }, "💥 editingProcessor failed");
+    // HARD FALLBACK → Never break the pipeline
+    log.error(
+      { sessionId, error: err.message },
+      "💥 editingProcessor failed — fallback to unedited audio"
+    );
+
+    try {
+      if (!ffmpegSucceeded) {
+        if (!fs.existsSync(editedPath)) {
+          fs.copyFileSync(inputPath, editedPath);
+        }
+
+        const buffer = fs.readFileSync(editedPath);
+        const key = `${sessionId}_edited.mp3`;
+        await uploadBuffer("merged", key, buffer, "audio/mpeg");
+
+        log.info(
+          { sessionId, key },
+          "💾 Uploaded fallback (unedited) MP3 to R2"
+        );
+      }
+    } catch (fallbackErr) {
+      log.error(
+        { sessionId, error: fallbackErr.message },
+        "💥 editingProcessor fallback also failed"
+      );
+      stopKeepAlive();
+      throw fallbackErr;
+    }
+
     stopKeepAlive();
-    throw err;
+    return editedPath;
   }
 }
 
