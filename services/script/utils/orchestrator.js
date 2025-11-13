@@ -10,7 +10,7 @@ import { generateEpisodeMetaLLM } from "../utils/podcastHelper.js";
 // ------------------------------------------------------------
 export async function orchestrateScript(sessionId) {
   const sid = sessionId || `TT-${Date.now()}`;
-  info({ sessionId: sid }, "🧠 Orchestrate Script: start");
+  info("🧠 Orchestrate Script: start", { sessionId: sid });
 
   try {
     // Step 1: Generate intro, main content, and outro
@@ -43,10 +43,10 @@ export async function orchestrateScript(sessionId) {
     }
 
     // Step 6: Log success and return structured result
-    info({ sessionId: sid }, "✅ Script orchestration complete");
+    info("✅ Script orchestration complete", { sessionId: sid });
     return { ...composed, fullText, chunks: uploadedChunks, metadata: meta || {} };
   } catch (err) {
-    error({ sessionId: sid, error: err?.message, stack: err?.stack }, "💥 Script orchestration failed");
+    error("💥 Script orchestration failed", { sessionId: sid, error: err?.message, stack: err?.stack });
     throw err;
   }
 }

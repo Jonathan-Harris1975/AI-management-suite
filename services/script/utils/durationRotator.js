@@ -1,3 +1,5 @@
+import { info } from "#logger.js";
+
 // ============================================================
 // 🔄 Duration Rotator (Auto-Normalizing per Episode)
 // ============================================================
@@ -25,9 +27,7 @@ export function rotateDurations(durations = {}) {
     totalSeconds: Math.round(targetSeconds),
   };
 
-  console.log(
-    `🕒 Episode runtime auto-set to ${targetMins} min (${finalDurations.totalSeconds}s)`
-  );
+  info(`🕒 Episode runtime auto-set to ${targetMins} min (${targetSeconds}s)`, { targetMins, totalSeconds: finalDurations.totalSeconds });
 
   return finalDurations;
 }

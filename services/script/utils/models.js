@@ -143,7 +143,7 @@ export async function generateComposedEpisode(sessionIdLike) {
   const meta = await generateEpisodeMetaLLM(edited, sessionMeta);
   await putJson("meta", `${id}-meta.json`, meta);
 
-  info({ sessionId: id, chunks: files.length }, "✅ Script orchestration complete");
+  info("✅ Script orchestration complete", { sessionId: id, chunks: files.length });
   return { transcript: edited, chunks: files, meta };
 }
 

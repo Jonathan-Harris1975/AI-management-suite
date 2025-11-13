@@ -1,3 +1,4 @@
+import { warn, info, error } from "#logger.js";
 // services/script/utils/getSponsor.js
 import fs from "fs";
 import path from "path";
@@ -16,7 +17,7 @@ export default function getSponsor() {
     const localPath = path.resolve(__dirname, "../data/books.json");
 
     if (!fs.existsSync(localPath)) {
-      console.warn(`⚠️ books.json not found at ${localPath}`);
+      warn(`⚠️ books.json not found at ${localPath}`);
       return {
         title: "Digital Diagnosis: How AI Is Revolutionizing Healthcare",
         url: "https://jonathan-harris.online",
@@ -27,7 +28,7 @@ export default function getSponsor() {
     const books = JSON.parse(raw);
 
     if (!Array.isArray(books) || books.length === 0) {
-      console.warn("⚠️ books.json is empty or malformed, returning fallback sponsor.");
+      warn("⚠️ books.json is empty or malformed, returning fallback sponsor.");
       return {
         title: "Digital Diagnosis: How AI Is Revolutionizing Healthcare",
         url: "https://jonathan-harris.online",
@@ -35,10 +36,10 @@ export default function getSponsor() {
     }
 
     const randomBook = books[Math.floor(Math.random() * books.length)];
-    console.log(`📘 Selected sponsor: ${randomBook.title}`);
+    info(`📘 Selected sponsor: ${randomBook.title}`);
     return randomBook;
   } catch (err) {
-    console.error("❌ getSponsor() failed:", err);
+    error("❌ getSponsor() failed", { error: err });
     return {
       title: "Digital Diagnosis: How AI Is Revolutionizing Healthcare",
       url: "https://jonathan-harris.online",

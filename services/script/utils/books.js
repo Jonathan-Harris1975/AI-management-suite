@@ -1,4 +1,5 @@
 import { createRequire } from 'module';
+import { warn, error } from '#logger.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -34,11 +35,11 @@ try {
   );
   
   if (books.length === 0) {
-    console.warn('No valid books found - using defaults');
+    warn('No valid books found - using defaults');
     books = DEFAULT_BOOKS;
   }
 } catch (err) {
-  console.error('Failed to load books.json:', err.message);
+  error('Failed to load books.json', { error: err.message });
   books = DEFAULT_BOOKS;
 }
 
@@ -58,7 +59,7 @@ export default function getRandomSponsor() {
     
     return books[books.length - 1]; // Fallback
   } catch (err) {
-    console.error('Sponsor selection failed:', err);
+    error('Sponsor selection failed', { error: err });
     return books[0] || null;
   }
 }
