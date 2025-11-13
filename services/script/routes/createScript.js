@@ -3,6 +3,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { orchestrateEpisode } from '../utils/orchestrator.js';
+import { error } from '#logger.js';
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ router.post('/create-script', async (req, res) => {
     const result = await runFullScriptPipeline(sessionId);
     res.status(200).json({ success: true, sessionId, ...result });
   } catch (err) {
-    console.error('❌ Pipeline failed', err);
+    error('❌ Pipeline failed', { error: err });
     res.status(500).json({ error: 'Script generation failed', details: err.message });
   }
 });
