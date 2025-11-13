@@ -1,16 +1,16 @@
 // scripts/startupCheck.js
-import { info } from "#logger.js";
+import { info, error } from "#logger.js";
 
 try {
   info("🚀 startupCheck.js reached — container runtime confirmed!");
-  console.log("---------------------------------------------");
-  console.log("📂 Working directory:", process.cwd());
-  console.log("📦 Node version:", process.version);
-  console.log("📦 Module type: module (from package.json)");
-  console.log("---------------------------------------------");
+  info("---------------------------------------------");
+  info(`📂 Working directory: ${process.cwd()}`);
+  info(`📦 Node version: ${process.version}`);
+  info("📦 Module type: module (from package.json)");
+  info("---------------------------------------------");
   info("🏁 Environment check completed successfully.");
   process.exit(0);
 } catch (err) {
-  console.error("❌ Startup check failed:", err);
+  error("❌ Startup check failed", { error: err });
   process.exit(1);
 }

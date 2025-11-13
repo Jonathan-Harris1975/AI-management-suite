@@ -24,20 +24,20 @@ function validateEnv(requiredKeys = []) {
   }
 
   if (missing.length > 0) {
-    log.error({ missing }, "❌ Missing required environment variables");
-    console.error("Missing required environment variables:", missing.join(", "));
+    log.error("❌ Missing required environment variables", { missing });
+    log.error("❌ Missing required environment variables", { missing });
     process.exit(1);
   }
 
-  log.info({ count: requiredKeys.length }, "✅ Environment variables validated successfully");
+  log.info("✅ Environment variables validated successfully", { count: requiredKeys.length });
 }
 
 // ------------------------------------------------------------------
 // 🧠 Bootstrap startup diagnostics
 // ------------------------------------------------------------------
-log.info({}, "=============================================");
-log.info({}, "🧠 AI Podcast Suite - Environment Bootstrap");
-log.info({}, "=============================================");
+log.info("=============================================", {});
+log.info("🧠 AI Podcast Suite - Environment Bootstrap", {});
+log.info("=============================================", {});
 
 const systemInfo = {
   time: new Date().toISOString(),
@@ -55,10 +55,10 @@ log.info(systemInfo, "🩺 Startup Health Check");
 // ⚠️ Resource warnings
 const free = parseFloat(systemInfo.freeMemGB);
 const cpus = systemInfo.cpus;
-if (free < 0.5) log.warn({ freeMemGB: systemInfo.freeMemGB }, "Low free memory (<0.5 GB)");
-if (cpus < 2) log.warn({ cpus }, "Low CPU core count (<2 cores)");
+if (free < 0.5) log.warn("Low free memory (<0.5 GB)", { freeMemGB: systemInfo.freeMemGB });
+if (cpus < 2) log.warn("Low CPU core count (<2 cores)", { cpus });
 
-log.info({}, "🚀 Beginning environment validation...");
+log.info("🚀 Beginning environment validation...", {});
 
 // ------------------------------------------------------------------
 // ✅ Validate all Shiper environment variables
@@ -114,5 +114,5 @@ validateEnv([
 // ------------------------------------------------------------------
 // 🌍 Done
 // ------------------------------------------------------------------
-log.info({}, "🌍 All environment variables validated successfully.");
-log.info({}, "✅ Environment Bootstrap complete.\n");
+log.info("🌍 All environment variables validated successfully.", {});
+log.info("✅ Environment Bootstrap complete.\n", {});
