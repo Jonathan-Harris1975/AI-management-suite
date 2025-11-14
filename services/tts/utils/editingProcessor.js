@@ -1,11 +1,23 @@
 // ============================================================
-// 🎙️ Podcast Editing Processor — Warm, Natural, Deeper Tone
+// 🎚️ Editing Processor — Hybrid Mastering (Stage 1)
 // ============================================================
 //
-// • Style A: natural, intimate podcast voice
-// • Local retry logic on ffmpeg
-// • Saves edited audio to R2 as a safenet (editedAudio bucket)
-// • Fallback to unedited merged audio if editing fails
+// Pipeline Purpose:
+//  • Improve TTS naturalness (de-ess, soften harsh TTS peaks)
+//  • Remove noise/clicks/artifacts
+//  • Loudnorm pre-pass (-18 LUFS target)
+//  • Light compression for natural speech-rolloff
+//  • DO NOT add fades (handled later)
+//  • DO NOT add intro/outro (podcastProcessor handles this)
+//
+// Includes:
+//  • Local retry logic
+//  • Keep-alive signals
+//  • R2 safenet upload -> R2_BUCKET_EDITED_AUDIO
+//
+// Returns:
+//   Buffer (clean mastered TTS audio)
+//
 // ============================================================
 
 import fs from "fs";
@@ -15,229 +27,179 @@ import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { putObject } from "#shared/r2-client.js";
 
-const TMP_DIR = "/tmp/tts_editing";
-const EDITED_BUCKET_KEY = "editedAudio"; // R2_BUCKETS alias
+// ------------------------------------------------------------
+// ⚙️ ENV
+// ------------------------------------------------------------
+const TMP_DIR = "/tmp/edited_audio";
 
-const MAX_EDIT_RETRIES = Number(process.env.MAX_EDIT_RETRIES || 3);
-const EDIT_RETRY_DELAY_MS = Number(process.env.EDIT_RETRY_DELAY_MS || 2000);
+const MAX_RETRIES = Number(process.env.MAX_CHUNK_RETRIES || 3);
+const RETRY_DELAY_MS = Number(process.env.RETRY_DELAY_MS || 2000);
+const RETRY_BACKOFF = Number(process.env.RETRY_BACKOFF_MULTIPLIER || 2);
 
-// Ensure /tmp editing directory exists
-function ensureTmpDir() {
-  if (!fs.existsSync(TMP_DIR)) {
-    fs.mkdirSync(TMP_DIR, { recursive: true });
-  }
+const EDITED_BUCKET = process.env.R2_BUCKET_EDITED_AUDIO || "";
+const PUBLIC_EDITED_BASE =
+  process.env.R2_PUBLIC_BASE_URL_EDITED_AUDIO || "";
+
+// Ensure temporary directory exists
+if (!fs.existsSync(TMP_DIR)) {
+  fs.mkdirSync(TMP_DIR, { recursive: true });
 }
 
 // ------------------------------------------------------------
-// 🎚️ Single ffmpeg attempt with PODCAST-SAFE enhancement filters
+// 🔧 Stage 1 Mastering Chain (anti-robotic TTS improvement)
 // ------------------------------------------------------------
 //
-// Filters are lean-build safe:
-//  - asetrate, aresample
-//  - highpass, lowpass
-//  - compand, volume
+// Order matters:
+//  1. High-pass filter (remove sub-bass rumble)
+//  2. De-esser to soften robotic hiss (ffmpeg hack via bandreject)
+//  3. Light compression (smooth harsh edges)
+//  4. Loudnorm pre-stage (Stage 1)
 // ------------------------------------------------------------
-function runFfmpegPodcastEnhanceOnce(inputPath, outputPath, sessionId, attempt, total) {
+function ffmpegStage1Filter() {
+  return [
+    // Clean sub-rumble
+    "highpass=f=110",
+
+    // TTS anti-robotic trick: narrow band-reject around 6–8 kHz
+    // Removes metallic edge typical of synthetic voices
+    "anequalizer=f=7000:t=h:width=200:g=-6",
+
+    // Natural-sounding gentle compression
+    "acompressor=threshold=-20dB:ratio=2:attack=10:release=80",
+
+    // Stage 1 loudnorm (pre-normalization)
+    "loudnorm=I=-18:TP=-2:LRA=11:print_format=none"
+  ].join(",");
+}
+
+// ------------------------------------------------------------
+// 🔁 Run ffmpeg Once
+// ------------------------------------------------------------
+function runEditingOnce(sessionId, inputPath, outputPath, attempt, total) {
+  const filters = ffmpegStage1Filter();
+
+  const args = [
+    "-y",
+    "-i", inputPath,
+    "-filter:a", filters,
+    "-c:a", "libmp3lame",
+    "-b:a", "128k",
+    outputPath,
+  ];
+
   return new Promise((resolve, reject) => {
-    const filterChain = [
-      // Slightly deeper tone via tiny pitch drop
-      "asetrate=48000*0.985,aresample=48000",
-
-      // Clean up extremes
-      "highpass=f=70",
-      "lowpass=f=13500",
-
-      // Gentle dynamics: podcast-style smoothness
-      "compand=attacks=0:points=-80/-80|-40/-32|-20/-14|0/-2|20/0",
-
-      // Small overall lift
-      "volume=1.8",
-    ].join(",");
-
-    const args = [
-      "-y",
-      "-i",
-      inputPath,
-      "-af",
-      filterChain,
-      "-c:a",
-      "libmp3lame",
-      "-b:a",
-      "192k",
-      outputPath,
-    ];
-
-    info("🎚️ Starting podcast ffmpeg enhancement", {
+    info("🎚️ Starting editingProcessor ffmpeg attempt", {
       sessionId,
       attempt,
-      of: total,
+      total,
       args,
     });
 
     const ff = spawn("ffmpeg", args);
 
-    ff.on("spawn", () => {
-      info("🎬 ffmpeg (podcast enhance) spawned", { sessionId, attempt });
-    });
-
-    ff.stderr?.on("data", (chunk) => {
-      const txt = chunk.toString();
-
-      // Only escalate if there's a real error keyword
-      const lower = txt.toLowerCase();
-      if (lower.includes("error") || lower.includes("invalid")) {
-        warn("⚠️ ffmpeg stderr reported potential problem (podcast enhance)", {
+    ff.stderr.on("data", (buf) => {
+      const txt = buf.toString().toLowerCase();
+      if (txt.includes("error")) {
+        warn("⚠️ ffmpeg stderr warning (editingProcessor)", {
           sessionId,
           attempt,
-          stderr: txt.trim(),
+          stderr: txt,
         });
       }
     });
 
     ff.on("error", (err) => {
-      error("💥 ffmpeg spawn error (podcast enhance)", {
-        sessionId,
-        attempt,
-        error: err.message,
-      });
       reject(err);
     });
 
     ff.on("close", (code) => {
-      if (code === 0) {
-        info("✅ ffmpeg podcast enhancement completed", {
-          sessionId,
-          attempt,
-          outputPath,
-        });
-        resolve();
-      } else {
-        const msg = `ffmpeg exited with code ${code}`;
-        error("💥 ffmpeg closed with non-zero exit (podcast enhance)", {
-          sessionId,
-          attempt,
-          code,
-        });
-        reject(new Error(msg));
-      }
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exited with code ${code}`));
     });
   });
 }
 
-// ============================================================
-// 🎛️ Main Editing Processor with Retry + R2 Safenet
-// ============================================================
-//
-// Called from orchestrator as:
-//   const editedBuffer = await editingProcessor(sessionId, merged);
-//
-// where `merged` is:
-//   { key, localPath } // from mergeProcessor
-// ============================================================
-async function editingProcessor(sessionId, merged) {
+// ------------------------------------------------------------
+// 🎧 editingProcessor — Main
+// ------------------------------------------------------------
+export async function editingProcessor(sessionId, audioBuffer) {
   const label = `editingProcessor:${sessionId}`;
-  ensureTmpDir();
+  startKeepAlive(label, { intervalMs: 15000 });
 
-  if (!merged || !merged.localPath) {
-    throw new Error("editingProcessor: merged.localPath is required.");
-  }
+  const inputPath = path.join(TMP_DIR, `${sessionId}_raw.mp3`);
+  const outputPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
 
-  const inputPath = merged.localPath;
-  const editedPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
+  await fs.promises.writeFile(inputPath, audioBuffer);
 
-  startKeepAlive(label, 25000);
+  let finalBuffer = null;
+  let lastError = null;
 
-  try {
-    let success = false;
-    let lastError;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await runEditingOnce(sessionId, inputPath, outputPath, attempt, MAX_RETRIES);
 
-    // 🔁 Local retry loop
-    for (let attempt = 1; attempt <= MAX_EDIT_RETRIES; attempt++) {
-      try {
-        await runFfmpegPodcastEnhanceOnce(
-          inputPath,
-          editedPath,
-          sessionId,
-          attempt,
-          MAX_EDIT_RETRIES
-        );
-        success = true;
-        break;
-      } catch (err) {
-        lastError = err;
-        if (attempt < MAX_EDIT_RETRIES) {
-          warn("⚠️ editingProcessor attempt failed, will retry", {
-            sessionId,
-            attempt,
-            maxAttempts: MAX_EDIT_RETRIES,
-            error: err.message,
-          });
-          await new Promise((r) => setTimeout(r, EDIT_RETRY_DELAY_MS));
-        }
+      finalBuffer = await fs.promises.readFile(outputPath);
+
+      info("✅ editingProcessor produced cleaned audio", {
+        sessionId,
+        bytes: finalBuffer.length,
+        attempt,
+      });
+
+      break;
+    } catch (err) {
+      lastError = err;
+
+      warn("⚠️ editingProcessor ffmpeg attempt failed", {
+        sessionId,
+        attempt,
+        error: err.message,
+        nextRetryMs: attempt < MAX_RETRIES
+          ? RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF, attempt - 1)
+          : 0,
+      });
+
+      if (attempt < MAX_RETRIES) {
+        const delay = RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF, attempt - 1);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
+  }
 
-    if (!success) {
-      throw lastError || new Error("editingProcessor failed after all retries");
-    }
+  stopKeepAlive(label);
 
-    const editedBuffer = await fs.promises.readFile(editedPath);
-
-    info("🎧 Podcast editing stage produced buffer", {
+  // If all attempts failed → return original buffer (fail-safe)
+  if (!finalBuffer) {
+    error("💥 editingProcessor failed after all retries — returning raw audio", {
       sessionId,
-      bytes: editedBuffer.length,
+      error: lastError?.message,
     });
+    return audioBuffer;
+  }
 
-    // 📦 Safenet: upload edited buffer to R2 (editedAudio)
+  // ------------------------------------------------------------
+  // 📦 Safenet Upload to Edited Bucket
+  // ------------------------------------------------------------
+  if (EDITED_BUCKET && PUBLIC_EDITED_BASE) {
     try {
-      const key = `${sessionId}.mp3`;
-      await putObject(EDITED_BUCKET_KEY, key, editedBuffer, "audio/mpeg");
+      const key = `${sessionId}_edited.mp3`;
+      await putObject("edited", key, finalBuffer, "audio/mpeg");
 
-      info("💾 Edited audio uploaded to R2 safenet (editedAudio)", {
+      info("💾 editingProcessor safenet upload complete", {
         sessionId,
-        bucketKey: EDITED_BUCKET_KEY,
+        bucket: EDITED_BUCKET,
         key,
-        bytes: editedBuffer.length,
+        url: `${PUBLIC_EDITED_BASE}/${encodeURIComponent(key)}`,
       });
-    } catch (uploadErr) {
-      warn("⚠️ Failed to upload edited audio to R2 safenet", {
+    } catch (err) {
+      warn("⚠️ editingProcessor safenet upload failed", {
         sessionId,
-        bucketKey: EDITED_BUCKET_KEY,
-        error: uploadErr.message,
+        error: err.message,
       });
-      // Non-fatal: we still return the edited buffer
-    }
-
-    stopKeepAlive(label);
-    return editedBuffer;
-  } catch (err) {
-    error("💥 editingProcessor failed — using fallback audio", {
-      sessionId,
-      error: err.message,
-    });
-
-    // Fallback to unedited merged audio
-    try {
-      const fallbackBuffer = await fs.promises.readFile(inputPath);
-
-      warn("⚠️ Using unedited merged audio fallback", {
-        sessionId,
-        bytes: fallbackBuffer.length,
-      });
-
-      stopKeepAlive(label);
-      return fallbackBuffer;
-    } catch (fallbackErr) {
-      error("💥 editingProcessor fallback also failed", {
-        sessionId,
-        error: fallbackErr.message,
-      });
-
-      stopKeepAlive(label);
-      throw fallbackErr;
     }
   }
+
+  return finalBuffer;
 }
 
-export { editingProcessor };
 export default editingProcessor;
