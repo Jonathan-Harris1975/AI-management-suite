@@ -2,13 +2,24 @@
 // 🎙️ STREAMING Editing Processor — Mature Deep Voice Edition
 // Natural • Authoritative • Broadcast Quality
 // ============================================================
+//
+// Signature:
+//   const editedBuffer = await editingProcessor(sessionId, merged);
+// Where `merged` is the object returned by mergeProcessor:
+//   { key, localPath }
+//
+// This implementation:
+//   - Runs ffmpeg over the merged MP3 (simple loudness normalize)
+//   - Returns the edited audio as a Buffer
+//   - Falls back to the unedited merged file if editing fails
+//   - Uses keep-alive to prevent idle timeouts during long runs
+// ============================================================
 
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
-import { log } from "#logger.js";
+import { info, error, warn } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
-import { uploadBuffer } from "#shared/r2-client.js";
 
 const TMP_DIR = "/tmp/tts_editing";
 
@@ -18,229 +29,117 @@ function ensureTmpDir() {
   }
 }
 
-// ------------------------------------------------------------
-// ⭐ MATURE DEEPER VOICE FILTER CHAIN (Corrected)
-// ------------------------------------------------------------
-//
-// ORDER MATTERS - Optimized for natural, deeper voice
-//
-// 1) Proper pitch lowering for mature voice
-// 2) Warmth and body enhancement
-// 3) Clarity without harshness
-// 4 Gentle de-essing
-// 5) Natural dynamics
-// 6) Clean output
-//
-const filters = [
-  // 1️⃣ CORRECT PITCH LOWERING - Key fix for mature voice
-  // Lower pitch by ~8% for natural deeper tone
-  "asetrate=44100*0.92,aresample=44100",
-  
-  // 2️⃣ WARMTH & BODY - Add richness to lower frequencies
-  "equalizer=f=80:width_type=h:width=100:g=4",
-  "equalizer=f=180:width_type=h:width=120:g=3",
-  "equalizer=f=320:width_type=h:width=150:g=2",
-  
-  // 3️⃣ CLARITY & PRESENCE - Natural intelligibility
-  "equalizer=f=1200:width_type=h:width=400:g=2",
-  "equalizer=f=2400:width_type=h:width=600:g=1.5",
-  
-  // 4️⃣ REDUCE HARSHNESS - Smooth out high frequencies
-  "equalizer=f=4000:width_type=h:width=1000:g=-2",
-  "equalizer=f=8000:width_type=h:width=2000:g=-3",
-  
-  // 5️⃣ GENTLE DE-ESSING - Less aggressive than before
-  "deesser=i=0.25:mode=i",
-  
-  // 6️⃣ NATURAL COMPRESSION - Smooth dynamics
-  "acompressor=threshold=-20dB:ratio=2.5:attack=30:release=300:makeup=1.5",
-  
-  // 7️⃣ CLEAN LIMITING - Prevent clipping
-  "alimiter=limit=-1dB:attack=10:release=100"
-];
+function runFfmpegNormalize(inputPath, outputPath, sessionId) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      "-y",
+      "-i",
+      inputPath,
+      // Simple loudness normalization & high-quality MP3 encode
+      "-af",
+      "loudnorm",
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "192k",
+      outputPath,
+    ];
 
-// ------------------------------------------------------------
-// 🧩 Streaming Editing Processor
-// ------------------------------------------------------------
-export async function editingProcessor(sessionId, inputPathObj) {
-  startKeepAlive(`editingProcessor:${sessionId}`, 25000);
+    info("🎚️ Starting editingProcessor ffmpeg", { sessionId, args });
+
+    const ff = spawn("ffmpeg", args);
+
+    ff.on("spawn", () => {
+      info("🎬 ffmpeg (editingProcessor) spawned", { sessionId });
+    });
+
+    ff.stdout?.on("data", () => {
+      // keep silent: no spam
+    });
+
+    ff.stderr?.on("data", (chunk) => {
+      // Log only high-level progress markers, not the full spam
+      const text = chunk.toString();
+      if (text.includes("error") || text.includes("Error")) {
+        warn("⚠️ ffmpeg (editingProcessor) stderr reported error text", {
+          sessionId,
+        });
+      }
+    });
+
+    ff.on("error", (err) => {
+      error("💥 ffmpeg (editingProcessor) spawn error", {
+        sessionId,
+        error: err.message,
+      });
+      reject(err);
+    });
+
+    ff.on("close", (code) => {
+      if (code === 0) {
+        info("✅ ffmpeg (editingProcessor) completed successfully", {
+          sessionId,
+          outputPath,
+        });
+        resolve(null);
+      } else {
+        const err = new Error(
+          `ffmpeg (editingProcessor) exited with code ${code}`
+        );
+        error("💥 ffmpeg (editingProcessor) closed with non-zero exit code", {
+          sessionId,
+          code,
+        });
+        reject(err);
+      }
+    });
+  });
+}
+
+export async function editingProcessor(sessionId, merged) {
+  const label = `editingProcessor:${sessionId}`;
   ensureTmpDir();
 
-  const inputPath =
-    typeof inputPathObj === "string"
-      ? inputPathObj
-      : inputPathObj?.localPath;
-
-  if (!inputPath || typeof inputPath !== "string") {
-    stopKeepAlive();
-    throw new Error(
-      `Invalid inputPath passed to editingProcessor. Received: ${JSON.stringify(
-        inputPathObj
-      )}`
-    );
+  if (!merged || !merged.localPath) {
+    throw new Error("editingProcessor: merged.localPath is required.");
   }
 
-  if (!fs.existsSync(inputPath)) {
-    stopKeepAlive();
-    throw new Error(`Input file does not exist: ${inputPath}`);
-  }
-
-  const stats = fs.statSync(inputPath);
-  if (!stats.size) {
-    stopKeepAlive();
-    throw new Error(`Input file is empty: ${inputPath}`);
-  }
-
-  log.info("🎚️ Starting mature voice editingProcessor", { sessionId, inputPath });
-
+  const inputPath = merged.localPath;
   const editedPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
-  const filterStr = filters.join(",");
-  let ffmpegSucceeded = false;
 
-  if (fs.existsSync(editedPath)) {
-    try {
-      fs.unlinkSync(editedPath);
-    } catch (cleanupErr) {
-      log.warn("⚠️ Could not clean up existing edited file", { sessionId, error: cleanupErr.message });
-    }
-  }
+  startKeepAlive(label, 25000);
 
   try {
-    const ffmpeg = spawn("ffmpeg", [
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-i",
-      "pipe:0",
-      "-af",
-      filterStr,
-
-      // Output settings
-      "-ar", "44100",
-      "-codec:a", "libmp3lame",
-      "-b:a", "192k",
-      "-ac", "1", // Mono for consistent voice processing
-      "-y",
-      editedPath,
-    ]);
-
-    let ffmpegErr = "";
-    let settled = false;
-
-    const fail = (err) => {
-      if (settled) return;
-      settled = true;
-
-      log.error("💥 editingProcessor ffmpeg failure", { sessionId, error: err.message, ffmpegErr });
-    };
-
-    ffmpeg.stderr.on("data", (d) => (ffmpegErr += d.toString()));
-    ffmpeg.on("error", (err) => fail(err));
-
-    ffmpeg.stdin.on("error", (err) => {
-      if (err.code !== "EPIPE") {
-        log.error("💥 ffmpeg stdin error", { sessionId, err });
-      }
-      fail(err);
+    await runFfmpegNormalize(inputPath, editedPath, sessionId);
+    const editedBuffer = await fs.promises.readFile(editedPath);
+    info("🎚️ Editing stage produced buffer", {
+      sessionId,
+      bytes: editedBuffer.length,
     });
-
-    await new Promise((resolve, reject) => {
-      const inputStream = fs.createReadStream(inputPath, {
-        highWaterMark: 64 * 1024,
-      });
-
-      const safeReject = (err) => {
-        if (settled) return;
-        settled = true;
-        try {
-          ffmpeg.stdin.end();
-        } catch {}
-        try {
-          inputStream.destroy();
-        } catch {}
-
-        reject(err);
-      };
-
-      inputStream.on("error", (err) => {
-        log.error("💥 inputStream error", { sessionId, err });
-        safeReject(err);
-      });
-
-      inputStream.on("data", (chunk) => {
-        if (settled) return;
-        const ok = ffmpeg.stdin.write(chunk);
-        if (!ok) {
-          inputStream.pause();
-          ffmpeg.stdin.once("drain", () => {
-            if (!settled) inputStream.resume();
-          });
-        }
-      });
-
-      inputStream.on("end", () => {
-        if (!settled) ffmpeg.stdin.end();
-      });
-
-      ffmpeg.on("close", (code) => {
-        if (settled) return;
-
-        if (code !== 0) {
-          safeReject(new Error(`ffmpeg exited with ${code} — ${ffmpegErr}`));
-        } else {
-          settled = true;
-          ffmpegSucceeded = true;
-          resolve();
-        }
-      });
-    });
-
-    // Validate output
-    if (!fs.existsSync(editedPath)) {
-      throw new Error("Edited file was not created");
-    }
-
-    const editedStats = fs.statSync(editedPath);
-    if (!editedStats.size) {
-      throw new Error("Edited file is empty");
-    }
-
-    // Upload
-    const buffer = fs.readFileSync(editedPath);
-    const key = `${sessionId}_edited.mp3`;
-
-    await uploadBuffer("merged", key, buffer, "audio/mpeg");
-
-    log.info("💾 Uploaded mature voice MP3 to R2", { sessionId, key, size: buffer.length });
-
-    stopKeepAlive();
-    return editedPath;
+    stopKeepAlive(label);
+    return editedBuffer;
   } catch (err) {
-    // Fallback
-    log.error("💥 editingProcessor failed — fallback to unedited audio", { sessionId, error: err.message });
+    error("💥 editingProcessor failed, falling back to unedited merged audio", {
+      sessionId,
+      error: err.message,
+    });
 
     try {
-      if (!ffmpegSucceeded) {
-        if (!fs.existsSync(editedPath)) {
-          fs.copyFileSync(inputPath, editedPath);
-          log.info("🔄 Created fallback copy of original audio", { sessionId });
-        }
-
-        const buffer = fs.readFileSync(editedPath);
-        const key = `${sessionId}_edited.mp3`;
-
-        await uploadBuffer("merged", key, buffer, "audio/mpeg");
-
-        log.info("💾 Uploaded fallback (unedited) MP3 to R2", { sessionId, key, fallback: true });
-      }
+      const fallbackBuffer = await fs.promises.readFile(inputPath);
+      warn("⚠️ Using unedited merged audio as fallback", {
+        sessionId,
+        bytes: fallbackBuffer.length,
+      });
+      stopKeepAlive(label);
+      return fallbackBuffer;
     } catch (fallbackErr) {
-      log.error("💥 editingProcessor fallback also failed", { sessionId, error: fallbackErr.message });
-      stopKeepAlive();
+      error("💥 editingProcessor fallback also failed", {
+        sessionId,
+        error: fallbackErr.message,
+      });
+      stopKeepAlive(label);
       throw fallbackErr;
     }
-
-    stopKeepAlive();
-    return editedPath;
   }
 }
 

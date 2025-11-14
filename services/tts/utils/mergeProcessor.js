@@ -141,7 +141,7 @@ async function modularMerge(sessionId, sources) {
     for (let i = 0; i < current.length; i += BATCH_SIZE) {
       const group = current.slice(i, i + BATCH_SIZE);
 
-      info({ sessionId, group }, `📦 Merging batch ${i / BATCH_SIZE + 1}`);
+      info(`📦 Merging batch ${i / BATCH_SIZE + 1}`, { sessionId, group });
 
       const buffers = [];
       for (const source of group) {

@@ -160,13 +160,13 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
     const publicUrl = `${R2_PUBLIC_BASE_URL_CHUNKS}/${encodeURIComponent(key)}`;
     
     info(
+      `✅ TTS chunk ${chunkNumber} uploaded${attempt > 1 ? ` (retry ${attempt})` : ''}`,
       { 
         sessionId, 
         key, 
         bytes: audioBuffer.length,
         attempt: attempt > 1 ? attempt : undefined
-      },
-      `✅ TTS chunk ${chunkNumber} uploaded${attempt > 1 ? ` (retry ${attempt})` : ''}`
+      }
     );
 
     return { 
@@ -180,6 +180,7 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
     const isRetryable = isRetryableError(err);
     
     warn(
+      `⚠️ TTS chunk ${chunkNumber} failed (attempt ${attempt}/${MAX_CHUNK_RETRIES})`,
       { 
         sessionId, 
         chunk: chunkNumber, 
@@ -187,8 +188,7 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
         message: err.message,
         isRetryable,
         errorCode: err?.name || err?.code
-      },
-      `⚠️ TTS chunk ${chunkNumber} failed (attempt ${attempt}/${MAX_CHUNK_RETRIES})`
+      }
     );
 
     // Retry if possible and error is retryable
@@ -196,8 +196,8 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
       const delay = RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
       
       info(
-        { sessionId, chunk: chunkNumber, delayMs: delay },
-        `🔄 Retrying chunk ${chunkNumber} after ${delay}ms`
+        `🔄 Retrying chunk ${chunkNumber} after ${delay}ms`,
+        { sessionId, chunk: chunkNumber, delayMs: delay }
       );
       
       await new Promise(resolve => setTimeout(resolve, delay));
@@ -206,13 +206,13 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
 
     // Final failure
     error(
+      `❌ TTS chunk ${chunkNumber} permanently failed after ${attempt} attempts`,
       { 
         sessionId, 
         chunk: chunkNumber, 
         message: err.message,
         totalAttempts: attempt 
-      },
-      `❌ TTS chunk ${chunkNumber} permanently failed after ${attempt} attempts`
+      }
     );
     
     return { 
@@ -268,6 +268,7 @@ export async function ttsProcessor(sessionId, chunkList = []) {
   // Log detailed failure information
   if (failedChunks.length > 0) {
     warn(
+      `⚠️ ${failedChunks.length} chunk(s) failed permanently`,
       { 
         sessionId,
         failures: failedChunks.map(f => ({
@@ -275,8 +276,7 @@ export async function ttsProcessor(sessionId, chunkList = []) {
           error: f.error,
           attempts: f.attempts
         }))
-      },
-      `⚠️ ${failedChunks.length} chunk(s) failed permanently`
+      }
     );
   }
 
@@ -288,4 +288,5 @@ export async function ttsProcessor(sessionId, chunkList = []) {
   return successfulChunks;
 }
 
-export default { ttsProcessor };
+export { ttsProcessor };
+export default ttsProcessor;
