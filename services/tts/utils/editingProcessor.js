@@ -1,6 +1,6 @@
 // ============================================================
-// 🎙️ STREAMING Editing Processor — Premium Radio Host Version
-// Mature UK Tone • Warm • Natural • Broadcast-Ready
+// 🎙️ STREAMING Editing Processor — Mature Deep Voice Edition
+// Natural • Authoritative • Broadcast Quality
 // ============================================================
 
 import fs from "fs";
@@ -19,43 +19,45 @@ function ensureTmpDir() {
 }
 
 // ------------------------------------------------------------
-// ⭐ FINAL UK-PREMIUM RADIO HOST FILTER CHAIN (Stable)
+// ⭐ MATURE DEEPER VOICE FILTER CHAIN (Corrected)
 // ------------------------------------------------------------
 //
-// ORDER MATTERS (this sequence avoids SIGSEGV + tonal artifacts)
+// ORDER MATTERS - Optimized for natural, deeper voice
 //
-// 1) Correct low-pitch adjustment
-// 2) Warm EQ
-// 3) Presence (light)
-// 4) De-esser (stable version)
-// 5) Compression
-// 6) Output limiting
+// 1) Proper pitch lowering for mature voice
+// 2) Warmth and body enhancement
+// 3) Clarity without harshness
+// 4 Gentle de-essing
+// 5) Natural dynamics
+// 6) Clean output
 //
 const filters = [
-  // 1️⃣ Pitch LOWERING — UK mature tone fix
-  // Correct: raise sample rate → lower pitch
-  "asetrate=44100*1.018,aresample=44100,atempo=0.982",
-
-  // 2️⃣ Warm body
-  "equalizer=f=120:t=q:w=1.1:g=3",
-  "equalizer=f=250:t=q:w=1.0:g=2",
-  "equalizer=f=3500:t=q:w=2.0:g=-2",
-  "equalizer=f=7800:t=h:g=-2.5",
-
-  // 3️⃣ Slight presence (British radio clarity)
-  "equalizer=f=2600:t=q:w=1.5:g=1.2",
-
-  // 4️⃣ Stable de-esser (moderate, within valid ranges)
-  // i = intensity [0–1], m = max de-essing [0–1], f = normalized freq [0–1]
-  "deesser=i=0.35:m=0.7:f=0.55",
-
-  // 5️⃣ Natural compression
-  "acompressor=threshold=-18dB:ratio=3.5:attack=18:release=260:makeup=2",
-
-  // 6️⃣ Broadcast limiter
-  "alimiter=limit=0.92:attack=6:release=90"
+  // 1️⃣ CORRECT PITCH LOWERING - Key fix for mature voice
+  // Lower pitch by ~8% for natural deeper tone
+  "asetrate=44100*0.92,aresample=44100",
+  
+  // 2️⃣ WARMTH & BODY - Add richness to lower frequencies
+  "equalizer=f=80:width_type=h:width=100:g=4",
+  "equalizer=f=180:width_type=h:width=120:g=3",
+  "equalizer=f=320:width_type=h:width=150:g=2",
+  
+  // 3️⃣ CLARITY & PRESENCE - Natural intelligibility
+  "equalizer=f=1200:width_type=h:width=400:g=2",
+  "equalizer=f=2400:width_type=h:width=600:g=1.5",
+  
+  // 4️⃣ REDUCE HARSHNESS - Smooth out high frequencies
+  "equalizer=f=4000:width_type=h:width=1000:g=-2",
+  "equalizer=f=8000:width_type=h:width=2000:g=-3",
+  
+  // 5️⃣ GENTLE DE-ESSING - Less aggressive than before
+  "deesser=i=0.25:mode=i",
+  
+  // 6️⃣ NATURAL COMPRESSION - Smooth dynamics
+  "acompressor=threshold=-20dB:ratio=2.5:attack=30:release=300:makeup=1.5",
+  
+  // 7️⃣ CLEAN LIMITING - Prevent clipping
+  "alimiter=limit=-1dB:attack=10:release=100"
 ];
-
 
 // ------------------------------------------------------------
 // 🧩 Streaming Editing Processor
@@ -89,7 +91,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
     throw new Error(`Input file is empty: ${inputPath}`);
   }
 
-  log.info("🎚️ Starting streaming editingProcessor (UK Premium Radio Host)", { sessionId, inputPath });
+  log.info("🎚️ Starting mature voice editingProcessor", { sessionId, inputPath });
 
   const editedPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
   const filterStr = filters.join(",");
@@ -113,10 +115,11 @@ export async function editingProcessor(sessionId, inputPathObj) {
       "-af",
       filterStr,
 
-      // Output
+      // Output settings
       "-ar", "44100",
       "-codec:a", "libmp3lame",
       "-b:a", "192k",
+      "-ac", "1", // Mono for consistent voice processing
       "-y",
       editedPath,
     ]);
@@ -208,7 +211,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
     await uploadBuffer("merged", key, buffer, "audio/mpeg");
 
-    log.info("💾 Uploaded edited MP3 to R2 (UK Premium Host)", { sessionId, key, size: buffer.length });
+    log.info("💾 Uploaded mature voice MP3 to R2", { sessionId, key, size: buffer.length });
 
     stopKeepAlive();
     return editedPath;
