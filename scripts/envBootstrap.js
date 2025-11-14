@@ -262,7 +262,7 @@ export const config = {
       DEEPSEEK: process.env.OPENROUTER_DEEPSEEK,
       META: process.env.OPENROUTER_META,
       ART: process.env.OPENROUTER_ART,
-      GROK: process.env.OPENROUTER_GROK,
+      
     },
     KEYS: {
       ANTHROPIC: process.env.OPENROUTER_API_KEY_ANTHROPIC,
@@ -271,7 +271,7 @@ export const config = {
       DEEPSEEK: process.env.OPENROUTER_API_KEY_DEEPSEEK,
       META: process.env.OPENROUTER_API_KEY_META,
       ART: process.env.OPENROUTER_API_KEY_ART,
-      GROK: process.env.OPENROUTER_API_KEY_GROK,
+      
     },
   },
 
