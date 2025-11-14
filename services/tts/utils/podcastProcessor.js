@@ -6,8 +6,10 @@
 //   const finalAudio = await podcastProcessor(sessionId, editedBuffer);
 //
 // • Mixes PODCAST_INTRO_URL + editedBuffer + PODCAST_OUTRO_URL
-// • Uses ffmpeg concat filter
-// • Local retry logic on ffmpeg
+// • Fades intro in & outro out using MIN_INTRO_DURATION / MIN_OUTRO_DURATION
+// • Applies loudnorm + gentle compression (Pro Podcast preset)
+// • Local retry logic with exponential backoff
+// • Saves final mastered file to R2_BUCKET_EDITED_AUDIO as safenet
 // • Falls back to editedBuffer if mixing fails
 // ============================================================
 
@@ -16,14 +18,37 @@ import path from "path";
 import { spawn } from "child_process";
 import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
+import { putObject } from "#shared/r2-client.js";
 
+// ------------------------------------------------------------
+// ⚙️ Environment
+// ------------------------------------------------------------
 const TMP_DIR = "/tmp/podcast_final";
 
 const PODCAST_INTRO_URL = process.env.PODCAST_INTRO_URL || "";
 const PODCAST_OUTRO_URL = process.env.PODCAST_OUTRO_URL || "";
 
-const MAX_PODCAST_RETRIES = Number(process.env.MAX_PODCAST_RETRIES || 3);
-const PODCAST_RETRY_DELAY_MS = Number(process.env.PODCAST_RETRY_DELAY_MS || 3000);
+// Fade durations (seconds) — from env, with sane defaults
+const MIN_INTRO_DURATION = Number(process.env.MIN_INTRO_DURATION || 3);
+const MIN_OUTRO_DURATION = Number(process.env.MIN_OUTRO_DURATION || 3);
+
+const INTRO_FADE_SEC = Number.isFinite(MIN_INTRO_DURATION)
+  ? Math.max(0.1, MIN_INTRO_DURATION)
+  : 3;
+
+const OUTRO_FADE_SEC = Number.isFinite(MIN_OUTRO_DURATION)
+  ? Math.max(0.1, MIN_OUTRO_DURATION)
+  : 3;
+
+// Retry settings (shared envs)
+const MAX_PODCAST_RETRIES = Number(process.env.MAX_CHUNK_RETRIES || 3);
+const PODCAST_RETRY_DELAY_MS = Number(process.env.RETRY_DELAY_MS || 2000);
+const PODCAST_RETRY_BACKOFF =
+  Number(process.env.RETRY_BACKOFF_MULTIPLIER || 2);
+
+// Edited audio safenet bucket
+const EDITED_BUCKET = process.env.R2_BUCKET_EDITED_AUDIO || "";
+const PUBLIC_EDITED_BASE = process.env.R2_PUBLIC_BASE_URL_EDITED_AUDIO || "";
 
 // Ensure /tmp directory exists
 function ensureTmpDir() {
@@ -34,11 +59,34 @@ function ensureTmpDir() {
 
 // ------------------------------------------------------------
 // 🧪 Single ffmpeg attempt to mix intro → main → outro
+//      + fades + loudnorm + compression
 // ------------------------------------------------------------
-function runPodcastMixdownOnce(sessionId, mainPath, outputPath, attempt, total) {
+function runPodcastMixdownOnce(
+  sessionId,
+  mainPath,
+  outputPath,
+  attempt,
+  total
+) {
   return new Promise((resolve, reject) => {
-    // We assume both intro & outro are available; if they aren't,
-    // the caller will short-circuit and just return editedBuffer.
+    // If intro/outro not configured, this function should not be called.
+    // Caller will short-circuit and use editedBuffer directly.
+    const filterComplex = [
+      // Intro: fade in from start
+      `[0:a]afade=t=in:d=${INTRO_FADE_SEC}[intro]`,
+
+      // Outro: fade out at end using reverse trick
+      `[2:a]areverse,afade=t=in:d=${OUTRO_FADE_SEC},areverse[outro]`,
+
+      // Concatenate: intro → main → outro
+      `[intro][1:a][outro]concat=n=3:v=0:a=1[pre]`,
+
+      // Pro-podcast mastering: loudnorm + gentle compression
+      `[pre]` +
+        `loudnorm=I=-16:LRA=11:TP=-1.5:print_format=summary,` +
+        `acompressor=threshold=-18dB:ratio=3:attack=5:release=50[master]`,
+    ].join(";");
+
     const args = [
       "-y",
       "-i",
@@ -48,9 +96,9 @@ function runPodcastMixdownOnce(sessionId, mainPath, outputPath, attempt, total) 
       "-i",
       PODCAST_OUTRO_URL,
       "-filter_complex",
-      "[0:a][1:a][2:a]concat=n=3:v=0:a=1[a]",
+      filterComplex,
       "-map",
-      "[a]",
+      "[master]",
       "-c:a",
       "libmp3lame",
       "-b:a",
@@ -101,7 +149,6 @@ function runPodcastMixdownOnce(sessionId, mainPath, outputPath, attempt, total) 
         info("✅ ffmpeg podcast mixdown completed", {
           sessionId,
           attempt,
-          outputPath,
         });
         resolve();
       } else {
@@ -137,8 +184,6 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     return editedBuffer;
   }
 
-  startKeepAlive(label, 30000);
-
   const mainPath = path.join(TMP_DIR, `${sessionId}_main.mp3`);
   const finalPath = path.join(TMP_DIR, `${sessionId}_final.mp3`);
 
@@ -148,6 +193,8 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     let success = false;
     let lastError;
     let finalBuffer = null;
+
+    startKeepAlive(label, { intervalMs: 15000 });
 
     for (let attempt = 1; attempt <= MAX_PODCAST_RETRIES; attempt++) {
       try {
@@ -164,14 +211,26 @@ export async function podcastProcessor(sessionId, editedBuffer) {
         break;
       } catch (err) {
         lastError = err;
+
+        warn("⚠️ podcastProcessor ffmpeg attempt failed", {
+          sessionId,
+          attempt,
+          maxAttempts: MAX_PODCAST_RETRIES,
+          error: err.message,
+        });
+
         if (attempt < MAX_PODCAST_RETRIES) {
-          warn("⚠️ podcastProcessor attempt failed, will retry", {
+          const delay =
+            PODCAST_RETRY_DELAY_MS *
+            Math.pow(PODCAST_RETRY_BACKOFF, attempt - 1);
+
+          info("🔁 Retrying podcast mixdown after delay", {
             sessionId,
             attempt,
-            maxAttempts: MAX_PODCAST_RETRIES,
-            error: err.message,
+            nextInMs: delay,
           });
-          await new Promise((r) => setTimeout(r, PODCAST_RETRY_DELAY_MS));
+
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
     }
@@ -194,6 +253,29 @@ export async function podcastProcessor(sessionId, editedBuffer) {
       sessionId,
       bytes: finalBuffer.length,
     });
+
+    // 📦 Safenet: upload final mastered buffer to edited-audio bucket (if configured)
+    if (EDITED_BUCKET && PUBLIC_EDITED_BASE) {
+      try {
+        const key = `${sessionId}.mp3`;
+        await putObject(EDITED_BUCKET, key, finalBuffer, "audio/mpeg");
+
+        const url = `${PUBLIC_EDITED_BASE}/${encodeURIComponent(key)}`;
+
+        info("💾 Final mastered podcast uploaded to edited-audio bucket", {
+          sessionId,
+          bucket: EDITED_BUCKET,
+          key,
+          url,
+          bytes: finalBuffer.length,
+        });
+      } catch (uploadErr) {
+        warn("⚠️ Failed to upload final mastered podcast to edited-audio bucket", {
+          sessionId,
+          error: uploadErr.message,
+        });
+      }
+    }
 
     stopKeepAlive(label);
     return finalBuffer;
