@@ -1,14 +1,15 @@
 // ============================================================
-// 🎙️ Podcast Editing Processor — Warm, Deep, Human Tone
+// 🎙️ Podcast Editing Processor — Warm, Natural, Deeper Tone
 // ============================================================
 //
-// • Slight pitch drop for deeper tone
-// • Warmth boost around 150–200 Hz
-// • Clarity boost around 3–4 kHz
-// • High-pass + low-pass to remove digital harshness
-// • Gentle podcast compression
-// • Clean fallback logic
-// • Keepalive integration
+// Style A: natural, intimate podcast voice
+//
+// • Slight pitch drop for deeper tone (but not slow)
+// • High-pass + low-pass to remove rumble & harshness
+// • Gentle dynamic smoothing using compand (ffmpeg-safe)
+// • Small volume lift for comfortable listening
+// • Shiper/Render-safe filter set (no equalizer/acompressor)
+// • Keepalive + fallback to unedited audio on failure
 // ============================================================
 
 import fs from "fs";
@@ -19,7 +20,7 @@ import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 
 const TMP_DIR = "/tmp/tts_editing";
 
-// Ensure /tmp directory exists
+// Ensure /tmp editing directory exists
 function ensureTmpDir() {
   if (!fs.existsSync(TMP_DIR)) {
     fs.mkdirSync(TMP_DIR, { recursive: true });
@@ -27,29 +28,42 @@ function ensureTmpDir() {
 }
 
 // ------------------------------------------------------------
-// 🎚️ Run ffmpeg with podcast enhancement filters
+// 🎚️ Run ffmpeg with PODCAST-SAFE enhancement filters
+// ------------------------------------------------------------
+//
+// Filter chain (all safe on lean ffmpeg builds):
+//
+// 1) asetrate=48000*0.985,aresample=48000
+//    → subtle pitch drop (~ -1.5%), keeps tempo natural
+//
+// 2) highpass=f=70
+//    → remove low rumble / mud
+//
+// 3) lowpass=f=13500
+//    → soften sharp digital top end
+//
+// 4) compand=...
+//    → gentle dynamic smoothing, like light compression
+//
+// 5) volume=1.8
+//    → comfortable podcast listening level
 // ------------------------------------------------------------
 function runFfmpegPodcastEnhance(inputPath, outputPath, sessionId) {
   return new Promise((resolve, reject) => {
-    // PODCAST ENHANCEMENT CHAIN (NO LOUDNORM)
     const filterChain = [
-      // Slight pitch drop (≈ -1.5%)
+      // Slightly deeper tone via tiny pitch drop
       "asetrate=48000*0.985,aresample=48000",
 
-      // Warmth (body)
-      "equalizer=f=170:t=h:width=200:g=3.5",
-
-      // Speech clarity (bite)
-      "equalizer=f=3500:t=h:width=200:g=2",
-
-      // Remove rumble
-      "highpass=f=65",
-
-      // Smooth harsh TTS digital top end
+      // Clean up extremes
+      "highpass=f=70",
       "lowpass=f=13500",
 
-      // Gentle podcast compression
-      "acompressor=threshold=-14dB:ratio=2.2:attack=6:release=200:makeup=3"
+      // Gentle dynamics: make quiet bits a bit louder,
+      // bright bits a bit softer (podcast-style smoothness)
+      "compand=attacks=0:points=-80/-80|-40/-32|-20/-14|0/-2|20/0",
+
+      // Small overall lift
+      "volume=1.8",
     ].join(",");
 
     const args = [
@@ -75,11 +89,15 @@ function runFfmpegPodcastEnhance(inputPath, outputPath, sessionId) {
 
     ff.stderr?.on("data", (chunk) => {
       const txt = chunk.toString();
-      if (txt.includes("rror") || txt.includes("Error")) {
-        warn("⚠️ ffmpeg stderr reported issue (podcast enhance)", {
+
+      // Only escalate if there's a real error word
+      if (txt.toLowerCase().includes("error") || txt.toLowerCase().includes("invalid")) {
+        warn("⚠️ ffmpeg stderr reported potential problem (podcast enhance)", {
           sessionId,
+          stderr: txt.trim(),
         });
       }
+      // Otherwise, it's usually just progress chatter; ignore to avoid noise
     });
 
     ff.on("error", (err) => {
@@ -98,11 +116,12 @@ function runFfmpegPodcastEnhance(inputPath, outputPath, sessionId) {
         });
         resolve();
       } else {
+        const msg = `ffmpeg exited with code ${code}`;
         error("💥 ffmpeg closed with non-zero exit (podcast enhance)", {
           sessionId,
           code,
         });
-        reject(new Error(`ffmpeg exited with code ${code}`));
+        reject(new Error(msg));
       }
     });
   });
@@ -110,6 +129,13 @@ function runFfmpegPodcastEnhance(inputPath, outputPath, sessionId) {
 
 // ============================================================
 // 🎛️ Main Editing Processor
+// ============================================================
+//
+// Called from orchestrator as:
+//   const editedBuffer = await editingProcessor(sessionId, merged);
+//
+// where `merged` is:
+//   { key, localPath } // from mergeProcessor
 // ============================================================
 async function editingProcessor(sessionId, merged) {
   const label = `editingProcessor:${sessionId}`;
@@ -125,7 +151,7 @@ async function editingProcessor(sessionId, merged) {
   startKeepAlive(label, 25000);
 
   try {
-    // Apply podcast enhancement filters
+    // Run podcast-safe enhancement
     await runFfmpegPodcastEnhance(inputPath, editedPath, sessionId);
 
     const editedBuffer = await fs.promises.readFile(editedPath);
@@ -143,9 +169,7 @@ async function editingProcessor(sessionId, merged) {
       error: err.message,
     });
 
-    // -----------------------------
-    // Fallback = unedited merged file
-    // -----------------------------
+    // Fallback to unedited merged audio
     try {
       const fallbackBuffer = await fs.promises.readFile(inputPath);
 
