@@ -13,7 +13,7 @@ const KA_MAP = globalThis.__KEEPALIVES__ || (globalThis.__KEEPALIVES__ = new Map
  */
 export function startKeepAlive(label = "keepalive", intervalMs = 20000) {
   if (KA_MAP.has(label)) return;
-  info({ label, intervalMs }, `⏳ Silent keep-alive active for ${label} (${Math.round(intervalMs / 1000)}s interval)`);
+  info(`⏳ Silent keep-alive active for ${label} (${Math.round(intervalMs / 1000)}s interval)`, { label, intervalMs });
   const id = setInterval(() => {
     process.stdout.write(`🔋${label} alive @ ${new Date().toISOString()}\n`);
   }, intervalMs);
