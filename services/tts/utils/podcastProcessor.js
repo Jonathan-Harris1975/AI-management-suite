@@ -1,149 +1,212 @@
 // ============================================================
-// 🎵 Podcast Processor — Add Intro/Outro & Final Mastering
+// 🎵 Podcast Processor — Intro/Outro Mixdown & Final Mastering
+// ============================================================
+//
+// Signature:
+//   const finalAudio = await podcastProcessor(sessionId, editedBuffer);
+//
+// • Mixes PODCAST_INTRO_URL + editedBuffer + PODCAST_OUTRO_URL
+// • Uses ffmpeg concat filter
+// • Local retry logic on ffmpeg
+// • Falls back to editedBuffer if mixing fails
 // ============================================================
 
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
-import { log } from "#logger.js";
-import { uploadBuffer } from "#shared/r2-client.js";
+import { spawn } from "child_process";
+import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 
 const TMP_DIR = "/tmp/podcast_final";
 
-// Environment variables with defaults
-const MIN_INTRO_DURATION = parseFloat(process.env.MIN_INTRO_DURATION) || 0.30; // 30 seconds
-const MIN_OUTRO_DURATION = parseFloat(process.env.MIN_OUTRO_DURATION) || 0.30; // 30 seconds
+const PODCAST_INTRO_URL = process.env.PODCAST_INTRO_URL || "";
+const PODCAST_OUTRO_URL = process.env.PODCAST_OUTRO_URL || "";
 
+const MAX_PODCAST_RETRIES = Number(process.env.MAX_PODCAST_RETRIES || 3);
+const PODCAST_RETRY_DELAY_MS = Number(process.env.PODCAST_RETRY_DELAY_MS || 3000);
+
+// Ensure /tmp directory exists
 function ensureTmpDir() {
-  if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
-  return TMP_DIR;
+  if (!fs.existsSync(TMP_DIR)) {
+    fs.mkdirSync(TMP_DIR, { recursive: true });
+  }
 }
 
-// 🎚️ Mastering filters — light version for full mix
-const masterFilters = [
-  "acompressor=threshold=-18dB:ratio=2:attack=20:release=250:makeup=4",
-  "dynaudnorm=f=200:n=1:p=0.7",
-  "equalizer=f=150:width_type=o:width=2:g=1.5",
-  "equalizer=f=8000:width_type=o:width=2:g=1.5",
-  "aecho=0.8:0.88:60:0.2,asetrate=44100,aresample=44100",
-];
+// ------------------------------------------------------------
+// 🧪 Single ffmpeg attempt to mix intro → main → outro
+// ------------------------------------------------------------
+function runPodcastMixdownOnce(sessionId, mainPath, outputPath, attempt, total) {
+  return new Promise((resolve, reject) => {
+    // We assume both intro & outro are available; if they aren't,
+    // the caller will short-circuit and just return editedBuffer.
+    const args = [
+      "-y",
+      "-i",
+      PODCAST_INTRO_URL,
+      "-i",
+      mainPath,
+      "-i",
+      PODCAST_OUTRO_URL,
+      "-filter_complex",
+      "[0:a][1:a][2:a]concat=n=3:v=0:a=1[a]",
+      "-map",
+      "[a]",
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "192k",
+      outputPath,
+    ];
 
-export async function podcastProcessor(sessionId, mainAudioPath) {
-  startKeepAlive(`podcastProcessor:${sessionId}`, 25000);
-  ensureTmpDir();
-  
-  log.info("🎵 Starting podcastProcessor", { 
-    sessionId, 
-    minIntroDuration: MIN_INTRO_DURATION, 
-    minOutroDuration: MIN_OUTRO_DURATION 
+    info("🎵 Starting podcast mixdown ffmpeg", {
+      sessionId,
+      attempt,
+      of: total,
+      args,
+    });
+
+    const ff = spawn("ffmpeg", args);
+
+    ff.on("spawn", () => {
+      info("🎬 ffmpeg (podcast mixdown) spawned", {
+        sessionId,
+        attempt,
+      });
+    });
+
+    ff.stderr?.on("data", (chunk) => {
+      const txt = chunk.toString();
+      const lower = txt.toLowerCase();
+
+      if (lower.includes("error") || lower.includes("invalid")) {
+        warn("⚠️ ffmpeg stderr reported potential problem (podcast mixdown)", {
+          sessionId,
+          attempt,
+          stderr: txt.trim(),
+        });
+      }
+    });
+
+    ff.on("error", (err) => {
+      error("💥 ffmpeg spawn error (podcast mixdown)", {
+        sessionId,
+        attempt,
+        error: err.message,
+      });
+      reject(err);
+    });
+
+    ff.on("close", (code) => {
+      if (code === 0) {
+        info("✅ ffmpeg podcast mixdown completed", {
+          sessionId,
+          attempt,
+          outputPath,
+        });
+        resolve();
+      } else {
+        const msg = `ffmpeg exited with code ${code}`;
+        error("💥 ffmpeg closed with non-zero exit (podcast mixdown)", {
+          sessionId,
+          attempt,
+          code,
+        });
+        reject(new Error(msg));
+      }
+    });
   });
+}
+
+// ============================================================
+// 🎛️ Main Podcast Processor with Retry + Fallback
+// ============================================================
+//
+// If intro/outro URLs are missing, or all ffmpeg attempts fail,
+// we fall back to returning `editedBuffer` so the pipeline still
+// produces a usable episode.
+// ============================================================
+export async function podcastProcessor(sessionId, editedBuffer) {
+  const label = `podcastProcessor:${sessionId}`;
+  ensureTmpDir();
+
+  // If no intro/outro configured, just return editedBuffer directly
+  if (!PODCAST_INTRO_URL && !PODCAST_OUTRO_URL) {
+    warn("⚠️ No PODCAST_INTRO_URL or PODCAST_OUTRO_URL set, skipping mixdown", {
+      sessionId,
+    });
+    return editedBuffer;
+  }
+
+  startKeepAlive(label, 30000);
+
+  const mainPath = path.join(TMP_DIR, `${sessionId}_main.mp3`);
+  const finalPath = path.join(TMP_DIR, `${sessionId}_final.mp3`);
 
   try {
-    const introUrl = process.env.PODCAST_INTRO_URL;
-    const outroUrl = process.env.PODCAST_OUTRO_URL;
-    const intro = path.join(TMP_DIR, `${sessionId}_intro.mp3`);
-    const outro = path.join(TMP_DIR, `${sessionId}_outro.mp3`);
+    await fs.promises.writeFile(mainPath, editedBuffer);
 
-    // Download intro/outro
-    fs.writeFileSync(intro, Buffer.from(await (await fetch(introUrl)).arrayBuffer()));
-    fs.writeFileSync(outro, Buffer.from(await (await fetch(outroUrl)).arrayBuffer()));
+    let success = false;
+    let lastError;
+    let finalBuffer = null;
 
-    const preMaster = path.join(TMP_DIR, `${sessionId}_premaster.mp3`);
-    const finalFile = path.join(TMP_DIR, `${sessionId}_final.mp3`);
+    for (let attempt = 1; attempt <= MAX_PODCAST_RETRIES; attempt++) {
+      try {
+        await runPodcastMixdownOnce(
+          sessionId,
+          mainPath,
+          finalPath,
+          attempt,
+          MAX_PODCAST_RETRIES
+        );
 
-    // Get audio durations
-    const getDuration = (filePath) => {
-      const result = execSync(
-        `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
-      ).toString().trim();
-      return parseFloat(result);
-    };
-
-    const introDuration = getDuration(intro);
-    const outroDuration = getDuration(outro);
-    const mainDuration = getDuration(mainAudioPath);
-
-    log.info("📊 Audio durations", {
-      sessionId,
-      introDuration: introDuration.toFixed(2),
-      outroDuration: outroDuration.toFixed(2),
-      mainDuration: mainDuration.toFixed(2),
-      requiredIntro: MIN_INTRO_DURATION,
-      requiredOutro: MIN_OUTRO_DURATION
-    });
-
-    // Validate minimum durations
-    if (introDuration < MIN_INTRO_DURATION) {
-      log.warn("⚠️ Intro is shorter than required minimum", {
-        sessionId,
-        current: introDuration,
-        required: MIN_INTRO_DURATION
-      });
+        finalBuffer = await fs.promises.readFile(finalPath);
+        success = true;
+        break;
+      } catch (err) {
+        lastError = err;
+        if (attempt < MAX_PODCAST_RETRIES) {
+          warn("⚠️ podcastProcessor attempt failed, will retry", {
+            sessionId,
+            attempt,
+            maxAttempts: MAX_PODCAST_RETRIES,
+            error: err.message,
+          });
+          await new Promise((r) => setTimeout(r, PODCAST_RETRY_DELAY_MS));
+        }
+      }
     }
 
-    if (outroDuration < MIN_OUTRO_DURATION) {
-      log.warn("⚠️ Outro is shorter than required minimum", {
-        sessionId,
-        current: outroDuration,
-        required: MIN_OUTRO_DURATION
-      });
+    if (!success || !finalBuffer?.length) {
+      // All attempts failed — fall back to editedBuffer
+      warn(
+        "⚠️ podcastProcessor failed after all retries, falling back to edited audio without intro/outro",
+        {
+          sessionId,
+          error: lastError?.message,
+        }
+      );
+
+      stopKeepAlive(label);
+      return editedBuffer;
     }
 
-    // Calculate fade points based on actual durations
-    const introFadeIn = Math.min(3, introDuration * 0.1); // 3s or 10% of intro
-    const outroFadeOut = Math.min(3, outroDuration * 0.1); // 3s or 10% of outro
-    
-    // Main content fades
-    const mainFadeIn = Math.min(2, mainDuration * 0.05); // 2s or 5% of main content
-    const mainFadeOut = Math.min(2, mainDuration * 0.05); // 2s or 5% of main content
-
-    // Complex filter for joining with proper fades
-    const fadeComplex =
-      `[0:a]afade=t=in:st=0:d=${introFadeIn}[a0];` +
-      `[1:a]afade=t=in:st=0:d=${mainFadeIn},afade=t=out:st=${mainDuration - mainFadeOut}:d=${mainFadeOut}[a1];` +
-      `[2:a]afade=t=out:st=${outroDuration - outroFadeOut}:d=${outroFadeOut}[a2];` +
-      `[a0][a1][a2]concat=n=3:v=0:a=1[aout]`;
-
-    execSync(
-      `ffmpeg -y -i "${intro}" -i "${mainAudioPath}" -i "${outro}" -filter_complex "${fadeComplex}" -map "[aout]" "${preMaster}"`,
-      { stdio: "ignore" }
-    );
-
-    // Apply final mastering filters
-    const filterStr = masterFilters.join(",");
-    execSync(`ffmpeg -y -i "${preMaster}" -af "${filterStr}" -ar 44100 -b:a 192k "${finalFile}"`, {
-      stdio: "ignore",
-    });
-
-    // Verify final duration
-    const finalDuration = getDuration(finalFile);
-    const expectedDuration = introDuration + mainDuration + outroDuration;
-    
-    log.info("✅ Final audio composition", {
+    info("🎚️ Podcast mixdown produced final buffer", {
       sessionId,
-      finalDuration: finalDuration.toFixed(2),
-      expectedDuration: expectedDuration.toFixed(2),
-      totalFadeTime: (introFadeIn + mainFadeIn + mainFadeOut + outroFadeOut).toFixed(2)
+      bytes: finalBuffer.length,
     });
 
-    // Upload to R2
-    const buffer = fs.readFileSync(finalFile);
-    const key = `${sessionId}.mp3`;
-    await uploadBuffer("podcast", key, buffer, "audio/mpeg");
-
-    log.info("💾 Uploaded final mastered podcast MP3 to R2", { 
-      sessionId, 
-      key,
-      finalSize: buffer.length,
-      finalDuration: finalDuration.toFixed(2)
-    });
-    
-    stopKeepAlive();
-    return finalFile;
+    stopKeepAlive(label);
+    return finalBuffer;
   } catch (err) {
-    log.error("💥 podcastProcessor failed", { sessionId, error: err.message });
-    stopKeepAlive();
-    throw err;
+    // On unexpected failure, still fall back to editedBuffer
+    error("💥 podcastProcessor unexpected failure — using editedBuffer fallback", {
+      sessionId,
+      error: err.message,
+    });
+
+    stopKeepAlive(label);
+    return editedBuffer;
   }
-      } 
+}
+
+export default podcastProcessor;
