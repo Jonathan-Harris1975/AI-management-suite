@@ -1,43 +1,63 @@
 // ============================================================
-// 🎙️ STREAMING Editing Processor — Mature Deep Voice Edition
-// Natural • Authoritative • Broadcast Quality
+// 🎙️ Podcast Editing Processor — Warm, Deep, Human Tone
 // ============================================================
 //
-// Signature:
-//   const editedBuffer = await editingProcessor(sessionId, merged);
-// Where `merged` is the object returned by mergeProcessor:
-//   { key, localPath }
-//
-// This implementation:
-//   - Runs ffmpeg over the merged MP3 (simple loudness normalize)
-//   - Returns the edited audio as a Buffer
-//   - Falls back to the unedited merged file if editing fails
-//   - Uses keep-alive to prevent idle timeouts during long runs
+// • Slight pitch drop for deeper tone
+// • Warmth boost around 150–200 Hz
+// • Clarity boost around 3–4 kHz
+// • High-pass + low-pass to remove digital harshness
+// • Gentle podcast compression
+// • Clean fallback logic
+// • Keepalive integration
 // ============================================================
 
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
-import { info, error, warn } from "#logger.js";
+import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 
 const TMP_DIR = "/tmp/tts_editing";
 
+// Ensure /tmp directory exists
 function ensureTmpDir() {
   if (!fs.existsSync(TMP_DIR)) {
     fs.mkdirSync(TMP_DIR, { recursive: true });
   }
 }
 
-function runFfmpegNormalize(inputPath, outputPath, sessionId) {
+// ------------------------------------------------------------
+// 🎚️ Run ffmpeg with podcast enhancement filters
+// ------------------------------------------------------------
+function runFfmpegPodcastEnhance(inputPath, outputPath, sessionId) {
   return new Promise((resolve, reject) => {
+    // PODCAST ENHANCEMENT CHAIN (NO LOUDNORM)
+    const filterChain = [
+      // Slight pitch drop (≈ -1.5%)
+      "asetrate=48000*0.985,aresample=48000",
+
+      // Warmth (body)
+      "equalizer=f=170:t=h:width=200:g=3.5",
+
+      // Speech clarity (bite)
+      "equalizer=f=3500:t=h:width=200:g=2",
+
+      // Remove rumble
+      "highpass=f=65",
+
+      // Smooth harsh TTS digital top end
+      "lowpass=f=13500",
+
+      // Gentle podcast compression
+      "acompressor=threshold=-14dB:ratio=2.2:attack=6:release=200:makeup=3"
+    ].join(",");
+
     const args = [
       "-y",
       "-i",
       inputPath,
-      // Simple loudness normalization & high-quality MP3 encode
       "-af",
-      "loudnorm",
+      filterChain,
       "-c:a",
       "libmp3lame",
       "-b:a",
@@ -45,30 +65,25 @@ function runFfmpegNormalize(inputPath, outputPath, sessionId) {
       outputPath,
     ];
 
-    info("🎚️ Starting editingProcessor ffmpeg", { sessionId, args });
+    info("🎚️ Starting podcast ffmpeg enhancement", { sessionId, args });
 
     const ff = spawn("ffmpeg", args);
 
     ff.on("spawn", () => {
-      info("🎬 ffmpeg (editingProcessor) spawned", { sessionId });
-    });
-
-    ff.stdout?.on("data", () => {
-      // keep silent: no spam
+      info("🎬 ffmpeg (podcast enhance) spawned", { sessionId });
     });
 
     ff.stderr?.on("data", (chunk) => {
-      // Log only high-level progress markers, not the full spam
-      const text = chunk.toString();
-      if (text.includes("error") || text.includes("Error")) {
-        warn("⚠️ ffmpeg (editingProcessor) stderr reported error text", {
+      const txt = chunk.toString();
+      if (txt.includes("rror") || txt.includes("Error")) {
+        warn("⚠️ ffmpeg stderr reported issue (podcast enhance)", {
           sessionId,
         });
       }
     });
 
     ff.on("error", (err) => {
-      error("💥 ffmpeg (editingProcessor) spawn error", {
+      error("💥 ffmpeg spawn error (podcast enhance)", {
         sessionId,
         error: err.message,
       });
@@ -77,26 +92,26 @@ function runFfmpegNormalize(inputPath, outputPath, sessionId) {
 
     ff.on("close", (code) => {
       if (code === 0) {
-        info("✅ ffmpeg (editingProcessor) completed successfully", {
+        info("✅ ffmpeg podcast enhancement completed", {
           sessionId,
           outputPath,
         });
-        resolve(null);
+        resolve();
       } else {
-        const err = new Error(
-          `ffmpeg (editingProcessor) exited with code ${code}`
-        );
-        error("💥 ffmpeg (editingProcessor) closed with non-zero exit code", {
+        error("💥 ffmpeg closed with non-zero exit (podcast enhance)", {
           sessionId,
           code,
         });
-        reject(err);
+        reject(new Error(`ffmpeg exited with code ${code}`));
       }
     });
   });
 }
 
-export async function editingProcessor(sessionId, merged) {
+// ============================================================
+// 🎛️ Main Editing Processor
+// ============================================================
+async function editingProcessor(sessionId, merged) {
   const label = `editingProcessor:${sessionId}`;
   ensureTmpDir();
 
@@ -110,26 +125,35 @@ export async function editingProcessor(sessionId, merged) {
   startKeepAlive(label, 25000);
 
   try {
-    await runFfmpegNormalize(inputPath, editedPath, sessionId);
+    // Apply podcast enhancement filters
+    await runFfmpegPodcastEnhance(inputPath, editedPath, sessionId);
+
     const editedBuffer = await fs.promises.readFile(editedPath);
-    info("🎚️ Editing stage produced buffer", {
+
+    info("🎧 Podcast editing stage produced buffer", {
       sessionId,
       bytes: editedBuffer.length,
     });
+
     stopKeepAlive(label);
     return editedBuffer;
   } catch (err) {
-    error("💥 editingProcessor failed, falling back to unedited merged audio", {
+    error("💥 editingProcessor failed — using fallback audio", {
       sessionId,
       error: err.message,
     });
 
+    // -----------------------------
+    // Fallback = unedited merged file
+    // -----------------------------
     try {
       const fallbackBuffer = await fs.promises.readFile(inputPath);
-      warn("⚠️ Using unedited merged audio as fallback", {
+
+      warn("⚠️ Using unedited merged audio fallback", {
         sessionId,
         bytes: fallbackBuffer.length,
       });
+
       stopKeepAlive(label);
       return fallbackBuffer;
     } catch (fallbackErr) {
@@ -137,10 +161,12 @@ export async function editingProcessor(sessionId, merged) {
         sessionId,
         error: fallbackErr.message,
       });
+
       stopKeepAlive(label);
       throw fallbackErr;
     }
   }
 }
 
+export { editingProcessor };
 export default editingProcessor;
