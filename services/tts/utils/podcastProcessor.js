@@ -8,9 +8,7 @@
 // • Mixes PODCAST_INTRO_URL + editedBuffer + PODCAST_OUTRO_URL
 // • Fades intro in & outro out using MIN_INTRO_DURATION / MIN_OUTRO_DURATION
 // • Applies loudnorm + gentle compression (Pro Podcast preset)
-// • Local retry logic with exponential backoff
-// • Saves final mastered file to R2_BUCKET_EDITED_AUDIO as safenet
-// • Falls back to editedBuffer if mixing fails
+// • Local retry logic + keepalive + safenet upload
 // ============================================================
 
 import fs from "fs";
@@ -21,16 +19,20 @@ import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { putObject } from "#shared/r2-client.js";
 
 // ------------------------------------------------------------
-// ⚙️ Environment
+// ⚙️ ENV
 // ------------------------------------------------------------
-const TMP_DIR = "/tmp/podcast_final";
+const TMP_DIR = "/tmp/podcast_master";
 
 const PODCAST_INTRO_URL = process.env.PODCAST_INTRO_URL || "";
 const PODCAST_OUTRO_URL = process.env.PODCAST_OUTRO_URL || "";
 
 // Fade durations (seconds) — from env, with sane defaults
-const MIN_INTRO_DURATION = Number(process.env.MIN_INTRO_DURATION || 3);
-const MIN_OUTRO_DURATION = Number(process.env.MIN_OUTRO_DURATION || 3);
+const MIN_INTRO_DURATION = Number(
+  process.env.MIN_INTRO_DURATION || 3
+);
+const MIN_OUTRO_DURATION = Number(
+  process.env.MIN_OUTRO_DURATION || 3
+);
 
 const INTRO_FADE_SEC = Number.isFinite(MIN_INTRO_DURATION)
   ? Math.max(0.1, MIN_INTRO_DURATION)
@@ -40,26 +42,33 @@ const OUTRO_FADE_SEC = Number.isFinite(MIN_OUTRO_DURATION)
   ? Math.max(0.1, MIN_OUTRO_DURATION)
   : 3;
 
-// Retry settings (shared envs)
-const MAX_PODCAST_RETRIES = Number(process.env.MAX_CHUNK_RETRIES || 3);
-const PODCAST_RETRY_DELAY_MS = Number(process.env.RETRY_DELAY_MS || 2000);
-const PODCAST_RETRY_BACKOFF =
-  Number(process.env.RETRY_BACKOFF_MULTIPLIER || 2);
+// Retry settings
+const MAX_PODCAST_RETRIES = Number(
+  process.env.MAX_PODCAST_RETRIES ||
+    process.env.MAX_CHUNK_RETRIES ||
+    3
+);
+const PODCAST_RETRY_DELAY_MS = Number(
+  process.env.PODCAST_RETRY_DELAY_MS ||
+    process.env.RETRY_DELAY_MS ||
+    2000
+);
+const PODCAST_RETRY_BACKOFF = Number(
+  process.env.RETRY_BACKOFF_MULTIPLIER || 2
+);
 
 // Edited audio safenet bucket
 const EDITED_BUCKET = process.env.R2_BUCKET_EDITED_AUDIO || "";
-const PUBLIC_EDITED_BASE = process.env.R2_PUBLIC_BASE_URL_EDITED_AUDIO || "";
+const PUBLIC_EDITED_BASE =
+  process.env.R2_PUBLIC_BASE_URL_EDITED_AUDIO || "";
 
-// Ensure /tmp directory exists
-function ensureTmpDir() {
-  if (!fs.existsSync(TMP_DIR)) {
-    fs.mkdirSync(TMP_DIR, { recursive: true });
-  }
+// Ensure directory
+if (!fs.existsSync(TMP_DIR)) {
+  fs.mkdirSync(TMP_DIR, { recursive: true });
 }
 
 // ------------------------------------------------------------
-// 🧪 Single ffmpeg attempt to mix intro → main → outro
-//      + fades + loudnorm + compression
+// 🧪 ffmpeg one-shot for intro + main + outro
 // ------------------------------------------------------------
 function runPodcastMixdownOnce(
   sessionId,
@@ -75,16 +84,18 @@ function runPodcastMixdownOnce(
       // Intro: fade in from start
       `[0:a]afade=t=in:d=${INTRO_FADE_SEC}[intro]`,
 
-      // Outro: fade out at end using reverse trick
+      // Outro: fade out at end
       `[2:a]areverse,afade=t=in:d=${OUTRO_FADE_SEC},areverse[outro]`,
 
-      // Concatenate: intro → main → outro
-      `[intro][1:a][outro]concat=n=3:v=0:a=1[pre]`,
+      // Main: no volume changes here, just passed through
+      `[1:a]anull[main]`,
 
-      // Pro-podcast mastering: loudnorm + gentle compression
-      `[pre]` +
-        `loudnorm=I=-16:LRA=11:TP=-1.5:print_format=summary,` +
-        `acompressor=threshold=-18dB:ratio=3:attack=5:release=50[master]`,
+      // Full chain: intro + main + outro
+      `[intro][main][outro]concat=n=3:v=0:a=1,` +
+        // Final loudnorm + light compression
+        "acompressor=threshold=-18dB:ratio=2:attack=5:release=120," +
+        "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=none" +
+        "[out]`,
     ].join(";");
 
     const args = [
@@ -98,89 +109,61 @@ function runPodcastMixdownOnce(
       "-filter_complex",
       filterComplex,
       "-map",
-      "[master]",
+      "[out]",
       "-c:a",
       "libmp3lame",
       "-b:a",
-      "192k",
+      "128k",
       outputPath,
     ];
 
-    info("🎵 Starting podcast mixdown ffmpeg", {
+    info("🎵 podcastProcessor ffmpeg attempt", {
       sessionId,
       attempt,
-      of: total,
+      total,
       args,
     });
 
     const ff = spawn("ffmpeg", args);
 
-    ff.on("spawn", () => {
-      info("🎬 ffmpeg (podcast mixdown) spawned", {
-        sessionId,
-        attempt,
-      });
-    });
+    let stderr = "";
 
-    ff.stderr?.on("data", (chunk) => {
-      const txt = chunk.toString();
-      const lower = txt.toLowerCase();
-
-      if (lower.includes("error") || lower.includes("invalid")) {
-        warn("⚠️ ffmpeg stderr reported potential problem (podcast mixdown)", {
+    ff.stderr.on("data", (data) => {
+      const txt = data.toString();
+      stderr += txt;
+      if (txt.toLowerCase().includes("error")) {
+        warn("⚠️ ffmpeg stderr (podcastProcessor)", {
           sessionId,
           attempt,
-          stderr: txt.trim(),
+          chunk: txt,
         });
       }
     });
 
     ff.on("error", (err) => {
-      error("💥 ffmpeg spawn error (podcast mixdown)", {
-        sessionId,
-        attempt,
-        error: err.message,
-      });
       reject(err);
     });
 
     ff.on("close", (code) => {
-      if (code === 0) {
-        info("✅ ffmpeg podcast mixdown completed", {
-          sessionId,
-          attempt,
-        });
-        resolve();
-      } else {
-        const msg = `ffmpeg exited with code ${code}`;
-        error("💥 ffmpeg closed with non-zero exit (podcast mixdown)", {
-          sessionId,
-          attempt,
-          code,
-        });
-        reject(new Error(msg));
-      }
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg podcastProcessor code ${code}: ${stderr}`));
     });
   });
 }
 
-// ============================================================
-// 🎛️ Main Podcast Processor with Retry + Fallback
-// ============================================================
-//
-// If intro/outro URLs are missing, or all ffmpeg attempts fail,
-// we fall back to returning `editedBuffer` so the pipeline still
-// produces a usable episode.
-// ============================================================
+// ------------------------------------------------------------
+// 🎧 podcastProcessor — Main
+// ------------------------------------------------------------
 export async function podcastProcessor(sessionId, editedBuffer) {
   const label = `podcastProcessor:${sessionId}`;
-  ensureTmpDir();
 
-  // If no intro/outro configured, just return editedBuffer directly
   if (!PODCAST_INTRO_URL && !PODCAST_OUTRO_URL) {
-    warn("⚠️ No PODCAST_INTRO_URL or PODCAST_OUTRO_URL set, skipping mixdown", {
-      sessionId,
-    });
+    warn(
+      "⚠️ No PODCAST_INTRO_URL or PODCAST_OUTRO_URL set, skipping mixdown",
+      {
+        sessionId,
+      }
+    );
     return editedBuffer;
   }
 
@@ -194,7 +177,8 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     let lastError;
     let finalBuffer = null;
 
-    startKeepAlive(label, { intervalMs: 15000 });
+    // ❗ FIXED: pass a NUMBER, not an object
+    startKeepAlive(label, 15000);
 
     for (let attempt = 1; attempt <= MAX_PODCAST_RETRIES; attempt++) {
       try {
@@ -230,63 +214,57 @@ export async function podcastProcessor(sessionId, editedBuffer) {
             nextInMs: delay,
           });
 
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          await new Promise((resolve) =>
+            setTimeout(resolve, delay)
+          );
         }
       }
     }
 
-    if (!success || !finalBuffer?.length) {
-      // All attempts failed — fall back to editedBuffer
-      warn(
-        "⚠️ podcastProcessor failed after all retries, falling back to edited audio without intro/outro",
-        {
-          sessionId,
-          error: lastError?.message,
-        }
-      );
+    stopKeepAlive(label);
 
-      stopKeepAlive(label);
+    if (!success || !finalBuffer) {
+      error(
+        "💥 podcastProcessor failed after all retries — returning editedBuffer",
+        { sessionId, error: lastError?.message }
+      );
       return editedBuffer;
     }
 
-    info("🎚️ Podcast mixdown produced final buffer", {
-      sessionId,
-      bytes: finalBuffer.length,
-    });
-
-    // 📦 Safenet: upload final mastered buffer to edited-audio bucket (if configured)
+    // Safenet upload of final mastered audio
     if (EDITED_BUCKET && PUBLIC_EDITED_BASE) {
       try {
-        const key = `${sessionId}.mp3`;
-        await putObject(EDITED_BUCKET, key, finalBuffer, "audio/mpeg");
+        const key = `${sessionId}_final.mp3`;
+        await putObject(
+          "edited",
+          key,
+          finalBuffer,
+          "audio/mpeg"
+        );
 
-        const url = `${PUBLIC_EDITED_BASE}/${encodeURIComponent(key)}`;
-
-        info("💾 Final mastered podcast uploaded to edited-audio bucket", {
+        info("💾 podcastProcessor safenet upload complete", {
           sessionId,
           bucket: EDITED_BUCKET,
           key,
-          url,
-          bytes: finalBuffer.length,
+          url: `${PUBLIC_EDITED_BASE}/${encodeURIComponent(
+            key
+          )}`,
         });
-      } catch (uploadErr) {
-        warn("⚠️ Failed to upload final mastered podcast to edited-audio bucket", {
+      } catch (err) {
+        warn("⚠️ podcastProcessor safenet upload failed", {
           sessionId,
-          error: uploadErr.message,
+          error: err.message,
         });
       }
     }
 
-    stopKeepAlive(label);
     return finalBuffer;
   } catch (err) {
-    // On unexpected failure, still fall back to editedBuffer
-    error("💥 podcastProcessor unexpected failure — using editedBuffer fallback", {
+    stopKeepAlive(label);
+    error("💥 podcastProcessor crashed", {
       sessionId,
       error: err.message,
     });
-
-    stopKeepAlive(label);
     return editedBuffer;
   }
 }
