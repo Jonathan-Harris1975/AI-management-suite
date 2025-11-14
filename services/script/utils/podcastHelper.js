@@ -1,4 +1,4 @@
-// services/script/utils/podcastHelper.js
+// services/script/utils/podcastHelper.js  
 // LLM-driven metadata generation for the podcast: title, description, SEO keywords, and artwork prompt (cached only).
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
@@ -7,8 +7,37 @@ import * as sessionCache from "./sessionCache.js";
 import { info, error } from "#logger.js";
 import { extractMainContent } from "./textHelpers.js";
 
-/**
- * Safely extract a JSON object from LLM text (handles code fences and extra prose)
+/* -----------------------------------------------------------
+ * URL + Digit Sanitizer → TTS Friendly Text
+ * -----------------------------------------------------------
+ */
+function numberToWords(n) {
+  const map = {
+    0: "zero", 1: "one", 2: "two", 3: "three", 4: "four",
+    5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine",
+  };
+  return String(n)
+    .split("")
+    .map(d => map[d] ?? d)
+    .join(" ");
+}
+
+export function sanitizeForSpeech(text = "") {
+  if (!text) return "";
+  return text
+    .replace(/https?:\/\//gi, "")
+    .replace(/www\./gi, "")
+    .replace(/\./g, " dot ")
+    .replace(/-/g, " dash ")
+    .replace(/\//g, " slash ")
+    .replace(/[0-9]+/g, (n) => numberToWords(n))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/* -----------------------------------------------------------
+ * Extract JSON safely from an LLM string
+ * -----------------------------------------------------------
  */
 export function extractAndParseJson(text) {
   if (!text || typeof text !== "string") return null;
@@ -18,9 +47,9 @@ export function extractAndParseJson(text) {
   try { return JSON.parse(text.slice(start, end + 1)); } catch { return null; }
 }
 
-/**
- * Title + Description prompt
- * MAIN SECTION ONLY — intro & outro ignored.
+/* -----------------------------------------------------------
+ * Prompts
+ * -----------------------------------------------------------
  */
 export function getTitleDescriptionPrompt(mainOnly) {
   return `You are a creative copywriter for a premium AI news podcast.
@@ -39,9 +68,6 @@ MAIN SECTION CONTENT:
 ${mainOnly}`;
 }
 
-/**
- * SEO keywords prompt
- */
 export function getSEOKeywordsPrompt(description) {
   return `Generate 10–14 relevant SEO keywords (comma-separated, lower case, no hashtags).
 Focus on AI, machine learning, automation, technology, innovation, and news.
@@ -50,10 +76,6 @@ Base them ONLY on this description:
 ${description}`;
 }
 
-/**
- * Artwork prompt (Nano Banana)
- * Reinforce: **NO TEXT ALLOWED**
- */
 export function getArtworkPrompt(description) {
   return `
 You are a prompt engineer for Google's Nano Banana image model.
@@ -70,32 +92,39 @@ DESCRIPTION:
 ${description}`;
 }
 
-/**
- * Main entrypoint — build metadata via LLM and save to meta bucket.
- * Artwork prompt is cached to memory only (NOT saved to R2).
+/* -----------------------------------------------------------
+ * Auto Episode Number (Option A)
+ * Example sessionId: "TT-2025-11-14"
+ *  → Extract yyyyMMdd → 20251114 → episode number
+ * -----------------------------------------------------------
+ */
+function deriveEpisodeNumberFromSessionId(id) {
+  if (!id) return null;
+  const match = id.match(/\d{4}-\d{2}-\d{2}/);
+  if (!match) return null;
+  return parseInt(match[0].replace(/-/g, ""), 10);
+}
+
+/* -----------------------------------------------------------
+ * Main metadata builder
+ * -----------------------------------------------------------
  */
 export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta) {
   const id = sessionMeta?.sessionId || "episode";
   const date = sessionMeta?.date;
 
-  // ────────────────────────────────────────────
-  // 1) Extract MAIN SECTION ONLY
-  // ────────────────────────────────────────────
+  /* 1 — Extract MAIN ONLY + sanitize for speech */
   let mainOnly = "";
   try {
-    mainOnly = extractMainContent(rawTranscript);
-    if (!mainOnly || mainOnly.length < 40) {
-      throw new Error("Main content extraction failed or too short.");
-    }
+    const extracted = extractMainContent(rawTranscript);
+    if (!extracted || extracted.length < 40) throw new Error("Main content too short.");
+    mainOnly = sanitizeForSpeech(extracted);
   } catch (err) {
     error("meta.main.extract.fail", { err: String(err) });
-    // fallback to rawTranscript (worst case scenario)
-    mainOnly = rawTranscript;
+    mainOnly = sanitizeForSpeech(rawTranscript);
   }
 
-  // ────────────────────────────────────────────
-  // 2) Title + Description (based on MAIN ONLY)
-  // ────────────────────────────────────────────
+  /* 2 — Title + Description */
   let title = "AI Weekly";
   let description = "Latest AI developments explained clearly.";
   try {
@@ -111,15 +140,16 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta) {
     error("meta.titleDesc.fail", { err: String(e) });
   }
 
-  // ────────────────────────────────────────────
-  // 3) SEO Keywords
-  // ────────────────────────────────────────────
+  /* sanitize description for next LLMs */
+  const safeDescription = sanitizeForSpeech(description);
+
+  /* 3 — SEO Keywords */
   let keywords = [];
   try {
     const kw = await resilientRequest("seoKeywords", {
       sessionId: sessionMeta,
       section: "meta-seo",
-      messages: [{ role: "system", content: getSEOKeywordsPrompt(description) }],
+      messages: [{ role: "system", content: getSEOKeywordsPrompt(safeDescription) }],
     });
 
     keywords = String(kw)
@@ -145,19 +175,15 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta) {
     error("meta.seo.fail", { err: String(e) });
   }
 
-  // ────────────────────────────────────────────
-  // 4) Artwork Prompt — with NO TEXT rule
-  // ────────────────────────────────────────────
+  /* 4 — Artwork Prompt */
   try {
     const ap = await resilientRequest("artworkPrompt", {
       sessionId: sessionMeta,
       section: "meta-artwork",
-      messages: [{ role: "system", content: getArtworkPrompt(description) }],
+      messages: [{ role: "system", content: getArtworkPrompt(safeDescription) }],
     });
 
     let prompt = String(ap).trim().replace(/^"+|"+$/g, "");
-
-    // Safety guard: strip accidental textual elements the model might output
     prompt = prompt.replace(/[A-Za-z0-9]/g, "").trim();
 
     await sessionCache.storeTempPart(sessionMeta, "artworkPrompt", prompt);
@@ -168,20 +194,22 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta) {
     info("artwork.cached.fallback", { sessionId: id, prompt: fallback });
   }
 
-  // ────────────────────────────────────────────
-  // 5) Build Final JSON — include episodeNumber ONLY if enabled
-  // ────────────────────────────────────────────
+  /* 5 — Episode Number (Option A) */
+  const autoEpisode = deriveEpisodeNumberFromSessionId(id) ||
+    Math.floor(Date.now() / 1000);
+
   const episodeNumber =
     String(process.env.PODCAST_RSS_EP || "").toLowerCase() === "yes"
-      ? sessionMeta?.episodeNumber || null
+      ? autoEpisode
       : null;
 
+  /* Final JSON */
   const meta = {
     session: { sessionId: id, date },
     title,
     description,
     keywords,
-    episodeNumber,   // <────────────── added ✔
+    episodeNumber,
     createdAt: new Date().toISOString(),
   };
 
@@ -194,5 +222,6 @@ export default {
   getSEOKeywordsPrompt,
   getArtworkPrompt,
   generateEpisodeMetaLLM,
+  sanitizeForSpeech,
   extractMainContent,
 };
