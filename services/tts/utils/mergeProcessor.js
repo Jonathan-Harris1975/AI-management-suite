@@ -1,5 +1,5 @@
 // =======================================================================
-// 🎧 BOMB-PROOF MODULAR STREAMING MERGE PROCESSOR
+// 🎧 MODULAR STREAMING MERGE PROCESSOR
 // Supports mixing remote URLs + local batch files safely
 // =======================================================================
 
@@ -14,9 +14,18 @@ import { uploadBuffer } from "#shared/r2-client.js";
 const TMP_DIR = "/tmp/podcast_merge";
 const MERGED_BUCKET = "merged";
 
-const DOWNLOAD_TIMEOUT_MS = 30000;
-const DOWNLOAD_RETRIES = 5;
-const MERGE_RETRIES = 6;
+// ------------------------------------------------------------
+// ⚙️ Environment-based tuning
+// ------------------------------------------------------------
+const DOWNLOAD_TIMEOUT_MS = Number(process.env.AI_TIMEOUT || 30000);
+const MAX_RETRIES = Number(process.env.MAX_CHUNK_RETRIES || 3);
+const DOWNLOAD_RETRIES = MAX_RETRIES;
+const MERGE_RETRIES = MAX_RETRIES;
+const RETRY_DELAY_MS = Number(process.env.RETRY_DELAY_MS || 2000);
+const RETRY_BACKOFF_MULTIPLIER =
+  Number(process.env.RETRY_BACKOFF_MULTIPLIER || 2);
+
+// Merge smaller groups recursively
 const BATCH_SIZE = 2;
 
 // ------------------------------------------------------------
@@ -40,7 +49,10 @@ async function fetchWithTimeout(url) {
   return Promise.race([
     fetch(url),
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Timeout fetching: ${url}`)), DOWNLOAD_TIMEOUT_MS)
+      setTimeout(
+        () => reject(new Error(`Timeout fetching: ${url}`)),
+        DOWNLOAD_TIMEOUT_MS
+      )
     ),
   ]);
 }
@@ -52,7 +64,11 @@ async function downloadRemoteToBuffer(url, attempt = 1) {
     return Buffer.from(await res.arrayBuffer());
   } catch (err) {
     if (attempt < DOWNLOAD_RETRIES) {
-      warn("Retrying remote download...", { url, attempt });
+      const delay =
+        RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
+
+      warn("Retrying remote download...", { url, attempt, delayMs: delay });
+      await new Promise((resolve) => setTimeout(resolve, delay));
       return downloadRemoteToBuffer(url, attempt + 1);
     }
     throw new Error(`Remote download failed after retries: ${url}`);
@@ -67,7 +83,11 @@ async function loadLocalToBuffer(localPath, attempt = 1) {
     return fs.readFileSync(localPath);
   } catch (err) {
     if (attempt < DOWNLOAD_RETRIES) {
-      warn("Retrying local file read...", { localPath, attempt });
+      const delay =
+        RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
+
+      warn("Retrying local file read...", { localPath, attempt, delayMs: delay });
+      await new Promise((resolve) => setTimeout(resolve, delay));
       return loadLocalToBuffer(localPath, attempt + 1);
     }
     throw new Error(`Local file read failed after retries: ${localPath}`);
@@ -89,10 +109,14 @@ async function streamMergeBuffers(buffers, outputPath, attempt = 1) {
   try {
     const ff = spawn("ffmpeg", [
       "-hide_banner",
-      "-loglevel", "error",
-      "-f", "mp3",
-      "-i", "pipe:0",
-      "-c", "copy",
+      "-loglevel",
+      "error",
+      "-f",
+      "mp3",
+      "-i",
+      "pipe:0",
+      "-c",
+      "copy",
       "-y",
       outputPath,
     ]);
@@ -110,7 +134,9 @@ async function streamMergeBuffers(buffers, outputPath, attempt = 1) {
 
       ff.on("close", (code) => {
         if (code !== 0) {
-          return reject(new Error(`FFmpeg failed (code ${code}): ${stderr}`));
+          return reject(
+            new Error(`FFmpeg failed (code ${code}): ${stderr}`)
+          );
         }
         resolve();
       });
@@ -119,7 +145,10 @@ async function streamMergeBuffers(buffers, outputPath, attempt = 1) {
     return outputPath;
   } catch (err) {
     if (attempt < MERGE_RETRIES) {
-      warn("Retrying merge batch...", { outputPath, attempt });
+      const delay =
+        RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
+
+      warn("Retrying merge batch...", { outputPath, attempt, delayMs: delay });
       return streamMergeBuffers(buffers, outputPath, attempt + 1);
     }
     throw err;
@@ -134,7 +163,11 @@ async function modularMerge(sessionId, sources) {
   let current = sources;
 
   while (current.length > 1) {
-    info("🔁 Batch merge round", { sessionId, round, groups: Math.ceil(current.length / BATCH_SIZE) });
+    info("🔁 Batch merge round", {
+      sessionId,
+      round,
+      groups: Math.ceil(current.length / BATCH_SIZE),
+    });
 
     const next = [];
 
@@ -169,11 +202,15 @@ async function modularMerge(sessionId, sources) {
 // ------------------------------------------------------------
 export async function mergeProcessor(sessionId, chunkUrls = []) {
   const sid = sessionId || `TT-${Date.now()}`;
+  const label = `mergeProcessor:${sid}`;
 
-  startKeepAlive(`mergeProcessor:${sid}`, 25000);
+  startKeepAlive(label, 25000);
   ensureTmpDir();
 
-  info("🎧 Starting bomb-proof mergeProcessor", { sessionId: sid, chunks: chunkUrls.length });
+  info("🎧 Starting bomb-proof mergeProcessor", {
+    sessionId: sid,
+    chunks: chunkUrls.length,
+  });
 
   try {
     if (!Array.isArray(chunkUrls) || chunkUrls.length === 0) {
@@ -187,13 +224,16 @@ export async function mergeProcessor(sessionId, chunkUrls = []) {
 
     await uploadBuffer(MERGED_BUCKET, mergedKey, mergedBuf, "audio/mpeg");
 
-    info("💾 Uploaded final merged MP3 to R2", { sessionId: sid, key: mergedKey });
+    info("💾 Uploaded final merged MP3 to R2", {
+      sessionId: sid,
+      key: mergedKey,
+    });
 
-    stopKeepAlive();
+    stopKeepAlive(label);
     return { key: mergedKey, localPath: finalPath };
   } catch (err) {
     error("💥 mergeProcessor failed", { sessionId: sid, error: err.message });
-    stopKeepAlive();
+    stopKeepAlive(label);
     throw err;
   }
 }
