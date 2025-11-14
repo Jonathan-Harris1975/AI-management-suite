@@ -2,11 +2,11 @@
 // 🎙️ TTS Processor — Hardened Production Version with Retry Logic
 // ============================================================
 //
-// ✅ Cleans & truncates text before Polly
-// ✅ Retries transient failures (rate limits, throttling)
-// ✅ Chunk-level retry with exponential backoff
-// ✅ Logs precise AWS error messages
-// ✅ Uploads all successful chunks to R2
+// • Uses full environment variable mapping (no hardcoded values)
+// • Cleans + truncates text using MAX_POLLY_NATURAL_CHUNK_CHARS
+// • Chunk-level retry with exponential backoff
+// • Logs detailed AWS/Polly errors
+// • Uploads successful chunks to R2 with env URLs
 // ============================================================
 
 import {
@@ -18,19 +18,32 @@ import { putObject } from "#shared/r2-client.js";
 import pLimit from "p-limit";
 
 // ------------------------------------------------------------
-// ⚙️ Environment
+// ⚙️ Environment (ALL FROM YOUR ENV LIST)
 // ------------------------------------------------------------
-const REGION = process.env.AWS_REGION || "eu-west-2";
-const VOICE_ID = process.env.TTS_VOICE || "Amy";
+
+const REGION = process.env.AWS_REGION;
+const VOICE_ID = process.env.POLLY_VOICE_ID;
+
 const CHUNKS_BUCKET = process.env.R2_BUCKET_CHUNKS;
 const PUBLIC_CHUNKS_BASE = process.env.R2_PUBLIC_BASE_URL_CHUNKS;
 
-const MAX_CHARS = 2500;
-const CONCURRENCY = 3;
+// Max characters Polly can handle for natural engine
+const MAX_CHARS =
+  Number(process.env.MAX_POLLY_NATURAL_CHUNK_CHARS) || 2500;
 
-const MAX_CHUNK_RETRIES = 4;
-const RETRY_DELAY_MS = 1200;
-const RETRY_BACKOFF_MULTIPLIER = 2.1;
+// Concurrency for chunk processing
+const CONCURRENCY =
+  Number(process.env.TTS_CONCURRENCY) || 3;
+
+// Chunk retry settings
+const MAX_CHUNK_RETRIES =
+  Number(process.env.MAX_CHUNK_RETRIES) || 4;
+
+const RETRY_DELAY_MS =
+  Number(process.env.RETRY_DELAY_MS) || 1200;
+
+const RETRY_BACKOFF_MULTIPLIER =
+  Number(process.env.RETRY_BACKOFF_MULTIPLIER) || 2.1;
 
 const polly = new PollyClient({ region: REGION });
 
@@ -39,7 +52,7 @@ const polly = new PollyClient({ region: REGION });
 // ------------------------------------------------------------
 function cleanText(input) {
   return input
-    .replace(/[^\x09\x0A\x0D\x20-\x7EÀ-ÿ]/g, "")      // strip control chars
+    .replace(/[^\x09\x0A\x0D\x20-\x7EÀ-ÿ]/g, "")  // strip control chars
     .replace(/&/g, "and")
     .replace(/<|>/g, "")
     .replace(/\n{2,}/g, ". ")
@@ -88,7 +101,7 @@ async function synthesizeTextWithRetry(text, retries = 3) {
 }
 
 // ------------------------------------------------------------
-// 🔁 Chunk-level retry
+// 🔁 Chunk-level retry with exponential backoff
 // ------------------------------------------------------------
 async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1) {
   try {
@@ -112,17 +125,18 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
       attempts: attempt,
     };
   } catch (err) {
+    const message = err?.message || err.toString();
     const isRetryable =
-      err?.message?.includes("Throttling") ||
-      err?.message?.includes("TooManyRequests") ||
-      err?.message?.includes("slow down") ||
-      err?.message?.includes("Rate exceeded");
+      message.includes("Throttling") ||
+      message.includes("TooManyRequests") ||
+      message.includes("slow down") ||
+      message.includes("Rate exceeded");
 
     warn(
       `⚠️ TTS chunk ${chunkNumber} failed (attempt ${attempt}/${MAX_CHUNK_RETRIES})`,
       {
         sessionId,
-        message: err.message,
+        message,
         isRetryable,
         attempt,
       }
@@ -145,7 +159,7 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
       {
         sessionId,
         chunk: chunkNumber,
-        message: err.message,
+        message,
         totalAttempts: attempt,
       }
     );
@@ -153,7 +167,7 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
     return {
       success: false,
       index: chunkNumber,
-      error: err.message,
+      error: message,
       attempts: attempt,
     };
   }
@@ -182,6 +196,7 @@ async function ttsProcessor(sessionId, chunkList = []) {
   );
 
   const raw = await Promise.all(tasks);
+
   const successfulChunks = raw.filter((r) => r.success);
   const failedChunks = raw.filter((r) => !r.success);
 
