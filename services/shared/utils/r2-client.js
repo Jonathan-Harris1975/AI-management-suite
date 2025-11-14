@@ -30,7 +30,6 @@ const {
 
   // Buckets
   R2_BUCKET_PODCAST,
-  R2_BUCKET_RAW,
   R2_BUCKET_RAW_TEXT,
   R2_BUCKET_META,
   R2_BUCKET_MERGED,
@@ -45,7 +44,6 @@ const {
 
   // Public URLs
   R2_PUBLIC_BASE_URL_PODCAST,
-  R2_PUBLIC_BASE_URL_RAW,
   R2_PUBLIC_BASE_URL_RAW_TEXT,
   R2_PUBLIC_BASE_URL_META,
   R2_PUBLIC_BASE_URL_MERGE,
@@ -76,7 +74,6 @@ export const s3 = new S3Client({
 // ------------------------------------------------------------
 export const R2_BUCKETS = {
   podcast:         R2_BUCKET_PODCAST,
-  raw:             R2_BUCKET_RAW,
   rawtext:         R2_BUCKET_RAW_TEXT,
   rawText:         R2_BUCKET_RAW_TEXT,
   "raw-text":      R2_BUCKET_RAW_TEXT,
@@ -110,7 +107,6 @@ export const R2_BUCKETS = {
 // ------------------------------------------------------------
 export const R2_PUBLIC_URLS = {
   podcast:         R2_PUBLIC_BASE_URL_PODCAST,
-  raw:             R2_PUBLIC_BASE_URL_RAW,
   rawtext:         R2_PUBLIC_BASE_URL_RAW_TEXT,
   rawText:         R2_PUBLIC_BASE_URL_RAW_TEXT,
   "raw-text":      R2_PUBLIC_BASE_URL_RAW_TEXT,
