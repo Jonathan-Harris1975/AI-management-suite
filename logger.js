@@ -1,75 +1,48 @@
 // ============================================================
-// 🧠 AI Podcast Suite — Ultra-Clean Logger (Pino v8)
+// AI Podcast Suite — Modern Minimal Logger
 // ============================================================
-// - Production: minimal JSON (no level/time fields)
-// - Development: pretty logs with colours
-// - Message-first helper API: info("msg", { meta })
+// - Production: structured JSON logs
+// - Development: human-readable output
+// - Clean, message-first API
 // ============================================================
 
 import pino from "pino";
 
-const isProd =
-  process.env.NODE_ENV === "production" || process.env.SHIPER === "true";
+// Configuration
+const isProd = process.env.NODE_ENV === "production";
+const logLevel = process.env.LOG_LEVEL || (isProd ? "info" : "debug");
 
+// Singleton logger instance
 let loggerInstance = globalThis.__AI_PODCAST_LOGGER__;
 
 if (!loggerInstance) {
+  const baseConfig = {
+    level: logLevel,
+    messageKey: "message",
+    base: null, // Remove default fields
+  };
+
   if (isProd) {
-    // Production: structured but minimal
+    // Production: clean JSON structure
     loggerInstance = pino({
-      level: process.env.LOG_LEVEL || "info",
-      base: null,          // drop pid/hostname
-      timestamp: false,    // drop timestamp field
+      ...baseConfig,
       formatters: {
-        level: (label) => ({ severity: label.toUpperCase() }), // Add human-readable severity
-        bindings: () => ({}),  // hide bindings
-        log: (obj) => {
-          // Clean up error objects for better readability
-          if (obj.err) {
-            return {
-              ...obj,
-              error: {
-                message: obj.err.message,
-                type: obj.err.name,
-                stack: obj.err.stack?.split('\n').slice(0, 3).join('\n'), // First 3 lines only
-              },
-            };
-          }
-          return obj;
-        },
+        level: (label) => ({ level: label.toUpperCase() }),
+        bindings: () => ({}),
       },
-      messageKey: "msg",   // ensure message is under "msg"
+      timestamp: () => `,"timestamp":"${new Date().toISOString()}"`,
     });
   } else {
-    // Development: pretty, colourised output
+    // Development: readable output
     loggerInstance = pino({
-      level: process.env.LOG_LEVEL || "debug",
-      base: { service: "ai-podcast-suite" },
-      timestamp: pino.stdTimeFunctions.isoTime,
+      ...baseConfig,
       transport: {
         target: "pino-pretty",
         options: {
           colorize: true,
-          singleLine: false,
-          translateTime: "HH:MM:ss",  // Shorter, friendlier timestamp
           ignore: "pid,hostname",
-          messageKey: "msg",
-          customPrettifiers: {
-            // Make log levels more prominent with emojis
-            level: (logLevel) => {
-              const icons = {
-                10: "🔍 TRACE",
-                20: "🐛 DEBUG",
-                30: "ℹ️  INFO ",
-                40: "⚠️  WARN ",
-                50: "❌ ERROR",
-                60: "💀 FATAL",
-              };
-              return icons[logLevel] || logLevel;
-            },
-          },
-          // Add blank lines between log entries for breathing room
-          messageFormat: "\n{msg}\n",
+          translateTime: "HH:MM:ss",
+          messageKey: "message",
         },
       },
     });
@@ -78,52 +51,62 @@ if (!loggerInstance) {
   globalThis.__AI_PODCAST_LOGGER__ = loggerInstance;
 }
 
+// Core logger
 const log = loggerInstance;
 
 // ============================================================
-// 🔊 PUBLIC LOG WRAPPERS — message-first API
-// ============================================================
-// Usage:
-//   info("Message", { meta });
-//   error("Something failed", { err });
-//   success("Task completed", { duration: 123 }); // NEW!
+// Logging API
 // ============================================================
 
-// Helper to format durations nicely
-const formatDuration = (ms) => {
+// Format duration for readability
+const formatDuration = (ms: number): string => {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${(ms / 60000).toFixed(1)}m`;
 };
 
-// Enhanced wrappers with better formatting
-export const info = (msg, obj = {}) => {
-  const enriched = obj.duration ? { ...obj, duration: formatDuration(obj.duration) } : obj;
-  log.info(enriched, msg);
-};
-
-export const warn = (msg, obj = {}) => log.warn(obj, msg);
-
-export const error = (msg, obj = {}) => {
-  // Ensure errors are always formatted nicely
-  if (obj.err && !isProd) {
-    log.error({ ...obj, err: undefined, error: obj.err.message, stack: obj.err.stack }, msg);
-  } else {
-    log.error(obj, msg);
+// Enhanced error handling
+const formatError = (error: unknown) => {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      name: error.name,
+      stack: error.stack,
+    };
   }
+  return { value: error };
 };
 
-export const debug = (msg, obj = {}) => log.debug(obj, msg);
-
-// NEW: Success log helper (uses info level but with visual distinction)
-export const success = (msg, obj = {}) => {
-  const enriched = obj.duration ? { ...obj, duration: formatDuration(obj.duration) } : obj;
-  log.info({ ...enriched, success: true }, `✅ ${msg}`);
+// Main log methods
+export const info = (message: string, meta?: Record<string, unknown>) => {
+  const enriched = meta?.duration ? 
+    { ...meta, duration: formatDuration(meta.duration as number) } : meta;
+  log.info(enriched, message);
 };
 
-// NEW: Progress/step logger for multi-step operations
-export const step = (stepNum, totalSteps, msg, obj = {}) => {
-  log.info(obj, `[${stepNum}/${totalSteps}] ${msg}`);
+export const warn = (message: string, meta?: Record<string, unknown>) => {
+  log.warn(meta, message);
+};
+
+export const error = (message: string, meta?: Record<string, unknown>) => {
+  const formattedMeta = meta?.error ? 
+    { ...meta, error: formatError(meta.error) } : meta;
+  log.error(formattedMeta, message);
+};
+
+export const debug = (message: string, meta?: Record<string, unknown>) => {
+  log.debug(meta, message);
+};
+
+// Specialized loggers
+export const success = (message: string, meta?: Record<string, unknown>) => {
+  const enriched = meta?.duration ? 
+    { ...meta, duration: formatDuration(meta.duration as number) } : meta;
+  log.info({ ...enriched, success: true }, message);
+};
+
+export const step = (current: number, total: number, message: string, meta?: Record<string, unknown>) => {
+  log.info({ ...meta, step: `${current}/${total}` }, message);
 };
 
 export { log };
