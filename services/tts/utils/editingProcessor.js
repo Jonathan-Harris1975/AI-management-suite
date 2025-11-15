@@ -223,7 +223,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
     const buffer = fs.readFileSync(finalPath);
     const key = `${sessionId}_edited.mp3`;
 
-    await uploadBuffer("merged", key, buffer, "audio/mpeg");
+    await uploadBuffer("editedAudio", key, buffer, "audio/mpeg");
 
     log.info("💾 Uploaded edited MP3 to R2 (Podcast-Ready)", { 
       sessionId, 
