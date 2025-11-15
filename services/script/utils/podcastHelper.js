@@ -2,7 +2,7 @@
 // LLM-driven metadata generation for the podcast: title, description, SEO keywords, and artwork prompt (cached only).
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-import { putJson } from "../../shared/utils/r2-client.js";
+import { putJson } from "../../shared/utils/r2-client.js"; // kept for future use if needed
 import * as sessionCache from "./sessionCache.js";
 import { info, error } from "#logger.js";
 import { extractMainContent } from "./textHelpers.js";
@@ -13,14 +13,22 @@ import { extractMainContent } from "./textHelpers.js";
  * -----------------------------------------------------------
  */
 const DIGIT_MAP = {
-  0: "zero", 1: "one", 2: "two", 3: "three", 4: "four",
-  5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine",
+  0: "zero",
+  1: "one",
+  2: "two",
+  3: "three",
+  4: "four",
+  5: "five",
+  6: "six",
+  7: "seven",
+  8: "eight",
+  9: "nine",
 };
 
 function numberToWords(n) {
   return String(n)
     .split("")
-    .map(d => DIGIT_MAP[d] ?? d)
+    .map((d) => DIGIT_MAP[d] ?? d)
     .join(" ");
 }
 
@@ -37,72 +45,72 @@ function urlToSpeech(url) {
     .replace(/^https?:\/\//i, "")
     // Remove www prefix
     .replace(/^www\./i, "");
-  
+
   // Split into domain and path
   const parts = speech.split("/");
   const domain = parts[0];
   const path = parts.slice(1).filter(Boolean);
-  
+
   // Handle domain
   let domainSpeech = domain
     .split(".")
-    .map(part => {
-      // Spell out common abbreviations
-      if (part.toLowerCase() === "api") return "A P I";
-      if (part.toLowerCase() === "www") return "W W W";
-      if (part.toLowerCase() === "cdn") return "C D N";
-      if (part.toLowerCase() === "app") return "app";
-      
+    .map((part) => {
+      const lower = part.toLowerCase();
+      if (lower === "api") return "A P I";
+      if (lower === "www") return "W W W";
+      if (lower === "cdn") return "C D N";
+      if (lower === "app") return "app";
       // Keep normal words as-is
       return part;
     })
     .join(" dot ");
-  
+
   // Add path if exists (but keep it simple)
   if (path.length > 0) {
-    // Only include first 2 path segments to avoid verbosity
     const simplePath = path.slice(0, 2).join(" slash ");
     domainSpeech += " slash " + simplePath;
-    
+
     if (path.length > 2) {
       domainSpeech += " and more";
     }
   }
-  
+
   return domainSpeech;
 }
 
 export function sanitizeForSpeech(text = "") {
   if (!text) return "";
-  
+
   let processed = text;
-  
-  // First, handle full URLs (must be done before individual character replacements)
-  processed = processed.replace(
-    /https?:\/\/[^\s]+/gi, 
-    (url) => " " + urlToSpeech(url) + " "
-  );
-  
-  // Handle standalone domain-like patterns (e.g., "openai.com" or "api.github.com")
+
+  // 1) Handle full URLs
+  processed = processed.replace(/https?:\/\/[^\s]+/gi, (url) => {
+    return " " + urlToSpeech(url) + " ";
+  });
+
+  // 2) Handle standalone domain-like patterns
   processed = processed.replace(
     /\b([a-z0-9-]+\.)+[a-z]{2,}\b/gi,
     (domain) => " " + urlToSpeech(domain) + " "
   );
-  
-  // Replace common symbols with spoken equivalents
+
+  // 3) Replace common symbols with spoken equivalents
   processed = processed
     // Email addresses (handle before dots)
-    .replace(/([a-z0-9._%+-]+)@([a-z0-9.-]+\.[a-z]{2,})/gi, "$1 at $2")
+    .replace(
+      /([a-z0-9._%+-]+)@([a-z0-9.-]+\.[a-z]{2,})/gi,
+      "$1 at $2"
+    )
     // Hyphens in text (distinguish from dashes)
-    .replace(/\s-\s/g, " to ")  // "5 - 10" → "5 to 10"
-    .replace(/-/g, " ")          // hyphenated-words → hyphenated words
+    .replace(/\s-\s/g, " to ") // "5 - 10" → "5 to 10"
+    .replace(/-/g, " ") // hyphenated-words → hyphenated words
     // Numbers (but preserve version numbers like 4.0)
-    .replace(/\b(\d+)\.(\d+)\b/g, "$1 point $2")  // "4.0" → "4 point 0"
+    .replace(/\b(\d+)\.(\d+)\b/g, "$1 point $2") // "4.0" → "4 point 0"
     .replace(/\b[0-9]+\b/g, (n) => numberToWords(n))
     // Clean up whitespace
     .replace(/\s+/g, " ")
     .trim();
-  
+
   return processed;
 }
 
@@ -112,14 +120,27 @@ export function sanitizeForSpeech(text = "") {
  */
 export function extractAndParseJson(text) {
   if (!text || typeof text !== "string") return null;
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
+
+  // Strip common markdown fences just in case
+  const cleaned = text
+    .replace(/```json/gi, "```")
+    .replace(/```/g, "")
+    .trim();
+
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+
   if (start === -1 || end === -1 || end < start) return null;
-  try { 
-    return JSON.parse(text.slice(start, end + 1)); 
-  } catch (err) { 
-    error("json.parse.fail", { text: text.slice(start, Math.min(end + 1, start + 100)) });
-    return null; 
+
+  try {
+    const slice = cleaned.slice(start, end + 1);
+    return JSON.parse(slice);
+  } catch (err) {
+    error("json.parse.fail", {
+      preview: cleaned.slice(start, Math.min(end + 1, start + 160)),
+      err: String(err),
+    });
+    return null;
   }
 }
 
@@ -180,20 +201,21 @@ ${description}`;
 const EPOCH_DATE = new Date("2025-01-01"); // Adjust this to your podcast's start date
 
 function deriveEpisodeNumberFromSessionId(id) {
-  if (!id) return null;
-  
+  if (!id || typeof id !== "string") return null;
+
   // Extract date from sessionId format: "TT-2025-11-14"
   const match = id.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (!match) return null;
-  
-  const [_, year, month, day] = match;
+
+  const [, year, month, day] = match;
   const episodeDate = new Date(`${year}-${month}-${day}`);
-  
+  if (Number.isNaN(episodeDate.getTime())) return null;
+
   // Calculate days since epoch
   const daysSinceEpoch = Math.floor(
     (episodeDate - EPOCH_DATE) / (1000 * 60 * 60 * 24)
   );
-  
+
   // Episode number starts at 1
   return Math.max(1, daysSinceEpoch + 1);
 }
@@ -203,25 +225,57 @@ function deriveEpisodeNumberFromSessionId(id) {
  * -----------------------------------------------------------
  */
 const DEFAULT_KEYWORDS = [
-  "ai", 
-  "artificial intelligence", 
-  "machine learning", 
-  "podcast", 
+  "ai",
+  "artificial intelligence",
+  "machine learning",
+  "podcast",
   "technology",
   "innovation",
   "automation",
   "tech news",
   "ai news",
-  "future tech"
+  "future tech",
 ];
+
+/* -----------------------------------------------------------
+ * Keyword normalization
+ * -----------------------------------------------------------
+ */
+function normalizeKeywords(input, maxCount = 14) {
+  if (!input) return [];
+
+  let raw;
+  if (Array.isArray(input)) {
+    raw = input.join(",");
+  } else {
+    raw = String(input);
+  }
+
+  let keywords = raw
+    .replace(/\s*\n+\s*/g, " ")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((k) => k && k.length > 2);
+
+  // Deduplicate
+  keywords = [...new Set(keywords)];
+
+  // Pad with defaults if needed
+  if (keywords.length < 10) {
+    const combined = [...keywords, ...DEFAULT_KEYWORDS];
+    keywords = [...new Set(combined)];
+  }
+
+  return keywords.slice(0, maxCount);
+}
 
 /* -----------------------------------------------------------
  * Main metadata builder
  * -----------------------------------------------------------
  */
-export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta) {
-  const id = sessionMeta?.sessionId || "episode";
-  const date = sessionMeta?.date;
+export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
+  const id = sessionMeta?.sessionId || sessionMeta?.id || "episode";
+  const date = sessionMeta?.date || new Date().toISOString();
 
   /* 1 — Extract MAIN ONLY + sanitize for speech */
   let mainOnly = "";
@@ -233,108 +287,165 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta) {
     mainOnly = sanitizeForSpeech(extracted);
   } catch (err) {
     error("meta.main.extract.fail", { err: String(err), sessionId: id });
-    mainOnly = sanitizeForSpeech(rawTranscript);
+    mainOnly = sanitizeForSpeech(rawTranscript || "");
   }
 
   /* 2 — Title + Description */
   let title = "AI Weekly";
   let description = "Latest AI developments explained clearly.";
+
   try {
     const td = await resilientRequest("podcastHelper", {
       sessionId: id,
       section: "meta-title-description",
-      messages: [{ role: "user", content: getTitleDescriptionPrompt(mainOnly) }],
+      messages: [
+        {
+          role: "user",
+          content: getTitleDescriptionPrompt(mainOnly),
+        },
+      ],
     });
-    
+
     const parsed = extractAndParseJson(td);
-    if (parsed?.title) title = String(parsed.title).trim().slice(0, 80);
-    if (parsed?.description) description = String(parsed.description).trim().slice(0, 1000);
-    
-    info("meta.titleDesc.success", { sessionId: id, titleLength: title.length });
+
+    if (parsed?.title) {
+      title = String(parsed.title).trim();
+    }
+    if (parsed?.description) {
+      description = String(parsed.description).trim();
+    }
+
+    // Hard caps (safety)
+    title = title.slice(0, 160); // extra safety; RSS/title truncation will handle UI side
+    description = description.slice(0, 4000);
+
+    info("meta.titleDesc.success", {
+      sessionId: id,
+      titleLength: title.length,
+    });
   } catch (e) {
     error("meta.titleDesc.fail", { err: String(e), sessionId: id });
   }
 
-  /* sanitize description for next LLMs */
+  // Additional hardening: ensure non-empty title/description
+  if (!title || !title.trim()) {
+    title = `AI News — ${date.slice(0, 10)}`;
+  }
+  if (!description || !description.trim()) {
+    description = "A deep dive into the latest AI and technology news.";
+  }
+
+  /* Sanitize description for next LLMs */
   const safeDescription = sanitizeForSpeech(description);
 
   /* 3 — SEO Keywords */
   let keywords = [];
+
   try {
     const kw = await resilientRequest("seoKeywords", {
       sessionId: id,
       section: "meta-seo",
-      messages: [{ role: "user", content: getSEOKeywordsPrompt(safeDescription) }],
+      messages: [
+        {
+          role: "user",
+          content: getSEOKeywordsPrompt(safeDescription),
+        },
+      ],
     });
 
-    keywords = String(kw)
-      .replace(/\n/g, " ")
-      .split(",")
-      .map(s => s.trim().toLowerCase())
-      .filter(k => k && k.length > 2);
+    keywords = normalizeKeywords(kw, 14);
 
-    // Deduplicate
-    keywords = [...new Set(keywords)].slice(0, 14);
-
-    // Pad with defaults if needed
-    if (keywords.length < 10) {
-      const combined = [...keywords, ...DEFAULT_KEYWORDS];
-      keywords = [...new Set(combined)].slice(0, 14);
-    }
-    
-    info("meta.seo.success", { sessionId: id, count: keywords.length });
+    info("meta.seo.success", {
+      sessionId: id,
+      count: keywords.length,
+    });
   } catch (e) {
     error("meta.seo.fail", { err: String(e), sessionId: id });
     keywords = DEFAULT_KEYWORDS.slice(0, 10);
   }
 
   /* 4 — Artwork Prompt */
-  let artworkPrompt = "Cinematic abstract neon depiction of AI systems, swirling data lights, no text";
+  let artworkPrompt =
+    "Cinematic abstract neon depiction of AI systems, swirling data lights, no text";
+
   try {
     const ap = await resilientRequest("artworkPrompt", {
       sessionId: id,
       section: "meta-artwork",
-      messages: [{ role: "user", content: getArtworkPrompt(safeDescription) }],
+      messages: [
+        {
+          role: "user",
+          content: getArtworkPrompt(safeDescription),
+        },
+      ],
     });
 
     let prompt = String(ap).trim().replace(/^["'`]+|["'`]+$/g, "");
-    
-    // Remove any remaining text characters (this line seems wrong - it removes ALL alphanumeric!)
-    // prompt = prompt.replace(/[A-Za-z0-9]/g, "").trim();
-    // Instead, just validate length and keep the prompt as-is
-    
+
+    // Length validation only — do NOT strip all alphanumerics
     if (prompt && prompt.length > 10 && prompt.length <= 250) {
       artworkPrompt = prompt;
     }
 
     await sessionCache.storeTempPart(sessionMeta, "artworkPrompt", artworkPrompt);
-    info("artwork.cached", { sessionId: id, promptLength: artworkPrompt.length });
+    info("artwork.cached", {
+      sessionId: id,
+      promptLength: artworkPrompt.length,
+    });
   } catch (e) {
     error("meta.artwork.fail", { err: String(e), sessionId: id });
     await sessionCache.storeTempPart(sessionMeta, "artworkPrompt", artworkPrompt);
     info("artwork.cached.fallback", { sessionId: id });
   }
 
-  /* 5 — Episode Number (starts at 1) */
-  const episodeNumber = 
-    String(process.env.PODCAST_RSS_EP || "").toLowerCase() === "yes"
-      ? deriveEpisodeNumberFromSessionId(id)
-      : null;
+  /* 5 — Episode Number (always >= 1, never null) */
+  let episodeNumber;
 
-  /* Final JSON */
+  try {
+    // If upstream explicitly provided an episode number, trust it (but clamp to >=1)
+    if (sessionMeta?.episodeNumber != null) {
+      const explicit = Number(sessionMeta.episodeNumber);
+      episodeNumber = Number.isFinite(explicit) ? Math.max(1, explicit) : 1;
+    } else {
+      const useEpisodeNumbers =
+        String(process.env.PODCAST_RSS_EP || "").toLowerCase() === "yes";
+
+      if (useEpisodeNumbers) {
+        const derived = deriveEpisodeNumberFromSessionId(id);
+        episodeNumber = Number.isFinite(derived) ? derived : 1;
+      } else {
+        // Even when RSS numbering is disabled, keep a stable, valid field
+        episodeNumber = 1;
+      }
+    }
+  } catch (err) {
+    error("meta.episodeNumber.fail", { sessionId: id, err: String(err) });
+    episodeNumber = 1;
+  }
+
+  // Final clamping safety
+  if (!Number.isFinite(episodeNumber) || episodeNumber < 1) {
+    episodeNumber = 1;
+  }
+
+  /* Final JSON — always includes sessionId + episodeNumber >= 1 */
   const meta = {
-    session: { sessionId: id, date },
+    session: {
+      sessionId: id,
+      date,
+    },
     title,
     description,
     keywords,
+    artworkPrompt,
     episodeNumber,
     createdAt: new Date().toISOString(),
   };
 
-  info("meta.generation.complete", { 
-    sessionId: id, 
-    episodeNumber, 
-    keywordCount: keywords.length 
+  info("meta.generation.complete", {
+    sessionId: id,
+    episodeNumber,
+    keywordCount: keywords.length,
   });
 
   return meta;
