@@ -277,6 +277,15 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
   const id = sessionMeta?.sessionId || sessionMeta?.id || "episode";
   const date = sessionMeta?.date || new Date().toISOString();
 
+  // Track operation status for summary
+  const opStatus = {
+    mainExtract: { success: false, fallback: false },
+    titleDesc: { success: false, fallback: false, titleLength: 0, descLength: 0 },
+    keywords: { success: false, fallback: false, count: 0 },
+    artwork: { success: false, fallback: false, cached: false, promptLength: 0 },
+    episodeNumber: { value: 1, source: "default" }
+  };
+
   /* 1 — Extract MAIN ONLY + sanitize for speech */
   let mainOnly = "";
   try {
@@ -285,9 +294,11 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
       throw new Error("Main content too short.");
     }
     mainOnly = sanitizeForSpeech(extracted);
+    opStatus.mainExtract.success = true;
   } catch (err) {
     error("meta.main.extract.fail", { err: String(err), sessionId: id });
     mainOnly = sanitizeForSpeech(rawTranscript || "");
+    opStatus.mainExtract.fallback = true;
   }
 
   /* 2 — Title + Description */
@@ -316,24 +327,29 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
     }
 
     // Hard caps (safety)
-    title = title.slice(0, 160); // extra safety; RSS/title truncation will handle UI side
+    title = title.slice(0, 160);
     description = description.slice(0, 4000);
 
-    info("meta.titleDesc.success", {
-      sessionId: id,
-      titleLength: title.length,
-    });
+    opStatus.titleDesc.success = true;
+    opStatus.titleDesc.titleLength = title.length;
+    opStatus.titleDesc.descLength = description.length;
   } catch (e) {
     error("meta.titleDesc.fail", { err: String(e), sessionId: id });
+    opStatus.titleDesc.fallback = true;
   }
 
   // Additional hardening: ensure non-empty title/description
   if (!title || !title.trim()) {
     title = `AI News — ${date.slice(0, 10)}`;
+    opStatus.titleDesc.fallback = true;
   }
   if (!description || !description.trim()) {
     description = "A deep dive into the latest AI and technology news.";
+    opStatus.titleDesc.fallback = true;
   }
+
+  opStatus.titleDesc.titleLength = title.length;
+  opStatus.titleDesc.descLength = description.length;
 
   /* Sanitize description for next LLMs */
   const safeDescription = sanitizeForSpeech(description);
@@ -354,14 +370,13 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
     });
 
     keywords = normalizeKeywords(kw, 14);
-
-    info("meta.seo.success", {
-      sessionId: id,
-      count: keywords.length,
-    });
+    opStatus.keywords.success = true;
+    opStatus.keywords.count = keywords.length;
   } catch (e) {
     error("meta.seo.fail", { err: String(e), sessionId: id });
     keywords = DEFAULT_KEYWORDS.slice(0, 10);
+    opStatus.keywords.fallback = true;
+    opStatus.keywords.count = keywords.length;
   }
 
   /* 4 — Artwork Prompt */
@@ -385,17 +400,20 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
     // Length validation only — do NOT strip all alphanumerics
     if (prompt && prompt.length > 10 && prompt.length <= 250) {
       artworkPrompt = prompt;
+      opStatus.artwork.success = true;
+    } else {
+      opStatus.artwork.fallback = true;
     }
 
     await sessionCache.storeTempPart(sessionMeta, "artworkPrompt", artworkPrompt);
-    info("artwork.cached", {
-      sessionId: id,
-      promptLength: artworkPrompt.length,
-    });
+    opStatus.artwork.cached = true;
+    opStatus.artwork.promptLength = artworkPrompt.length;
   } catch (e) {
     error("meta.artwork.fail", { err: String(e), sessionId: id });
     await sessionCache.storeTempPart(sessionMeta, "artworkPrompt", artworkPrompt);
-    info("artwork.cached.fallback", { sessionId: id });
+    opStatus.artwork.fallback = true;
+    opStatus.artwork.cached = true;
+    opStatus.artwork.promptLength = artworkPrompt.length;
   }
 
   /* 5 — Episode Number (always >= 1, never null) */
@@ -406,6 +424,7 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
     if (sessionMeta?.episodeNumber != null) {
       const explicit = Number(sessionMeta.episodeNumber);
       episodeNumber = Number.isFinite(explicit) ? Math.max(1, explicit) : 1;
+      opStatus.episodeNumber.source = "explicit";
     } else {
       const useEpisodeNumbers =
         String(process.env.PODCAST_RSS_EP || "").toLowerCase() === "yes";
@@ -413,20 +432,26 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
       if (useEpisodeNumbers) {
         const derived = deriveEpisodeNumberFromSessionId(id);
         episodeNumber = Number.isFinite(derived) ? derived : 1;
+        opStatus.episodeNumber.source = derived ? "derived" : "default";
       } else {
         // Even when RSS numbering is disabled, keep a stable, valid field
         episodeNumber = 1;
+        opStatus.episodeNumber.source = "disabled";
       }
     }
   } catch (err) {
     error("meta.episodeNumber.fail", { sessionId: id, err: String(err) });
     episodeNumber = 1;
+    opStatus.episodeNumber.source = "error_fallback";
   }
 
   // Final clamping safety
   if (!Number.isFinite(episodeNumber) || episodeNumber < 1) {
     episodeNumber = 1;
+    opStatus.episodeNumber.source = "clamped";
   }
+
+  opStatus.episodeNumber.value = episodeNumber;
 
   /* Final JSON — always includes sessionId + episodeNumber >= 1 */
   const meta = {
@@ -442,10 +467,26 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
     createdAt: new Date().toISOString(),
   };
 
-  info("meta.generation.complete", {
+  // Single comprehensive summary log
+  info("🔗 meta.generation.complete", {
     sessionId: id,
     episodeNumber,
-    keywordCount: keywords.length,
+    mainExtract: opStatus.mainExtract.success ? "success" : "fallback",
+    titleDesc: {
+      status: opStatus.titleDesc.success ? "success" : "fallback",
+      titleChars: opStatus.titleDesc.titleLength,
+      descChars: opStatus.titleDesc.descLength
+    },
+    keywords: {
+      status: opStatus.keywords.success ? "success" : "fallback",
+      count: opStatus.keywords.count
+    },
+    artwork: {
+      status: opStatus.artwork.success ? "success" : "fallback",
+      cached: opStatus.artwork.cached,
+      promptChars: opStatus.artwork.promptLength
+    },
+    episodeNumberSource: opStatus.episodeNumber.source
   });
 
   return meta;
