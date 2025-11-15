@@ -50,7 +50,7 @@ async function fetchWithTimeout(url) {
     fetch(url),
     new Promise((_, reject) =>
       setTimeout(
-        () => reject(new Error(`Timeout fetching: ${url}`)),
+        () => reject(new Error(`Download timeout`)),
         DOWNLOAD_TIMEOUT_MS
       )
     ),
@@ -60,18 +60,18 @@ async function fetchWithTimeout(url) {
 async function downloadRemoteToBuffer(url, attempt = 1) {
   try {
     const res = await fetchWithTimeout(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return Buffer.from(await res.arrayBuffer());
   } catch (err) {
     if (attempt < DOWNLOAD_RETRIES) {
       const delay =
         RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
 
-      warn("Retrying remote download...", { url, attempt, delayMs: delay });
+      warn("Retrying remote download", { attempt, delayMs: delay });
       await new Promise((resolve) => setTimeout(resolve, delay));
       return downloadRemoteToBuffer(url, attempt + 1);
     }
-    throw new Error(`Remote download failed after retries: ${url}`);
+    throw new Error(`Remote download failed after ${DOWNLOAD_RETRIES} attempts`);
   }
 }
 
@@ -86,11 +86,11 @@ async function loadLocalToBuffer(localPath, attempt = 1) {
       const delay =
         RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
 
-      warn("Retrying local file read...", { localPath, attempt, delayMs: delay });
+      warn("Retrying local file read", { attempt, delayMs: delay });
       await new Promise((resolve) => setTimeout(resolve, delay));
       return loadLocalToBuffer(localPath, attempt + 1);
     }
-    throw new Error(`Local file read failed after retries: ${localPath}`);
+    throw new Error(`Local file read failed after ${DOWNLOAD_RETRIES} attempts`);
   }
 }
 
@@ -148,7 +148,7 @@ async function streamMergeBuffers(buffers, outputPath, attempt = 1) {
       const delay =
         RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
 
-      warn("Retrying merge batch...", { outputPath, attempt, delayMs: delay });
+      warn("Retrying merge batch", { attempt, delayMs: delay });
       return streamMergeBuffers(buffers, outputPath, attempt + 1);
     }
     throw err;
@@ -163,10 +163,10 @@ async function modularMerge(sessionId, sources) {
   let current = sources;
 
   while (current.length > 1) {
-    info("🔁 Batch merge round", {
-      sessionId,
+    info("Batch merge round started", {
       round,
-      groups: Math.ceil(current.length / BATCH_SIZE),
+      inputChunks: current.length,
+      batchSize: BATCH_SIZE
     });
 
     const next = [];
@@ -174,7 +174,9 @@ async function modularMerge(sessionId, sources) {
     for (let i = 0; i < current.length; i += BATCH_SIZE) {
       const group = current.slice(i, i + BATCH_SIZE);
 
-      info(`📦 Merging batch ${i / BATCH_SIZE + 1}`, { sessionId, group });
+      info(`Merging batch ${i / BATCH_SIZE + 1}`, { 
+        batchSize: group.length 
+      });
 
       const buffers = [];
       for (const source of group) {
@@ -207,9 +209,8 @@ export async function mergeProcessor(sessionId, chunkUrls = []) {
   startKeepAlive(label, 25000);
   ensureTmpDir();
 
-  info("🎧 Starting bomb-proof mergeProcessor", {
-    sessionId: sid,
-    chunks: chunkUrls.length,
+  info("🎚️ Starting merge process", {
+    totalChunks: chunkUrls.length,
   });
 
   try {
@@ -224,15 +225,14 @@ export async function mergeProcessor(sessionId, chunkUrls = []) {
 
     await uploadBuffer(MERGED_BUCKET, mergedKey, mergedBuf, "audio/mpeg");
 
-    info("💾 Uploaded final merged MP3 to R2", {
-      sessionId: sid,
+    info("Uploaded final merged MP3", {
       key: mergedKey,
     });
 
     stopKeepAlive(label);
     return { key: mergedKey, localPath: finalPath };
   } catch (err) {
-    error("💥 mergeProcessor failed", { sessionId: sid, error: err.message });
+    error("Merge process failed", { error: err.message });
     stopKeepAlive(label);
     throw err;
   }
