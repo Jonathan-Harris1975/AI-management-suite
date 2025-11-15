@@ -1,23 +1,11 @@
 // ============================================================
-// 🎵 Podcast Processor — Intro/Outro Mixdown & Final Mastering
+// 🎵 Modular Podcast Processor
 // ============================================================
-//
-// Signature:
-//   const finalAudio = await podcastProcessor(sessionId, editedBuffer);
-//
-// Processing:
-//   • Download intro & outro to /tmp/podcast_master
-//   • Use editedBuffer as main
-//   • Normalize all three inputs to 48kHz mono s16
-//   • Intro fade-in, outro tail-fade via reverse trick
-//   • Concat intro + main + outro
-//   • Final acompressor + loudnorm
-//
-// Safety:
-//   • ffmpeg uses -xerror → hard fail on decode errors
-//   • Output must be >= 10 KB
-//   • ffmpeg timeout guard (no infinite hang)
-//   • On total failure, returns editedBuffer unchanged
+// Four-step pipeline:
+//   1. Normalize intro/outro to 48kHz mono s16 (temp memory)
+//   2. Normalize main edit MP3 to 48kHz mono s16 (temp memory)
+//   3. Apply fade in/out effects
+//   4. Apply audio effects (compression + loudnorm)
 // ============================================================
 
 import fs from "fs";
@@ -27,171 +15,69 @@ import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { putObject } from "#shared/r2-client.js";
 
+// ============================================================
+// Configuration
+// ============================================================
 const TMP_DIR = "/tmp/podcast_master";
 const MIN_VALID_BYTES = 10 * 1024; // 10 KB
 
 const PODCAST_INTRO_URL = process.env.PODCAST_INTRO_URL || "";
 const PODCAST_OUTRO_URL = process.env.PODCAST_OUTRO_URL || "";
 
-const MIN_INTRO_DURATION = Number(
-  process.env.MIN_INTRO_DURATION || 3
-);
-const MIN_OUTRO_DURATION = Number(
-  process.env.MIN_OUTRO_DURATION || 3
-);
+const MIN_INTRO_DURATION = Number(process.env.MIN_INTRO_DURATION || 3);
+const MIN_OUTRO_DURATION = Number(process.env.MIN_OUTRO_DURATION || 3);
 
 const INTRO_FADE_SEC = Math.max(0.1, MIN_INTRO_DURATION);
 const OUTRO_FADE_SEC = Math.max(0.1, MIN_OUTRO_DURATION);
 
 const MAX_PODCAST_RETRIES = Number(
-  process.env.MAX_PODCAST_RETRIES ||
-    process.env.MAX_CHUNK_RETRIES ||
-    3
+  process.env.MAX_PODCAST_RETRIES || process.env.MAX_CHUNK_RETRIES || 3
 );
 
 const PODCAST_RETRY_DELAY_MS = Number(
-  process.env.PODCAST_RETRY_DELAY_MS ||
-    process.env.RETRY_DELAY_MS ||
-    2000
+  process.env.PODCAST_RETRY_DELAY_MS || process.env.RETRY_DELAY_MS || 2000
 );
 
-const PODCAST_RETRY_BACKOFF = Number(
-  process.env.RETRY_BACKOFF_MULTIPLIER || 2
-);
+const PODCAST_RETRY_BACKOFF = Number(process.env.RETRY_BACKOFF_MULTIPLIER || 2);
 
-// Kill ffmpeg if it runs too long (ms)
 const PODCAST_FFMPEG_TIMEOUT_MS = Number(
   process.env.PODCAST_FFMPEG_TIMEOUT_MS || 5 * 60 * 1000
-); // default 5 min
+);
 
 const EDITED_BUCKET = process.env.R2_BUCKET_EDITED_AUDIO || "";
-const PUBLIC_EDITED_BASE =
-  process.env.R2_PUBLIC_BASE_URL_EDITED_AUDIO || "";
+const PUBLIC_EDITED_BASE = process.env.R2_PUBLIC_BASE_URL_EDITED_AUDIO || "";
 
 if (!fs.existsSync(TMP_DIR)) {
   fs.mkdirSync(TMP_DIR, { recursive: true });
 }
 
-// ------------------------------------------------------------
-// 📥 Download helper (intro/outro)
-// ------------------------------------------------------------
-async function downloadToLocal(url, targetPath, label) {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(
-      `Failed to download ${label}: HTTP ${res.status}`
-    );
-  }
-
-  const buf = Buffer.from(await res.arrayBuffer());
-
-  if (buf.length < MIN_VALID_BYTES) {
-    throw new Error(
-      `${label} MP3 too small or invalid (bytes=${buf.length})`
-    );
-  }
-
-  await fs.promises.writeFile(targetPath, buf);
-
-  info(`⬇️ Downloaded ${label}`, {
-    bytes: buf.length,
-    targetPath,
-  });
-
-  return buf;
-}
-
-// ------------------------------------------------------------
-// 🧪 ffmpeg mixdown — one attempt
-// ------------------------------------------------------------
-function runPodcastMixdownOnce(
-  sessionId,
-  introPath,
-  mainPath,
-  outroPath,
-  outputPath,
-  attempt,
-  total
-) {
+// ============================================================
+// Utility: Execute FFmpeg with timeout and retries
+// ============================================================
+function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
-    // All inputs → 48kHz mono s16, then concat, then compressor + loudnorm
-    const filterComplex = `
-      [0:a]aresample=48000,pan=mono|c0=c0,
-           aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=mono,
-           afade=t=in:d=${INTRO_FADE_SEC}[intro];
-      [1:a]aresample=48000,pan=mono|c0=c0,
-           aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=mono[main];
-      [2:a]aresample=48000,pan=mono|c0=c0,
-           aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=mono,
-           areverse,afade=t=in:d=${OUTRO_FADE_SEC},areverse[outro];
-      [intro][main][outro]concat=n=3:v=0:a=1,
-        acompressor=threshold=-18dB:ratio=2:attack=5:release=120,
-        loudnorm=I=-16:TP=-1.5:LRA=11:print_format=none[out]
-    `.replace(/\s+/g, " ");
-
-    const args = [
-      "-y",
-      "-xerror", // 🔥 hard fail on decode errors
-      "-i",
-      introPath,
-      "-i",
-      mainPath,
-      "-i",
-      outroPath,
-      "-filter_complex",
-      filterComplex,
-      "-map",
-      "[out]",
-      "-c:a",
-      "libmp3lame",
-      "-b:a",
-      "128k",
-      outputPath,
-    ];
-
-    info("🎵 podcastProcessor ffmpeg attempt", {
-      sessionId,
-      attempt,
-      total,
-    });
-
     const ff = spawn("ffmpeg", args);
     let stderr = "";
     let timeoutId = null;
     let settled = false;
 
-    // ⏱️ Timeout guard
-    if (PODCAST_FFMPEG_TIMEOUT_MS > 0) {
+    if (timeoutMs > 0) {
       timeoutId = setTimeout(() => {
         if (settled) return;
         settled = true;
-        warn("⚠️ podcastProcessor ffmpeg timed out, killing process", {
-          sessionId,
-          attempt,
-          timeoutMs: PODCAST_FFMPEG_TIMEOUT_MS,
-        });
+        warn(`⚠️ ${label} timed out, killing ffmpeg`, { sessionId, timeoutMs });
         try {
           ff.kill("SIGKILL");
-        } catch {
-          // ignore
-        }
-        reject(
-          new Error(
-            `ffmpeg timed out after ${PODCAST_FFMPEG_TIMEOUT_MS} ms`
-          )
-        );
-      }, PODCAST_FFMPEG_TIMEOUT_MS);
+        } catch {}
+        reject(new Error(`ffmpeg timed out after ${timeoutMs} ms`));
+      }, timeoutMs);
     }
 
     ff.stderr.on("data", (data) => {
       const txt = data.toString();
       stderr += txt;
       if (txt.toLowerCase().includes("error")) {
-        warn("⚠️ ffmpeg stderr (podcastProcessor)", {
-          sessionId,
-          attempt,
-          chunk: txt,
-        });
+        warn(`⚠️ ffmpeg stderr (${label})`, { sessionId, chunk: txt });
       }
     });
 
@@ -210,23 +96,274 @@ function runPodcastMixdownOnce(
       if (code === 0) {
         resolve();
       } else {
-        reject(
-          new Error(
-            `ffmpeg failed (code ${code}): ${stderr}`
-          )
-        );
+        reject(new Error(`ffmpeg failed (code ${code}): ${stderr}`));
       }
     });
   });
 }
 
-// ------------------------------------------------------------
-// 🎧 podcastProcessor — Main
-// ------------------------------------------------------------
-export async function podcastProcessor(
+// ============================================================
+// Utility: Download remote file
+// ============================================================
+async function downloadToLocal(url, targetPath, label) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to download ${label}: HTTP ${res.status}`);
+  }
+
+  const buf = Buffer.from(await res.arrayBuffer());
+
+  if (buf.length < MIN_VALID_BYTES) {
+    throw new Error(`${label} MP3 too small or invalid (bytes=${buf.length})`);
+  }
+
+  await fs.promises.writeFile(targetPath, buf);
+  info(`⬇️ Downloaded ${label}`, { bytes: buf.length, targetPath });
+
+  return buf;
+}
+
+// ============================================================
+// STEP 1: Normalize intro/outro to 48kHz mono s16
+// ============================================================
+async function normalizeIntroOutro(sessionId, introPath, outroPath) {
+  info("🔧 STEP 1: Normalizing intro/outro to 48kHz mono s16", { sessionId });
+
+  const introNormPath = path.join(TMP_DIR, `${sessionId}_intro_norm.wav`);
+  const outroNormPath = path.join(TMP_DIR, `${sessionId}_outro_norm.wav`);
+
+  // Normalize intro
+  await runFFmpeg(
+    [
+      "-y",
+      "-xerror",
+      "-i",
+      introPath,
+      "-ar",
+      "48000",
+      "-ac",
+      "1",
+      "-sample_fmt",
+      "s16",
+      "-acodec",
+      "pcm_s16le",
+      introNormPath,
+    ],
+    "normalize-intro",
+    sessionId
+  );
+
+  // Normalize outro
+  await runFFmpeg(
+    [
+      "-y",
+      "-xerror",
+      "-i",
+      outroPath,
+      "-ar",
+      "48000",
+      "-ac",
+      "1",
+      "-sample_fmt",
+      "s16",
+      "-acodec",
+      "pcm_s16le",
+      outroNormPath,
+    ],
+    "normalize-outro",
+    sessionId
+  );
+
+  info("✅ STEP 1 complete: Intro/outro normalized", {
+    sessionId,
+    intro: introNormPath,
+    outro: outroNormPath,
+  });
+
+  return { introNormPath, outroNormPath };
+}
+
+// ============================================================
+// STEP 2: Normalize main edit MP3 to 48kHz mono s16
+// ============================================================
+async function normalizeMainAudio(sessionId, mainPath) {
+  info("🔧 STEP 2: Normalizing main audio to 48kHz mono s16", { sessionId });
+
+  const mainNormPath = path.join(TMP_DIR, `${sessionId}_main_norm.wav`);
+
+  await runFFmpeg(
+    [
+      "-y",
+      "-xerror",
+      "-i",
+      mainPath,
+      "-ar",
+      "48000",
+      "-ac",
+      "1",
+      "-sample_fmt",
+      "s16",
+      "-acodec",
+      "pcm_s16le",
+      mainNormPath,
+    ],
+    "normalize-main",
+    sessionId
+  );
+
+  info("✅ STEP 2 complete: Main audio normalized", {
+    sessionId,
+    main: mainNormPath,
+  });
+
+  return mainNormPath;
+}
+
+// ============================================================
+// STEP 3: Apply fade in/out effects
+// ============================================================
+async function applyFades(sessionId, introNormPath, mainNormPath, outroNormPath) {
+  info("🔧 STEP 3: Applying fade in/out effects", { sessionId });
+
+  const introFadedPath = path.join(TMP_DIR, `${sessionId}_intro_faded.wav`);
+  const outroFadedPath = path.join(TMP_DIR, `${sessionId}_outro_faded.wav`);
+
+  // Fade in intro
+  await runFFmpeg(
+    [
+      "-y",
+      "-xerror",
+      "-i",
+      introNormPath,
+      "-af",
+      `afade=t=in:d=${INTRO_FADE_SEC}`,
+      "-acodec",
+      "pcm_s16le",
+      introFadedPath,
+    ],
+    "fade-intro",
+    sessionId
+  );
+
+  // Fade out outro (reverse trick)
+  await runFFmpeg(
+    [
+      "-y",
+      "-xerror",
+      "-i",
+      outroNormPath,
+      "-af",
+      `areverse,afade=t=in:d=${OUTRO_FADE_SEC},areverse`,
+      "-acodec",
+      "pcm_s16le",
+      outroFadedPath,
+    ],
+    "fade-outro",
+    sessionId
+  );
+
+  info("✅ STEP 3 complete: Fades applied", {
+    sessionId,
+    introFaded: introFadedPath,
+    outroFaded: outroFadedPath,
+  });
+
+  return { introFadedPath, outroFadedPath };
+}
+
+// ============================================================
+// STEP 4: Apply audio effects (concat + compression + loudnorm)
+// ============================================================
+async function applyAudioEffects(
   sessionId,
-  editedBuffer
+  introFadedPath,
+  mainNormPath,
+  outroFadedPath,
+  outputPath
 ) {
+  info("🔧 STEP 4: Applying audio effects (concat + compression + loudnorm)", {
+    sessionId,
+  });
+
+  const filterComplex = `
+    [0:a][1:a][2:a]concat=n=3:v=0:a=1,
+    acompressor=threshold=-18dB:ratio=2:attack=5:release=120,
+    loudnorm=I=-16:TP=-1.5:LRA=11:print_format=none[out]
+  `.replace(/\s+/g, " ");
+
+  await runFFmpeg(
+    [
+      "-y",
+      "-xerror",
+      "-i",
+      introFadedPath,
+      "-i",
+      mainNormPath,
+      "-i",
+      outroFadedPath,
+      "-filter_complex",
+      filterComplex,
+      "-map",
+      "[out]",
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "128k",
+      outputPath,
+    ],
+    "audio-effects",
+    sessionId
+  );
+
+  info("✅ STEP 4 complete: Audio effects applied", { sessionId, outputPath });
+}
+
+// ============================================================
+// Pipeline orchestrator with retries
+// ============================================================
+async function runPodcastPipeline(
+  sessionId,
+  introPath,
+  mainPath,
+  outroPath,
+  outputPath,
+  attempt,
+  total
+) {
+  info(`🎵 Running podcast pipeline (attempt ${attempt}/${total})`, { sessionId });
+
+  // STEP 1: Normalize intro/outro
+  const { introNormPath, outroNormPath } = await normalizeIntroOutro(
+    sessionId,
+    introPath,
+    outroPath
+  );
+
+  // STEP 2: Normalize main audio
+  const mainNormPath = await normalizeMainAudio(sessionId, mainPath);
+
+  // STEP 3: Apply fades
+  const { introFadedPath, outroFadedPath } = await applyFades(
+    sessionId,
+    introNormPath,
+    mainNormPath,
+    outroNormPath
+  );
+
+  // STEP 4: Apply audio effects
+  await applyAudioEffects(
+    sessionId,
+    introFadedPath,
+    mainNormPath,
+    outroFadedPath,
+    outputPath
+  );
+}
+
+// ============================================================
+// Main: podcastProcessor
+// ============================================================
+export async function podcastProcessor(sessionId, editedBuffer) {
   const label = `podcastProcessor:${sessionId}`;
 
   if (!PODCAST_INTRO_URL || !PODCAST_OUTRO_URL) {
@@ -243,35 +380,27 @@ export async function podcastProcessor(
   const finalPath = path.join(TMP_DIR, `${sessionId}_final.mp3`);
 
   try {
+    // Write main audio to disk
     await fs.promises.writeFile(mainPath, editedBuffer);
 
     // Download intro & outro
-    await downloadToLocal(
-      PODCAST_INTRO_URL,
-      introPath,
-      "intro"
-    );
-    await downloadToLocal(
-      PODCAST_OUTRO_URL,
-      outroPath,
-      "outro"
-    );
+    await downloadToLocal(PODCAST_INTRO_URL, introPath, "intro");
+    await downloadToLocal(PODCAST_OUTRO_URL, outroPath, "outro");
 
     let finalBuffer = null;
     let lastError = null;
 
     startKeepAlive(label, 15000);
 
+    // Retry loop
     for (let attempt = 1; attempt <= MAX_PODCAST_RETRIES; attempt++) {
       try {
-        // clear previous final file
+        // Clear previous final file
         try {
           await fs.promises.unlink(finalPath);
-        } catch {
-          // ignore
-        }
+        } catch {}
 
-        await runPodcastMixdownOnce(
+        await runPodcastPipeline(
           sessionId,
           introPath,
           mainPath,
@@ -281,9 +410,7 @@ export async function podcastProcessor(
           MAX_PODCAST_RETRIES
         );
 
-        const candidate = await fs.promises.readFile(
-          finalPath
-        );
+        const candidate = await fs.promises.readFile(finalPath);
 
         if (candidate.length < MIN_VALID_BYTES) {
           throw new Error(
@@ -302,7 +429,7 @@ export async function podcastProcessor(
       } catch (err) {
         lastError = err;
 
-        warn("⚠️ podcastProcessor ffmpeg attempt failed", {
+        warn("⚠️ podcastProcessor pipeline attempt failed", {
           sessionId,
           attempt,
           maxAttempts: MAX_PODCAST_RETRIES,
@@ -311,30 +438,20 @@ export async function podcastProcessor(
 
         if (attempt < MAX_PODCAST_RETRIES) {
           const delay =
-            PODCAST_RETRY_DELAY_MS *
-            Math.pow(PODCAST_RETRY_BACKOFF, attempt - 1);
+            PODCAST_RETRY_DELAY_MS * Math.pow(PODCAST_RETRY_BACKOFF, attempt - 1);
 
-          info("🔁 Retrying podcastProcessor", {
-            sessionId,
-            attempt,
-            delayMs: delay,
-          });
-
-          await new Promise((res) =>
-            setTimeout(res, delay)
-          );
+          info("🔁 Retrying podcastProcessor", { sessionId, attempt, delayMs: delay });
+          await new Promise((res) => setTimeout(res, delay));
         }
       }
     }
 
     stopKeepAlive(label);
 
-    // Cleanup final file (best-effort)
+    // Cleanup final file
     try {
       await fs.promises.unlink(finalPath);
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     // All attempts failed → return editedBuffer unchanged
     if (!finalBuffer) {
@@ -345,25 +462,18 @@ export async function podcastProcessor(
       return editedBuffer;
     }
 
-    // 📦 Safenet upload
+    // Safenet upload
     if (EDITED_BUCKET && PUBLIC_EDITED_BASE) {
       try {
         const key = `${sessionId}_final.mp3`;
 
-        await putObject(
-          EDITED_BUCKET,
-          key,
-          finalBuffer,
-          "audio/mpeg"
-        );
+        await putObject(EDITED_BUCKET, key, finalBuffer, "audio/mpeg");
 
         info("💾 podcastProcessor safenet upload OK", {
           sessionId,
           bucket: EDITED_BUCKET,
           key,
-          url: `${PUBLIC_EDITED_BASE}/${encodeURIComponent(
-            key
-          )}`,
+          url: `${PUBLIC_EDITED_BASE}/${encodeURIComponent(key)}`,
         });
       } catch (err) {
         warn("⚠️ podcastProcessor safenet upload failed", {
