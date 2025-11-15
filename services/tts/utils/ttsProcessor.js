@@ -21,7 +21,7 @@ import pLimit from "p-limit";
 // ⚙️ Configuration
 // ------------------------------------------------------------
 const REGION = process.env.AWS_REGION;
-const VOICE_ID = process.env.POLLY_VICE_ID;
+const VOICE_ID = process.env.POLLY_VOICE_ID;
 const CHUNKS_BUCKET = process.env.R2_BUCKET_CHUNKS;
 const PUBLIC_CHUNKS_BASE = process.env.R2_PUBLIC_BASE_URL_CHUNKS;
 
