@@ -4,6 +4,7 @@
 // - Production: minimal JSON (no level/time fields)
 // - Development: pretty logs with colours
 // - Message-first helper API: info("msg", { meta })
+// - Messages are stored in metadata as "message" field
 // ============================================================
 
 import pino from "pino";
@@ -57,11 +58,13 @@ const log = loggerInstance;
 // Usage:
 //   info("Message", { meta });
 //   error("Something failed", { err });
+// - Messages are stored in metadata as "message" field
+// - Empty string passed as primary msg to hide it from output
 // ============================================================
-export const info = (msg, obj = {}) => log.info(obj, msg);
-export const warn = (msg, obj = {}) => log.warn(obj, msg);
-export const error = (msg, obj = {}) => log.error(obj, msg);
-export const debug = (msg, obj = {}) => log.debug(obj, msg);
+export const info = (msg, obj = {}) => log.info({ ...obj, message: msg }, "");
+export const warn = (msg, obj = {}) => log.warn({ ...obj, message: msg }, "");
+export const error = (msg, obj = {}) => log.error({ ...obj, message: msg }, "");
+export const debug = (msg, obj = {}) => log.debug({ ...obj, message: msg }, "");
 
 export { log };
 export default log;
