@@ -33,13 +33,14 @@ export default function chunkText(text, maxChars = Number(process.env.MAX_POLLY_
 
   // Handle text smaller than max size
   if (getCharLength(normalized) <= maxChars) {
-    info("tts.chunk", { 
-      total: 1, 
-      chars: getCharLength(normalized),
-      strategy: "single"
+    info("✓ Text fits in single chunk", { 
+      characters: getCharLength(normalized),
+      limit: maxChars
     });
     return [normalized];
   }
+
+  info(`📝 Splitting text into chunks (${getCharLength(normalized)} characters total)`);
 
   // Strategy selection: paragraph-first, then sentence-based
   const hasParagraphs = /\n\s*\n/.test(normalized);
@@ -73,6 +74,7 @@ export default function chunkText(text, maxChars = Number(process.env.MAX_POLLY_
         
         // Emergency: if single sentence exceeds limit, split by words
         if (sentenceSize > maxChars) {
+          info(`⚠️  Found very long sentence (${sentenceSize} chars) - splitting by words`);
           const wordChunks = splitByWords(sentence, maxChars, getCharLength);
           wordChunks.forEach(wc => {
             chunks.push(wc);
@@ -130,6 +132,7 @@ export default function chunkText(text, maxChars = Number(process.env.MAX_POLLY_
   for (const chunk of chunks) {
     if (getCharLength(chunk) > maxChars) {
       // Emergency re-split
+      info(`⚠️  Chunk exceeded limit during validation - re-splitting`);
       const subChunks = splitByWords(chunk, maxChars, getCharLength);
       validatedChunks.push(...subChunks);
     } else {
@@ -137,21 +140,26 @@ export default function chunkText(text, maxChars = Number(process.env.MAX_POLLY_
     }
   }
 
-  // Enhanced logging
+  // Enhanced human-friendly logging
+  info(`\n📊 Created ${validatedChunks.length} chunk${validatedChunks.length > 1 ? 's' : ''} for TTS processing:\n`);
+  
   validatedChunks.forEach((chunk, idx) => {
     const chars = getCharLength(chunk);
-    const preview = chunk.length > 60 
-      ? `${chunk.slice(0, 60)}...` 
+    const percentage = ((chars / maxChars) * 100).toFixed(0);
+    const preview = chunk.length > 50 
+      ? `${chunk.slice(0, 50)}...` 
       : chunk;
     
-    info("tts.chunk", {
-      index: idx + 1,
-      total: validatedChunks.length,
-      chars,
-      utilization: `${((chars / maxChars) * 100).toFixed(1)}%`,
-      preview
-    });
+    // Visual bar representation
+    const barLength = 20;
+    const filledBars = Math.round((chars / maxChars) * barLength);
+    const bar = '█'.repeat(filledBars) + '░'.repeat(barLength - filledBars);
+    
+    info(`  Chunk ${idx + 1}/${validatedChunks.length}: ${chars} chars [${bar}] ${percentage}% full`);
+    info(`    "${preview}"`);
   });
+
+  info(`\n✓ All chunks ready for AWS Polly synthesis\n`);
 
   return validatedChunks;
 }
@@ -224,4 +232,4 @@ function splitByWords(text, maxChars, getCharLength) {
 function truncateToChars(str, maxChars, getCharLength) {
   if (getCharLength(str) <= maxChars) return str;
   return str.slice(0, maxChars);
-  }
+}
