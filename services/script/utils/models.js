@@ -75,7 +75,10 @@ export async function generateMain(sessionIdLike) {
     .filter((a) => a.title || a.summary);
 
   const { mainSeconds, targetMins } = calculateDuration("main", sessionMeta, articles.length);
-  info("script.main.runtimeTarget", { targetMins, mainSeconds, articleCount: articles.length, feedUrl });
+  info("Main script generation", { 
+    targetMinutes: targetMins, 
+    articles: articles.length 
+  });
 
   const combined = await generateMainLongform(sessionMeta, articles, mainSeconds);
   await sessionCache.storeTempPart(sessionMeta, "main", combined);
@@ -111,8 +114,9 @@ export async function generateComposedEpisode(sessionIdLike) {
   const maxBytes = Number(process.env.MAX_SSML_CHUNK_BYTES || 4200);
   const byteLen = (s) => Buffer.byteLength(s, "utf8");
   let ttsChunks = chunkText(edited, maxBytes);
+  
   if (ttsChunks.length <= 1 && byteLen(edited) > maxBytes) {
-    info("tts.chunk.forceSplit", { reason: "single-chunk-too-large" });
+    info("Force splitting large chunk", { reason: "single-chunk-too-large" });
     const out = [];
     let remaining = edited.trim();
     while (Buffer.byteLength(remaining, "utf8") > maxBytes) {
@@ -143,7 +147,11 @@ export async function generateComposedEpisode(sessionIdLike) {
   const meta = await generateEpisodeMetaLLM(edited, sessionMeta);
   await putJson("meta", `${id}-meta.json`, meta);
 
-  info("✅ Script orchestration complete", { sessionId: id, chunks: files.length });
+  info("Script orchestration complete", { 
+    sessionId: id, 
+    chunks: files.length 
+  });
+  
   return { transcript: edited, chunks: files, meta };
 }
 
