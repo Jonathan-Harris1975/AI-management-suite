@@ -22,7 +22,7 @@ function ensureTmpDir() {
 // ------------------------------------------------------------
 const filters = [
   // 1️⃣ CORRECTED: Normal speed with deeper pitch (0.85-0.9 for natural deeper tone)
-  "rubberband=pitch=0.85:tempo=1.0",
+  "rubberband=pitch=0.89:tempo=1.0",
 
   // 2️⃣ Enhanced low-end warmth for depth
   "equalizer=f=80:t=q:w=1.2:g=4",
