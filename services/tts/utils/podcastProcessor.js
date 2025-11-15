@@ -10,7 +10,7 @@
 
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { putObject } from "#shared/r2-client.js";
@@ -52,6 +52,52 @@ if (!fs.existsSync(TMP_DIR)) {
 }
 
 // ============================================================
+// Utility: Audio File Verification
+// ============================================================
+async function verifyAudioFile(filePath, label, sessionId) {
+  try {
+    const stats = await fs.promises.stat(filePath);
+    if (stats.size < MIN_VALID_BYTES) {
+      throw new Error(`File too small: ${stats.size} bytes (min: ${MIN_VALID_BYTES})`);
+    }
+
+    // Try to get basic file info with ffprobe
+    const result = spawnSync('ffprobe', [
+      '-v', 'error',
+      '-select_streams', 'a:0',
+      '-show_entries', 'stream=duration,codec_name,sample_rate,channels,bit_rate',
+      '-of', 'json',
+      filePath
+    ], { encoding: 'utf8', timeout: 10000 });
+
+    if (result.status !== 0) {
+      throw new Error(`ffprobe failed: ${result.stderr || 'Unknown error'}`);
+    }
+
+    const info = JSON.parse(result.stdout);
+    if (!info.streams || info.streams.length === 0) {
+      throw new Error('No audio streams detected');
+    }
+
+    const stream = info.streams[0];
+    info(`✅ Audio file verified: ${label}`, {
+      sessionId,
+      filePath,
+      size: stats.size,
+      codec: stream.codec_name,
+      duration: stream.duration,
+      sampleRate: stream.sample_rate,
+      channels: stream.channels,
+      bitRate: stream.bit_rate
+    });
+
+    return info;
+  } catch (err) {
+    throw new Error(`Audio file verification failed for ${label}: ${err.message}`);
+  }
+}
+
+// ============================================================
 // Utility: Execute FFmpeg with timeout and retries
 // ============================================================
 function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS) {
@@ -76,6 +122,15 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
     ff.stderr.on("data", (data) => {
       const txt = data.toString();
       stderr += txt;
+      
+      // Enhanced error detection
+      if (txt.toLowerCase().includes("invalid argument") || 
+          txt.toLowerCase().includes("format mp3 detected only with low score") ||
+          txt.toLowerCase().includes("failed to read frame size") ||
+          txt.toLowerCase().includes("could not seek to")) {
+        warn(`🔴 Critical FFmpeg input error (${label})`, { sessionId, chunk: txt });
+      }
+      
       if (txt.toLowerCase().includes("error")) {
         warn(`⚠️ ffmpeg stderr (${label})`, { sessionId, chunk: txt });
       }
@@ -96,7 +151,9 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`ffmpeg failed (code ${code}): ${stderr}`));
+        // Enhanced error message with context
+        const errorMsg = `ffmpeg failed (code ${code}) for ${label}: ${stderr.slice(-500)}`;
+        reject(new Error(errorMsg));
       }
     });
   });
@@ -105,7 +162,7 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
 // ============================================================
 // Utility: Download remote file
 // ============================================================
-async function downloadToLocal(url, targetPath, label) {
+async function downloadToLocal(url, targetPath, label, sessionId) {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`Failed to download ${label}: HTTP ${res.status}`);
@@ -118,7 +175,10 @@ async function downloadToLocal(url, targetPath, label) {
   }
 
   await fs.promises.writeFile(targetPath, buf);
-  info(`⬇️ Downloaded ${label}`, { bytes: buf.length, targetPath });
+  info(`⬇️ Downloaded ${label}`, { sessionId, bytes: buf.length, targetPath });
+
+  // Verify the downloaded file
+  await verifyAudioFile(targetPath, label, sessionId);
 
   return buf;
 }
@@ -131,6 +191,10 @@ async function normalizeIntroOutro(sessionId, introPath, outroPath) {
 
   const introNormPath = path.join(TMP_DIR, `${sessionId}_intro_norm.wav`);
   const outroNormPath = path.join(TMP_DIR, `${sessionId}_outro_norm.wav`);
+
+  // Verify input files before processing
+  await verifyAudioFile(introPath, "intro input", sessionId);
+  await verifyAudioFile(outroPath, "outro input", sessionId);
 
   // Normalize intro
   await runFFmpeg(
@@ -174,6 +238,10 @@ async function normalizeIntroOutro(sessionId, introPath, outroPath) {
     sessionId
   );
 
+  // Verify output files
+  await verifyAudioFile(introNormPath, "normalized intro", sessionId);
+  await verifyAudioFile(outroNormPath, "normalized outro", sessionId);
+
   info("✅ STEP 1 complete: Intro/outro normalized", {
     sessionId,
     intro: introNormPath,
@@ -190,6 +258,9 @@ async function normalizeMainAudio(sessionId, mainPath) {
   info("🔧 STEP 2: Normalizing main audio to 48kHz mono s16", { sessionId });
 
   const mainNormPath = path.join(TMP_DIR, `${sessionId}_main_norm.wav`);
+
+  // Verify input file before processing
+  await verifyAudioFile(mainPath, "main audio input", sessionId);
 
   await runFFmpeg(
     [
@@ -211,6 +282,9 @@ async function normalizeMainAudio(sessionId, mainPath) {
     sessionId
   );
 
+  // Verify output file
+  await verifyAudioFile(mainNormPath, "normalized main audio", sessionId);
+
   info("✅ STEP 2 complete: Main audio normalized", {
     sessionId,
     main: mainNormPath,
@@ -227,6 +301,10 @@ async function applyFades(sessionId, introNormPath, mainNormPath, outroNormPath)
 
   const introFadedPath = path.join(TMP_DIR, `${sessionId}_intro_faded.wav`);
   const outroFadedPath = path.join(TMP_DIR, `${sessionId}_outro_faded.wav`);
+
+  // Verify input files before processing
+  await verifyAudioFile(introNormPath, "intro for fading", sessionId);
+  await verifyAudioFile(outroNormPath, "outro for fading", sessionId);
 
   // Fade in intro
   await runFFmpeg(
@@ -262,6 +340,10 @@ async function applyFades(sessionId, introNormPath, mainNormPath, outroNormPath)
     sessionId
   );
 
+  // Verify output files
+  await verifyAudioFile(introFadedPath, "faded intro", sessionId);
+  await verifyAudioFile(outroFadedPath, "faded outro", sessionId);
+
   info("✅ STEP 3 complete: Fades applied", {
     sessionId,
     introFaded: introFadedPath,
@@ -284,6 +366,11 @@ async function applyAudioEffects(
   info("🔧 STEP 4: Applying audio effects (concat + compression + loudnorm)", {
     sessionId,
   });
+
+  // Verify all input files before processing
+  await verifyAudioFile(introFadedPath, "faded intro for effects", sessionId);
+  await verifyAudioFile(mainNormPath, "main audio for effects", sessionId);
+  await verifyAudioFile(outroFadedPath, "faded outro for effects", sessionId);
 
   const filterComplex = `
     [0:a][1:a][2:a]concat=n=3:v=0:a=1,
@@ -315,6 +402,9 @@ async function applyAudioEffects(
     sessionId
   );
 
+  // Verify final output
+  await verifyAudioFile(outputPath, "final podcast output", sessionId);
+
   info("✅ STEP 4 complete: Audio effects applied", { sessionId, outputPath });
 }
 
@@ -331,6 +421,12 @@ async function runPodcastPipeline(
   total
 ) {
   info(`🎵 Running podcast pipeline (attempt ${attempt}/${total})`, { sessionId });
+
+  // Verify all input files before starting pipeline
+  info("🔍 Verifying input files before pipeline start", { sessionId });
+  await verifyAudioFile(introPath, "pipeline intro", sessionId);
+  await verifyAudioFile(mainPath, "pipeline main", sessionId);
+  await verifyAudioFile(outroPath, "pipeline outro", sessionId);
 
   // STEP 1: Normalize intro/outro
   const { introNormPath, outroNormPath } = await normalizeIntroOutro(
@@ -366,11 +462,22 @@ async function runPodcastPipeline(
 export async function podcastProcessor(sessionId, editedBuffer) {
   const label = `podcastProcessor:${sessionId}`;
 
+  // Validate environment
   if (!PODCAST_INTRO_URL || !PODCAST_OUTRO_URL) {
     warn(
       "⚠️ PODCAST_INTRO_URL or PODCAST_OUTRO_URL missing — skipping mixdown",
       { sessionId }
     );
+    return editedBuffer;
+  }
+
+  // Validate input buffer
+  if (!editedBuffer || editedBuffer.length < MIN_VALID_BYTES) {
+    warn("⚠️ Invalid editedBuffer - too small or empty, skipping podcast processing", {
+      sessionId,
+      bufferLength: editedBuffer?.length || 0,
+      minRequired: MIN_VALID_BYTES
+    });
     return editedBuffer;
   }
 
@@ -380,12 +487,20 @@ export async function podcastProcessor(sessionId, editedBuffer) {
   const finalPath = path.join(TMP_DIR, `${sessionId}_final.mp3`);
 
   try {
-    // Write main audio to disk
+    // Write main audio to disk and verify
     await fs.promises.writeFile(mainPath, editedBuffer);
+    
+    // Verify the written file
+    const stats = await fs.promises.stat(mainPath);
+    if (stats.size < MIN_VALID_BYTES) {
+      throw new Error(`Main audio file too small after write: ${stats.size} bytes`);
+    }
+    
+    info("💾 Main audio written to disk", { sessionId, bytes: stats.size });
 
     // Download intro & outro
-    await downloadToLocal(PODCAST_INTRO_URL, introPath, "intro");
-    await downloadToLocal(PODCAST_OUTRO_URL, outroPath, "outro");
+    await downloadToLocal(PODCAST_INTRO_URL, introPath, "intro", sessionId);
+    await downloadToLocal(PODCAST_OUTRO_URL, outroPath, "outro", sessionId);
 
     let finalBuffer = null;
     let lastError = null;
@@ -448,10 +563,19 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
     stopKeepAlive(label);
 
-    // Cleanup final file
+    // Cleanup temporary files
     try {
-      await fs.promises.unlink(finalPath);
-    } catch {}
+      const files = await fs.promises.readdir(TMP_DIR);
+      const sessionFiles = files.filter(f => f.includes(sessionId));
+      for (const file of sessionFiles) {
+        try {
+          await fs.promises.unlink(path.join(TMP_DIR, file));
+        } catch {}
+      }
+      info("🧹 Cleaned up temporary files", { sessionId, files: sessionFiles.length });
+    } catch (cleanupErr) {
+      warn("⚠️ Failed to cleanup temporary files", { sessionId, error: cleanupErr.message });
+    }
 
     // All attempts failed → return editedBuffer unchanged
     if (!finalBuffer) {
