@@ -1,4 +1,3 @@
-
 // =======================================================================
 // 🎧 MODULAR STREAMING MERGE PROCESSOR
 // Supports mixing remote URLs + local batch files safely
@@ -164,20 +163,15 @@ async function modularMerge(sessionId, sources) {
   let current = sources;
 
   while (current.length > 1) {
-    info("Batch merge round started", {
+    info("Batch merge round", {
       round,
-      inputChunks: current.length,
-      batchSize: BATCH_SIZE
+      chunksRemaining: current.length,
     });
 
     const next = [];
 
     for (let i = 0; i < current.length; i += BATCH_SIZE) {
       const group = current.slice(i, i + BATCH_SIZE);
-
-      info(`Merging batch ${i / BATCH_SIZE + 1}`, { 
-        batchSize: group.length 
-      });
 
       const buffers = [];
       for (const source of group) {
@@ -210,7 +204,8 @@ export async function mergeProcessor(sessionId, chunkUrls = []) {
   startKeepAlive(label, 25000);
   ensureTmpDir();
 
-  info("🎚️ Starting merge process", {
+  info("Starting merge process", {
+    sessionId: sid,
     totalChunks: chunkUrls.length,
   });
 
@@ -226,14 +221,22 @@ export async function mergeProcessor(sessionId, chunkUrls = []) {
 
     await uploadBuffer(MERGED_BUCKET, mergedKey, mergedBuf, "audio/mpeg");
 
-    info("Uploaded final merged MP3", {
-      key: mergedKey,
+    // ✅ CLEAN COMPLETION SUMMARY
+    info("🟩 Merge process completed", {
+      sessionId: sid,
+      chunksProcessed: chunkUrls.length,
+      outputKey: mergedKey,
+      status: "success"
     });
 
     stopKeepAlive(label);
     return { key: mergedKey, localPath: finalPath };
   } catch (err) {
-    error("Merge process failed", { error: err.message });
+    error("Merge process failed", { 
+      sessionId: sid,
+      error: err.message,
+      status: "failed"
+    });
     stopKeepAlive(label);
     throw err;
   }
