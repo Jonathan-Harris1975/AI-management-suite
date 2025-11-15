@@ -16,7 +16,7 @@ export async function getWeatherSummary() {
     if (!apiKey) throw new Error("Missing RAPIDAPI_KEY");
 
     const url = `https://${apiHost}/current.json?q=${encodeURIComponent(location)}`;
-    info("weather.fetch.external", { url, host: apiHost });
+    info("Fetching weather data");
 
     const res = await fetch(url, {
       method: "GET",
@@ -31,10 +31,10 @@ export async function getWeatherSummary() {
 
     const condition = (data?.current?.condition?.text || "overcast").toLowerCase().trim();
     const summary = `${condition} in London`;
-    info("weather.summary.success", { summary });
+    info("Weather summary: ${summary}");
     return summary;
   } catch (err) {
-    error("weather.summary.fail", { err: err.message });
+    error("Failed to get weather summary");
     return "grey skies in London";
   }
 }
