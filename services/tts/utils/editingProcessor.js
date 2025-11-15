@@ -1,5 +1,3 @@
-audio speed is like someone talking on helium and highly caffeinated  speed needs to be normal 
-
 // 🎙️ STREAMING Editing Processor — Podcast-Ready Version
 // Normal Speed • Deeper Tone • Broadcast-Ready
 // ============================================================
