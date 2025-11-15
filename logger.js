@@ -61,6 +61,7 @@ const log = loggerInstance;
 // - Messages are stored in metadata as "message" field
 // - Empty string passed as primary msg to hide it from output
 // ============================================================
+// Modify your log wrappers to move message into metadata
 export const info = (msg, obj = {}) => log.info({ ...obj, message: msg }, "");
 export const warn = (msg, obj = {}) => log.warn({ ...obj, message: msg }, "");
 export const error = (msg, obj = {}) => log.error({ ...obj, message: msg }, "");
