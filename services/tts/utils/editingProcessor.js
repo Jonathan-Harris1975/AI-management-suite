@@ -1,3 +1,5 @@
+audio speed is like someone talking on helium and highly caffeinated  speed needs to be normal 
+
 // 🎙️ STREAMING Editing Processor — Podcast-Ready Version
 // Normal Speed • Deeper Tone • Broadcast-Ready
 // ============================================================
@@ -18,11 +20,11 @@ function ensureTmpDir() {
 }
 
 // ------------------------------------------------------------
-// ⭐ PODCAST-READY FILTER CHAIN (Normal Speed, Deeper Tone)
+// ⭐ PODCAST-READY FILTER CHAIN (Normal Speed, Deeper Tone - FIXED)
 // ------------------------------------------------------------
 const filters = [
-  // 1️⃣ Deeper pitch (lowered by ~10-15%)
-  "asetrate=44100*1.12,aresample=44100",
+  // 1️⃣ CORRECTED: Normal speed with deeper pitch (0.85-0.9 for natural deeper tone)
+  "asetrate=44100*0.88,aresample=44100",
 
   // 2️⃣ Enhanced low-end warmth for depth
   "equalizer=f=80:t=q:w=1.2:g=4",
