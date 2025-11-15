@@ -58,6 +58,6 @@ export const info = (msg, obj = {}) => log.info(obj, msg);
 export const warn = (msg, obj = {}) => log.warn(obj, msg);
 export const error = (msg, obj = {}) => log.error(obj, msg);
 export const debug = (msg, obj = {}) => log.debug(obj, msg);
-
+export const success = (msg, obj = {}) => log.success(obj, msg);
 export { log };
 export default log;
