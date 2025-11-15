@@ -1,5 +1,5 @@
-// 🎙️ STREAMING Editing Processor — Premium Radio Host Version
-// Mature UK Tone • Warm • Natural • Broadcast-Ready
+// 🎙️ STREAMING Editing Processor — Podcast-Ready Version
+// Normal Speed • Deeper Tone • Broadcast-Ready
 // ============================================================
 
 import fs from "fs";
@@ -18,30 +18,33 @@ function ensureTmpDir() {
 }
 
 // ------------------------------------------------------------
-// ⭐ FINAL UK-PREMIUM RADIO HOST FILTER CHAIN (Stable)
+// ⭐ PODCAST-READY FILTER CHAIN (Normal Speed, Deeper Tone)
 // ------------------------------------------------------------
 const filters = [
-  // 1️⃣ Pitch correction
-  "asetrate=44100*1.018,aresample=44100,atempo=0.982",
+  // 1️⃣ Deeper pitch (lowered by ~10-15%)
+  "asetrate=44100*1.12,aresample=44100",
 
-  // 2️⃣ Warm body
-  "equalizer=f=120:t=q:w=1.1:g=3",
-  "equalizer=f=250:t=q:w=1.0:g=2",
-  "equalizer=f=3500:t=q:w=2.0:g=-2",
-  "equalizer=f=7800:t=h:g=-2.5",
+  // 2️⃣ Enhanced low-end warmth for depth
+  "equalizer=f=80:t=q:w=1.2:g=4",
+  "equalizer=f=150:t=q:w=1.1:g=3.5",
+  "equalizer=f=250:t=q:w=1.0:g=2.5",
 
-  // 3️⃣ Slight presence (British radio clarity)
-  "equalizer=f=2600:t=q:w=1.5:g=1.2",
+  // 3️⃣ Reduce mid-high harshness
+  "equalizer=f=3000:t=q:w=2.0:g=-2.5",
+  "equalizer=f=6000:t=q:w=2.0:g=-3",
+  "equalizer=f=8500:t=h:g=-2",
 
-  // 4️⃣ Stable de-esser (moderate, within valid ranges)
-  // i = intensity [0–1], m = max de-essing [0–1], f = normalized freq [0–1]
-  "deesser=i=0.35:m=0.7:f=0.55",
+  // 4️⃣ Slight presence boost for clarity
+  "equalizer=f=2200:t=q:w=1.5:g=1.5",
 
-  // 5️⃣ Natural compression
-  "acompressor=threshold=-18dB:ratio=3.5:attack=18:release=260:makeup=2",
+  // 5️⃣ Professional de-esser
+  "deesser=i=0.4:m=0.75:f=0.5",
 
-  // 6️⃣ Broadcast limiter
-  "alimiter=limit=0.92:attack=6:release=90"
+  // 6️⃣ Podcast-grade compression
+  "acompressor=threshold=-20dB:ratio=4:attack=15:release=250:makeup=3",
+
+  // 7️⃣ Broadcast limiter for consistent loudness
+  "alimiter=limit=0.95:attack=5:release=100"
 ];
 
 // ------------------------------------------------------------
@@ -76,7 +79,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
     throw new Error(`Input file is empty: ${inputPath}`);
   }
 
-  log.info("🎚️ Starting streaming editingProcessor (UK Premium Radio Host)", { sessionId, inputPath });
+  log.info("🎚️ Starting streaming editingProcessor (Podcast-Ready: Normal Speed, Deeper Tone)", { sessionId, inputPath });
 
   const editedPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
   const filterStr = filters.join(",");
@@ -195,7 +198,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
     await uploadBuffer("merged", key, buffer, "audio/mpeg");
 
-    log.info("💾 Uploaded edited MP3 to R2 (UK Premium Host)", { sessionId, key, size: buffer.length });
+    log.info("💾 Uploaded edited MP3 to R2 (Podcast-Ready)", { sessionId, key, size: buffer.length });
 
     stopKeepAlive();
     return editedPath;
