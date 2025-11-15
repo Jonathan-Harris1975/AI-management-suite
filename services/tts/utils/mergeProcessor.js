@@ -7,7 +7,7 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import fetch from "node-fetch";
-import { info, error, warn } from "#logger.js";
+import { info, error, success } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 
@@ -66,8 +66,6 @@ async function downloadRemoteToBuffer(url, attempt = 1) {
     if (attempt < DOWNLOAD_RETRIES) {
       const delay =
         RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
-
-      warn("Retrying remote download", { attempt, delayMs: delay });
       await new Promise((resolve) => setTimeout(resolve, delay));
       return downloadRemoteToBuffer(url, attempt + 1);
     }
@@ -85,8 +83,6 @@ async function loadLocalToBuffer(localPath, attempt = 1) {
     if (attempt < DOWNLOAD_RETRIES) {
       const delay =
         RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
-
-      warn("Retrying local file read", { attempt, delayMs: delay });
       await new Promise((resolve) => setTimeout(resolve, delay));
       return loadLocalToBuffer(localPath, attempt + 1);
     }
@@ -147,8 +143,6 @@ async function streamMergeBuffers(buffers, outputPath, attempt = 1) {
     if (attempt < MERGE_RETRIES) {
       const delay =
         RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
-
-      warn("Retrying merge batch", { attempt, delayMs: delay });
       return streamMergeBuffers(buffers, outputPath, attempt + 1);
     }
     throw err;
@@ -161,26 +155,20 @@ async function streamMergeBuffers(buffers, outputPath, attempt = 1) {
 async function modularMerge(sessionId, sources) {
   let round = 1;
   let current = sources;
+  let totalBatchesProcessed = 0;
+  let totalChunksProcessed = 0;
 
   while (current.length > 1) {
-    info("Batch merge round started", {
-      round,
-      inputChunks: current.length,
-      batchSize: BATCH_SIZE
-    });
-
     const next = [];
 
     for (let i = 0; i < current.length; i += BATCH_SIZE) {
       const group = current.slice(i, i + BATCH_SIZE);
-
-      info(`Merging batch ${i / BATCH_SIZE + 1}`, { 
-        batchSize: group.length 
-      });
+      totalBatchesProcessed++;
 
       const buffers = [];
       for (const source of group) {
         buffers.push(await loadChunk(source));
+        totalChunksProcessed++;
       }
 
       const batchOutput = path.join(
@@ -196,7 +184,15 @@ async function modularMerge(sessionId, sources) {
     round++;
   }
 
-  return current[0];
+  return {
+    finalPath: current[0],
+    stats: {
+      totalRounds: round - 1,
+      totalBatches: totalBatchesProcessed,
+      totalChunks: totalChunksProcessed,
+      finalFileSize: fs.statSync(current[0]).size
+    }
+  };
 }
 
 // ------------------------------------------------------------
@@ -205,34 +201,55 @@ async function modularMerge(sessionId, sources) {
 export async function mergeProcessor(sessionId, chunkUrls = []) {
   const sid = sessionId || `TT-${Date.now()}`;
   const label = `mergeProcessor:${sid}`;
+  const startTime = Date.now();
 
   startKeepAlive(label, 25000);
   ensureTmpDir();
-
-  info("🎚️ Starting merge process", {
-    totalChunks: chunkUrls.length,
-  });
 
   try {
     if (!Array.isArray(chunkUrls) || chunkUrls.length === 0) {
       throw new Error("mergeProcessor requires chunk URLs.");
     }
 
-    const finalPath = await modularMerge(sid, chunkUrls);
+    const mergeResult = await modularMerge(sid, chunkUrls);
+    const { finalPath, stats } = mergeResult;
 
     const mergedBuf = fs.readFileSync(finalPath);
     const mergedKey = `${sid}.mp3`;
 
     await uploadBuffer(MERGED_BUCKET, mergedKey, mergedBuf, "audio/mpeg");
 
-    info("Uploaded final merged MP3", {
-      key: mergedKey,
+    // Final summary only
+    const endTime = Date.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+    const fileSizeMB = (stats.finalFileSize / (1024 * 1024)).toFixed(2);
+    const remoteCount = chunkUrls.filter(url => isRemote(url)).length;
+    const localCount = chunkUrls.length - remoteCount;
+
+    success("⛓️🔉 MERGE PROCESS COMPLETED", {
+      sessionId: sid,
+      duration: `${duration}s`,
+      totalChunks: chunkUrls.length,
+      remoteSources: remoteCount,
+      localSources: localCount,
+      mergeRounds: stats.totalRounds,
+      batchesProcessed: stats.totalBatches,
+      finalFileSize: `${fileSizeMB} MB`,
+      outputKey: mergedKey
     });
 
     stopKeepAlive(label);
-    return { key: mergedKey, localPath: finalPath };
+    return { key: mergedKey, localPath: finalPath, stats };
   } catch (err) {
-    error("Merge process failed", { error: err.message });
+    const endTime = Date.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+    
+    error("❌ MERGE PROCESS FAILED", {
+      sessionId: sid,
+      duration: `${duration}s`,
+      error: err.message
+    });
+    
     stopKeepAlive(label);
     throw err;
   }
