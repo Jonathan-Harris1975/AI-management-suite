@@ -247,7 +247,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       const fallbackBuffer = fs.readFileSync(fallbackPath);
       const key = `${sessionId}_edited.mp3`;
 
-      await uploadBuffer("merged", key, fallbackBuffer, "audio/mpeg");
+      await uploadBuffer("editedAudio", key, fallbackBuffer, "audio/mpeg");
 
       log.info("💾 Uploaded fallback audio to R2", { 
         sessionId, 
