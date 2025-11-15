@@ -15,7 +15,7 @@ export async function runPodcastPipeline(sessionId) {
   try {
     // 1️⃣ Script
     const script = await orchestrateScript(sessionId);
-    log.info("🧩 Script ready", { sessionId, chunks: script?.chunks?.length });
+    log.info(" 📝 Script ready", { sessionId, chunks: script?.chunks?.length });
 
     // 2️⃣ Artwork
     const artwork = await createPodcastArtwork({
@@ -26,11 +26,11 @@ export async function runPodcastPipeline(sessionId) {
 
     // 3️⃣ TTS
     const tts = await orchestrateTTS({ sessionId, chunkKeys: script.chunks });
-    log.info("🔊 TTS complete", { sessionId });
+    log.info( "🗣️🎙️ TTS complete", { sessionId });
 
     const summary = { sessionId, script, artwork, tts };
     await uploadText("podcast-meta", `${sessionId}.json`, JSON.stringify(summary), "application/json");
-    log.info("✅ Metadata saved", { sessionId });
+    log.info("💾 Metadata saved", { sessionId });
 
     log.info("🏁 Podcast pipeline complete", { sessionId });
     return summary;
