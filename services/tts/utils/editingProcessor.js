@@ -1,391 +1,239 @@
-// ============================================================
-// 🎚️ Editing Processor — Hybrid Mastering (Stage 1)
-// ============================================================
-//
-// Input:
-//   • Merged MP3 from MERGED public base (R2_PUBLIC_BASE_URL_MERGE)
-//     → downloaded to /tmp/edited_audio/<sessionId>_raw.mp3
-//
-// Output:
-//   • Edited MP3 at /tmp/edited_audio/<sessionId>_edited.mp3
-//   • Safenet upload to R2_BUCKET_EDITED_AUDIO
-//
-// Safety:
-//   • ffmpeg uses -xerror → hard fail on decode error
-//   • Output must be >= 10 KB or it is treated as corrupt
-//   • On total failure, returns original merged MP3 from R2
+============================================================
+// 🎙️ STREAMING Editing Processor — Premium Radio Host Version
+// Mature UK Tone • Warm • Natural • Broadcast-Ready
 // ============================================================
 
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
-import { info, warn, error } from "#logger.js";
+import { log } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
-import { putObject } from "#shared/r2-client.js";
+import { uploadBuffer } from "#shared/r2-client.js";
 
-const TMP_DIR = "/tmp/edited_audio";
-const MIN_VALID_BYTES = 10 * 1024; // 10 KB
+const TMP_DIR = "/tmp/tts_editing";
 
-const MAX_RETRIES = Number(
-  process.env.MAX_EDIT_RETRIES ||
-    process.env.MAX_CHUNK_RETRIES ||
-    3
-);
-
-const RETRY_DELAY_MS = Number(
-  process.env.EDIT_RETRY_DELAY_MS ||
-    process.env.RETRY_DELAY_MS ||
-    2000
-);
-
-const RETRY_BACKOFF = Number(
-  process.env.RETRY_BACKOFF_MULTIPLIER || 2
-);
-
-const MERGED_BASE = process.env.R2_PUBLIC_BASE_URL_MERGE || "";
-
-const EDITED_BUCKET = process.env.R2_BUCKET_EDITED_AUDIO || "";
-const PUBLIC_EDITED_BASE =
-  process.env.R2_PUBLIC_BASE_URL_EDITED_AUDIO || "";
-
-if (!fs.existsSync(TMP_DIR)) {
-  fs.mkdirSync(TMP_DIR, { recursive: true });
+function ensureTmpDir() {
+  if (!fs.existsSync(TMP_DIR)) {
+    fs.mkdirSync(TMP_DIR, { recursive: true });
+  }
 }
 
 // ------------------------------------------------------------
-// 🎚️ Stage 1 Filter Chain (no loudnorm; that happens later)
+// ⭐ FINAL UK-PREMIUM RADIO HOST FILTER CHAIN (Stable)
 // ------------------------------------------------------------
-function ffmpegStage1Filter() {
-  return [
-    "highpass=f=110",
-    "equalizer=f=7000:t=h:w=200:g=-6",
-    "acompressor=threshold=-20dB:ratio=2:attack=10:release=80",
-  ].join(",");
-}
+//
+//
+const filters = [
+    "asetrate=44100*1.018,aresample=44100,atempo=0.982",
+
+  // 2️⃣ Warm body
+  "equalizer=f=120:t=q:w=1.1:g=3",
+  "equalizer=f=250:t=q:w=1.0:g=2",
+  "equalizer=f=3500:t=q:w=2.0:g=-2",
+  "equalizer=f=7800:t=h:g=-2.5",
+
+  // 3️⃣ Slight presence (British radio clarity)
+  "equalizer=f=2600:t=q:w=1.5:g=1.2",
+
+  // 4️⃣ Stable de-esser (moderate, within valid ranges)
+  // i = intensity [0–1], m = max de-essing [0–1], f = normalized freq [0–1]
+  "deesser=i=0.35:m=0.7:f=0.55",
+
+  // 5️⃣ Natural compression
+  "acompressor=threshold=-18dB:ratio=3.5:attack=18:release=260:makeup=2",
+
+  // 6️⃣ Broadcast limiter
+  "alimiter=limit=0.92:attack=6:release=90"
+];
+
 
 // ------------------------------------------------------------
-// 📥 Download merged MP3 from R2 → local file
+// 🧩 Streaming Editing Processor
 // ------------------------------------------------------------
-async function downloadMergedToLocal(sessionId, mergedUrl, localPath) {
-  const fetchFn = globalThis.fetch;
-  if (!fetchFn) {
-    throw new Error("fetch not available; cannot download merged MP3");
-  }
+export async function editingProcessor(sessionId, inputPathObj) {
+  startKeepAlive(`editingProcessor:${sessionId}`, 25000);
+  ensureTmpDir();
 
-  const res = await fetchFn(mergedUrl);
-  if (!res.ok) {
+  const inputPath =
+    typeof inputPathObj === "string"
+      ? inputPathObj
+      : inputPathObj?.localPath;
+
+  if (!inputPath || typeof inputPath !== "string") {
+    stopKeepAlive();
     throw new Error(
-      `Failed to download merged MP3: HTTP ${res.status}`
+      `Invalid inputPath passed to editingProcessor. Received: ${JSON.stringify(
+        inputPathObj
+      )}`
     );
   }
 
-  const buf = Buffer.from(await res.arrayBuffer());
-
-  if (buf.length < MIN_VALID_BYTES) {
-    throw new Error(
-      `Merged MP3 too small or invalid (bytes=${buf.length})`
-    );
+  if (!fs.existsSync(inputPath)) {
+    stopKeepAlive();
+    throw new Error(`Input file does not exist: ${inputPath}`);
   }
 
-  await fs.promises.writeFile(localPath, buf);
-
-  info("⬇️ Downloaded merged MP3 locally", {
-    sessionId,
-    bytes: buf.length,
-    localPath,
-  });
-
-  return buf;
-}
-
-// ------------------------------------------------------------
-// 🛰️ Fallback: fetch merged MP3 as Buffer (no local file used)
-// ------------------------------------------------------------
-async function fetchMergedBuffer(mergedUrl) {
-  const fetchFn = globalThis.fetch;
-  if (!fetchFn) {
-    throw new Error(
-      "fetch not available; cannot download merged MP3 fallback"
-    );
+  const stats = fs.statSync(inputPath);
+  if (!stats.size) {
+    stopKeepAlive();
+    throw new Error(`Input file is empty: ${inputPath}`);
   }
 
-  const res = await fetchFn(mergedUrl);
-  if (!res.ok) {
-    throw new Error(
-      `Failed to fetch merged MP3 fallback: HTTP ${res.status}`
-    );
+  log.info("🎚️ Starting streaming editingProcessor (UK Premium Radio Host)", { sessionId, inputPath });
+
+  const editedPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
+  const filterStr = filters.join(",");
+  let ffmpegSucceeded = false;
+
+  if (fs.existsSync(editedPath)) {
+    try {
+      fs.unlinkSync(editedPath);
+    } catch (cleanupErr) {
+      log.warn("⚠️ Could not clean up existing edited file", { sessionId, error: cleanupErr.message });
+    }
   }
-
-  const buf = Buffer.from(await res.arrayBuffer());
-
-  if (buf.length < MIN_VALID_BYTES) {
-    throw new Error(
-      `Merged MP3 fallback too small or invalid (bytes=${buf.length})`
-    );
-  }
-
-  return buf;
-}
-
-// ------------------------------------------------------------
-// 🔁 Run ffmpeg once (LOCAL INPUT)
-// ------------------------------------------------------------
-function runEditingOnce(
-  sessionId,
-  inputPath,
-  outputPath,
-  attempt,
-  total
-) {
-  const filters = ffmpegStage1Filter();
-
-  const args = [
-    "-y",
-    "-xerror", // 🔥 hard fail on decode error
-    "-i",
-    inputPath,
-    "-filter:a",
-    filters,
-    "-c:a",
-    "libmp3lame",
-    "-b:a",
-    "128k",
-    outputPath,
-  ];
-
-  return new Promise((resolve, reject) => {
-    info("🎚️ Starting editingProcessor ffmpeg attempt", {
-      sessionId,
-      attempt,
-      total,
-      args,
-    });
-
-    const ff = spawn("ffmpeg", args);
-    let stderr = "";
-
-    ff.stderr.on("data", (buf) => {
-      const txt = buf.toString();
-      stderr += txt;
-      if (txt.toLowerCase().includes("error")) {
-        warn("⚠️ ffmpeg stderr (editingProcessor)", {
-          sessionId,
-          attempt,
-          stderr: txt,
-        });
-      }
-    });
-
-    ff.on("error", (err) => reject(err));
-
-    ff.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(
-          new Error(
-            `ffmpeg exited with code ${code}: ${stderr}`
-          )
-        );
-      }
-    });
-  });
-}
-
-// ------------------------------------------------------------
-// 🎧 editingProcessor — Main
-// ------------------------------------------------------------
-// NOTE: second parameter is ignored so orchestrator signature
-//       `editingProcessor(sessionId, buffer)` still works.
-export async function editingProcessor(
-  sessionId,
-  _unusedAudioBuffer
-) {
-  const label = `editingProcessor:${sessionId}`;
-  startKeepAlive(label, 15000);
-
-  if (!MERGED_BASE) {
-    stopKeepAlive(label);
-    throw new Error(
-      "R2_PUBLIC_BASE_URL_MERGE is not set; cannot run editingProcessor"
-    );
-  }
-
-  const mergedUrl = `${MERGED_BASE}/${encodeURIComponent(
-    `${sessionId}.mp3`
-  )}`;
-  const rawLocal = path.join(TMP_DIR, `${sessionId}_raw.mp3`);
-  const editedLocal = path.join(
-    TMP_DIR,
-    `${sessionId}_edited.mp3`
-  );
-
-  info("🔗 Using merged MP3 as editing input", {
-    sessionId,
-    mergedUrl,
-    rawLocal,
-    editedLocal,
-  });
-
-  let finalBuffer = null;
-  let lastError = null;
 
   try {
-    // Download merged MP3 once per run
-    await downloadMergedToLocal(
-      sessionId,
-      mergedUrl,
-      rawLocal
-    );
+    const ffmpeg = spawn("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      "pipe:0",
+      "-af",
+      filterStr,
+
+      // Output
+      "-ar", "44100",
+      "-codec:a", "libmp3lame",
+      "-b:a", "192k",
+      "-y",
+      editedPath,
+    ]);
+
+    let ffmpegErr = "";
+    let settled = false;
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+
+      log.error("💥 editingProcessor ffmpeg failure", { sessionId, error: err.message, ffmpegErr });
+    };
+
+    ffmpeg.stderr.on("data", (d) => (ffmpegErr += d.toString()));
+    ffmpeg.on("error", (err) => fail(err));
+
+    ffmpeg.stdin.on("error", (err) => {
+      if (err.code !== "EPIPE") {
+        log.error("💥 ffmpeg stdin error", { sessionId, err });
+      }
+      fail(err);
+    });
+
+    await new Promise((resolve, reject) => {
+      const inputStream = fs.createReadStream(inputPath, {
+        highWaterMark: 64 * 1024,
+      });
+
+      const safeReject = (err) => {
+        if (settled) return;
+        settled = true;
+        try {
+          ffmpeg.stdin.end();
+        } catch {}
+        try {
+          inputStream.destroy();
+        } catch {}
+
+        reject(err);
+      };
+
+      inputStream.on("error", (err) => {
+        log.error("💥 inputStream error", { sessionId, err });
+        safeReject(err);
+      });
+
+      inputStream.on("data", (chunk) => {
+        if (settled) return;
+        const ok = ffmpeg.stdin.write(chunk);
+        if (!ok) {
+          inputStream.pause();
+          ffmpeg.stdin.once("drain", () => {
+            if (!settled) inputStream.resume();
+          });
+        }
+      });
+
+      inputStream.on("end", () => {
+        if (!settled) ffmpeg.stdin.end();
+      });
+
+      ffmpeg.on("close", (code) => {
+        if (settled) return;
+
+        if (code !== 0) {
+          safeReject(new Error(`ffmpeg exited with ${code} — ${ffmpegErr}`));
+        } else {
+          settled = true;
+          ffmpegSucceeded = true;
+          resolve();
+        }
+      });
+    });
+
+    // Validate output
+    if (!fs.existsSync(editedPath)) {
+      throw new Error("Edited file was not created");
+    }
+
+    const editedStats = fs.statSync(editedPath);
+    if (!editedStats.size) {
+      throw new Error("Edited file is empty");
+    }
+
+    // Upload
+    const buffer = fs.readFileSync(editedPath);
+    const key = `${sessionId}_edited.mp3`;
+
+    await uploadBuffer("merged", key, buffer, "audio/mpeg");
+
+    log.info("💾 Uploaded edited MP3 to R2 (UK Premium Host)", { sessionId, key, size: buffer.length });
+
+    stopKeepAlive();
+    return editedPath;
   } catch (err) {
-    stopKeepAlive(label);
-    error("💥 Failed to download merged MP3 for editing", {
-      sessionId,
-      error: err.message,
-    });
-    // If we can't even download the merged file, bail
-    throw err;
-  }
-
-  // 🔁 Retry loop
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      // remove stale output if any
-      try {
-        await fs.promises.unlink(editedLocal);
-      } catch {
-        // ignore
-      }
-
-      await runEditingOnce(
-        sessionId,
-        rawLocal,
-        editedLocal,
-        attempt,
-        MAX_RETRIES
-      );
-
-      const candidate = await fs.promises.readFile(
-        editedLocal
-      );
-
-      if (candidate.length < MIN_VALID_BYTES) {
-        throw new Error(
-          `Edited MP3 too small or invalid (bytes=${candidate.length})`
-        );
-      }
-
-      finalBuffer = candidate;
-
-      info("✅ editingProcessor produced cleaned audio", {
-        sessionId,
-        bytes: finalBuffer.length,
-        attempt,
-      });
-
-      break;
-    } catch (err) {
-      lastError = err;
-
-      warn("⚠️ editingProcessor ffmpeg attempt failed", {
-        sessionId,
-        attempt,
-        error: err.message,
-        maxAttempts: MAX_RETRIES,
-      });
-
-      if (attempt < MAX_RETRIES) {
-        const delay =
-          RETRY_DELAY_MS *
-          Math.pow(RETRY_BACKOFF, attempt - 1);
-
-        info("🔁 Retrying editingProcessor after delay", {
-          sessionId,
-          attempt,
-          nextInMs: delay,
-        });
-
-        await new Promise((resolve) =>
-          setTimeout(resolve, delay)
-        );
-      }
-    }
-  }
-
-  stopKeepAlive(label);
-
-  // Cleanup temp edited file (best-effort)
-  try {
-    await fs.promises.unlink(editedLocal);
-  } catch {
-    // ignore
-  }
-
-  // ❌ All attempts failed → fall back to original merged MP3
-  if (!finalBuffer) {
-    error(
-      "💥 editingProcessor failed after all retries — returning original merged audio",
-      {
-        sessionId,
-        error: lastError?.message,
-      }
-    );
+    // Fallback
+    log.error("💥 editingProcessor failed — fallback to unedited audio", { sessionId, error: err.message });
 
     try {
-      const fallbackBuffer = await fetchMergedBuffer(
-        mergedUrl
-      );
-
-      info(
-        "🛟 Returned original merged MP3 as editing fallback",
-        {
-          sessionId,
-          bytes: fallbackBuffer.length,
+      if (!ffmpegSucceeded) {
+        if (!fs.existsSync(editedPath)) {
+          fs.copyFileSync(inputPath, editedPath);
+          log.info("🔄 Created fallback copy of original audio", { sessionId });
         }
-      );
 
-      return fallbackBuffer;
+        const buffer = fs.readFileSync(editedPath);
+        const key = `${sessionId}_edited.mp3`;
+
+        await uploadBuffer("merged", key, buffer, "audio/mpeg");
+
+        log.info("💾 Uploaded fallback (unedited) MP3 to R2", { sessionId, key, fallback: true });
+      }
     } catch (fallbackErr) {
-      error(
-        "💥 editingProcessor fallback to merged MP3 also failed",
-        {
-          sessionId,
-          error: fallbackErr.message,
-        }
-      );
-      throw lastError || fallbackErr;
+      log.error("💥 editingProcessor fallback also failed", { sessionId, error: fallbackErr.message });
+      stopKeepAlive();
+      throw fallbackErr;
     }
+
+    stopKeepAlive();
+    return editedPath;
   }
-
-  // 📦 Safenet R2 Upload
-  if (EDITED_BUCKET && PUBLIC_EDITED_BASE) {
-    try {
-      const key = `${sessionId}_edited.mp3`;
-
-      await putObject(
-        EDITED_BUCKET,
-        key,
-        finalBuffer,
-        "audio/mpeg"
-      );
-
-      info("💾 editingProcessor safenet upload OK", {
-        sessionId,
-        bucket: EDITED_BUCKET,
-        key,
-        publicUrl: `${PUBLIC_EDITED_BASE}/${encodeURIComponent(
-          key
-        )}`,
-      });
-    } catch (err) {
-      warn("⚠️ editingProcessor safenet upload failed", {
-        sessionId,
-        error: err.message,
-      });
-    }
-  }
-
-  return finalBuffer;
 }
 
 export default editingProcessor;
+
+
+
+
+    
