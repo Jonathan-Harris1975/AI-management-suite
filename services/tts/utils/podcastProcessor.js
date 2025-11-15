@@ -19,7 +19,6 @@ import { putObject } from "#shared/r2-client.js";
 // Configuration
 // ============================================================
 const TMP_DIR = "/tmp/podcast_master";
-const MIN_VALID_BYTES = 10 * 1024; // 10 KB
 
 const PODCAST_INTRO_URL = process.env.PODCAST_INTRO_URL || "";
 const PODCAST_OUTRO_URL = process.env.PODCAST_OUTRO_URL || "";
@@ -57,8 +56,8 @@ if (!fs.existsSync(TMP_DIR)) {
 async function verifyAudioFile(filePath, label, sessionId) {
   try {
     const stats = await fs.promises.stat(filePath);
-    if (stats.size < MIN_VALID_BYTES) {
-      throw new Error(`File too small: ${stats.size} bytes (min: ${MIN_VALID_BYTES})`);
+    if (stats.size === 0) {
+      throw new Error(`File is empty: 0 bytes`);
     }
 
     // Try to get basic file info with ffprobe
@@ -74,12 +73,12 @@ async function verifyAudioFile(filePath, label, sessionId) {
       throw new Error(`ffprobe failed: ${result.stderr || 'Unknown error'}`);
     }
 
-    const info = JSON.parse(result.stdout);
-    if (!info.streams || info.streams.length === 0) {
+    const probeInfo = JSON.parse(result.stdout);
+    if (!probeInfo.streams || probeInfo.streams.length === 0) {
       throw new Error('No audio streams detected');
     }
 
-    const stream = info.streams[0];
+    const stream = probeInfo.streams[0];
     info(`✅ Audio file verified: ${label}`, {
       sessionId,
       filePath,
@@ -91,14 +90,14 @@ async function verifyAudioFile(filePath, label, sessionId) {
       bitRate: stream.bit_rate
     });
 
-    return info;
+    return probeInfo;
   } catch (err) {
     throw new Error(`Audio file verification failed for ${label}: ${err.message}`);
   }
 }
 
 // ============================================================
-// Utility: Execute FFmpeg with timeout and retries
+// Utility: Execute FFmpeg with timeout
 // ============================================================
 function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
@@ -151,7 +150,6 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
       if (code === 0) {
         resolve();
       } else {
-        // Enhanced error message with context
         const errorMsg = `ffmpeg failed (code ${code}) for ${label}: ${stderr.slice(-500)}`;
         reject(new Error(errorMsg));
       }
@@ -160,7 +158,7 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
 }
 
 // ============================================================
-// Utility: Download remote file
+// Utility: Download remote file with streaming
 // ============================================================
 async function downloadToLocal(url, targetPath, label, sessionId) {
   const res = await fetch(url);
@@ -168,19 +166,37 @@ async function downloadToLocal(url, targetPath, label, sessionId) {
     throw new Error(`Failed to download ${label}: HTTP ${res.status}`);
   }
 
-  const buf = Buffer.from(await res.arrayBuffer());
+  // Stream directly to file instead of loading into memory
+  const fileStream = fs.createWriteStream(targetPath);
+  
+  try {
+    // Convert web ReadableStream to Node.js stream
+    const reader = res.body.getReader();
+    let bytesWritten = 0;
 
-  if (buf.length < MIN_VALID_BYTES) {
-    throw new Error(`${label} MP3 too small or invalid (bytes=${buf.length})`);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      fileStream.write(value);
+      bytesWritten += value.length;
+    }
+
+    await new Promise((resolve, reject) => {
+      fileStream.end();
+      fileStream.on('finish', resolve);
+      fileStream.on('error', reject);
+    });
+
+    info(`⬇️ Downloaded ${label}`, { sessionId, bytes: bytesWritten, targetPath });
+
+    // Verify the downloaded file
+    await verifyAudioFile(targetPath, label, sessionId);
+
+  } catch (err) {
+    fileStream.destroy();
+    throw err;
   }
-
-  await fs.promises.writeFile(targetPath, buf);
-  info(`⬇️ Downloaded ${label}`, { sessionId, bytes: buf.length, targetPath });
-
-  // Verify the downloaded file
-  await verifyAudioFile(targetPath, label, sessionId);
-
-  return buf;
 }
 
 // ============================================================
@@ -409,7 +425,7 @@ async function applyAudioEffects(
 }
 
 // ============================================================
-// Pipeline orchestrator with retries
+// Pipeline orchestrator
 // ============================================================
 async function runPodcastPipeline(
   sessionId,
@@ -457,6 +473,24 @@ async function runPodcastPipeline(
 }
 
 // ============================================================
+// Cleanup helper
+// ============================================================
+async function cleanupTempFiles(sessionId) {
+  try {
+    const files = await fs.promises.readdir(TMP_DIR);
+    const sessionFiles = files.filter(f => f.includes(sessionId));
+    
+    await Promise.allSettled(
+      sessionFiles.map(file => fs.promises.unlink(path.join(TMP_DIR, file)))
+    );
+    
+    info("🧹 Cleaned up temporary files", { sessionId, files: sessionFiles.length });
+  } catch (cleanupErr) {
+    warn("⚠️ Failed to cleanup temporary files", { sessionId, error: cleanupErr.message });
+  }
+}
+
+// ============================================================
 // Main: podcastProcessor
 // ============================================================
 export async function podcastProcessor(sessionId, editedBuffer) {
@@ -472,11 +506,10 @@ export async function podcastProcessor(sessionId, editedBuffer) {
   }
 
   // Validate input buffer
-  if (!editedBuffer || editedBuffer.length < MIN_VALID_BYTES) {
-    warn("⚠️ Invalid editedBuffer - too small or empty, skipping podcast processing", {
+  if (!editedBuffer || editedBuffer.length === 0) {
+    warn("⚠️ Invalid editedBuffer - empty, skipping podcast processing", {
       sessionId,
-      bufferLength: editedBuffer?.length || 0,
-      minRequired: MIN_VALID_BYTES
+      bufferLength: editedBuffer?.length || 0
     });
     return editedBuffer;
   }
@@ -492,13 +525,13 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     
     // Verify the written file
     const stats = await fs.promises.stat(mainPath);
-    if (stats.size < MIN_VALID_BYTES) {
-      throw new Error(`Main audio file too small after write: ${stats.size} bytes`);
+    if (stats.size === 0) {
+      throw new Error(`Main audio file is empty after write`);
     }
     
     info("💾 Main audio written to disk", { sessionId, bytes: stats.size });
 
-    // Download intro & outro
+    // Download intro & outro (streaming)
     await downloadToLocal(PODCAST_INTRO_URL, introPath, "intro", sessionId);
     await downloadToLocal(PODCAST_OUTRO_URL, outroPath, "outro", sessionId);
 
@@ -527,10 +560,8 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
         const candidate = await fs.promises.readFile(finalPath);
 
-        if (candidate.length < MIN_VALID_BYTES) {
-          throw new Error(
-            `Final MP3 too small or invalid (bytes=${candidate.length})`
-          );
+        if (candidate.length === 0) {
+          throw new Error(`Final MP3 is empty`);
         }
 
         finalBuffer = candidate;
@@ -564,18 +595,7 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     stopKeepAlive(label);
 
     // Cleanup temporary files
-    try {
-      const files = await fs.promises.readdir(TMP_DIR);
-      const sessionFiles = files.filter(f => f.includes(sessionId));
-      for (const file of sessionFiles) {
-        try {
-          await fs.promises.unlink(path.join(TMP_DIR, file));
-        } catch {}
-      }
-      info("🧹 Cleaned up temporary files", { sessionId, files: sessionFiles.length });
-    } catch (cleanupErr) {
-      warn("⚠️ Failed to cleanup temporary files", { sessionId, error: cleanupErr.message });
-    }
+    await cleanupTempFiles(sessionId);
 
     // All attempts failed → return editedBuffer unchanged
     if (!finalBuffer) {
@@ -615,6 +635,9 @@ export async function podcastProcessor(sessionId, editedBuffer) {
       sessionId,
       error: err.message,
     });
+
+    // Attempt cleanup even on crash
+    await cleanupTempFiles(sessionId);
 
     return editedBuffer;
   }
