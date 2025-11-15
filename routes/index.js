@@ -9,58 +9,40 @@ import rssRoutes from "../services/rss-feed-creator/routes/rewrite.js";
 import scriptRoutes from "../services/script/routes/index.js";
 import ttsRoutes from "../services/tts/routes/tts.js";
 import artworkRoutes from "../services/artwork/index.js";
-import podcastRoutes from "../services/podcast/index.js"; // ✅ Correct route import
+import podcastRoutes from "../services/podcast/index.js";
 
 const router = express.Router();
 
-info("🚀 Starting route registration...");
+const routeRegistry = [
+  { path: "/rss", name: "RSS Feed Creator", routes: rssRoutes },
+  { path: "/script", name: "Script Generation", routes: scriptRoutes },
+  { path: "/tts", name: "TTS Service", routes: ttsRoutes },
+  { path: "/artwork", name: "Artwork Creation", routes: artworkRoutes },
+  { path: "/podcast", name: "Podcast Generation", routes: podcastRoutes }
+];
+
+info("📡 Starting route registration...");
 
 try {
-  // ─────────────────────────────
-  //  HEALTH ENDPOINTS
-  // ─────────────────────────────
-  router.get("/api/rss/health", (_req, res) =>
+  // Health endpoints
+  router.get("/api/rss/health", (_req, res) => 
     res.status(200).json({ status: "ok", service: "rss-feed-creator" })
   );
-
-  router.get("/api/podcast/health", (_req, res) =>
+  router.get("/api/podcast/health", (_req, res) => 
     res.status(200).json({ status: "ok", service: "podcast" })
   );
 
-  // ─────────────────────────────
-  //  RSS FEED CREATOR
-  // ─────────────────────────────
-  router.use("/rss", rssRoutes);
-  info("📰 Mounted: /rss");
+  // Mount all routes
+  routeRegistry.forEach(({ path, name, routes }) => {
+    router.use(path, routes);
+  });
 
-  // ─────────────────────────────
-  //  SCRIPT GENERATION & ORCHESTRATION
-  // ─────────────────────────────
-  router.use("/script", scriptRoutes);
-  info("✍️ Mounted: /script");
-
-  // ─────────────────────────────
-  //  TTS SERVICE
-  // ─────────────────────────────
-  router.use("/tts", ttsRoutes);
-  info("🔊 Mounted: /tts");
-
-  // ─────────────────────────────
-  //  ARTWORK CREATION
-  // ─────────────────────────────
-  router.use("/artwork", artworkRoutes);
-  info("🎨 Mounted: /artwork");
-
-  // ─────────────────────────────
-  //  PODCAST GENERATION
-  // ─────────────────────────────
-  // Includes both /podcast/run and /podcast/health
-  router.use("/podcast", podcastRoutes);
-  info("🎧 Mounted: /podcast");
-
-  info("✅ All routes mounted successfully.");
+  // Summary log
+  info(`🟩 Routes mounted: ${routeRegistry.length} services registered`);
+  
 } catch (err) {
-  error("💥 Failed during route registration", { error: err.stack });
+  error("💥 Route registration failed", { error: err.stack });
+  throw err;
 }
 
 export default router;
