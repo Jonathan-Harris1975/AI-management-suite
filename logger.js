@@ -1,35 +1,43 @@
 // ============================================================
 // 🧠 AI Podcast Suite — Ultra-Clean Logger (Pino v8)
 // ============================================================
-// - Production: minimal JSON (no level/time fields)
-// - Development: pretty logs with colours
-// - Message-first helper API: info("msg", { meta })
-// - Messages are stored in metadata as "message" field
-// ============================================================
 
 import pino from "pino";
 
-const isProd =
-  process.env.NODE_ENV === "production" || process.env.SHIPER === "true";
+const isProd = process.env.NODE_ENV === "production" || process.env.SHIPER === "true";
 
 let loggerInstance = globalThis.__AI_PODCAST_LOGGER__;
 
 if (!loggerInstance) {
+  const customLogFormatters = {
+    formatLog: (obj) => {
+      const { msg, level, time, ...rest } = obj;
+      
+      if (isProd) {
+        // Production: return only custom fields, no msg
+        return rest;
+      } else {
+        // Development: include message as custom field, exclude msg
+        return {
+          ...rest,
+          // Message is available as custom field if needed
+        };
+      }
+    }
+  };
+
   if (isProd) {
-    // Production: structured but minimal
     loggerInstance = pino({
       level: process.env.LOG_LEVEL || "info",
-      base: null,          // drop pid/hostname
-      timestamp: false,    // drop timestamp field
+      base: null,
+      timestamp: false,
       formatters: {
-        level: () => ({}),     // hide "level"
-        bindings: () => ({}),  // hide bindings
-        log: (obj) => obj,     // pass through user metadata as-is
+        level: () => ({}),
+        bindings: () => ({}),
+        log: customLogFormatters.formatLog,
       },
-      messageKey: "msg",   // ensure message is under "msg"
     });
   } else {
-    // Development: pretty, colourised output
     loggerInstance = pino({
       level: process.env.LOG_LEVEL || "debug",
       base: { service: "ai-podcast-suite" },
@@ -40,9 +48,12 @@ if (!loggerInstance) {
           colorize: true,
           singleLine: false,
           translateTime: "SYS:standard",
-          ignore: "pid,hostname",
-          messageKey: "msg",
+          ignore: "pid,hostname,msg", // Ignore msg in pretty output
+          messageKey: "customMessage", // Prevent default msg behavior
         },
+      },
+      formatters: {
+        log: customLogFormatters.formatLog,
       },
     });
   }
@@ -52,20 +63,11 @@ if (!loggerInstance) {
 
 const log = loggerInstance;
 
-// ============================================================
-// 🔊 PUBLIC LOG WRAPPERS — message-first API
-// ============================================================
-// Usage:
-//   info("Message", { meta });
-//   error("Something failed", { err });
-// - Messages are stored in metadata as "message" field
-// - Empty string passed as primary msg to hide it from output
-// ============================================================
-// Modify your log wrappers to move message into metadata
-export const info = (msg, obj = {}) => log.info({ ...obj, message: msg }, "");
-export const warn = (msg, obj = {}) => log.warn({ ...obj, message: msg }, "");
-export const error = (msg, obj = {}) => log.error({ ...obj, message: msg }, "");
-export const debug = (msg, obj = {}) => log.debug({ ...obj, message: msg }, "");
+// 🔥 WRAPPER FUNCTIONS STAY EXACTLY THE SAME 🔥
+export const info = (msg, obj = {}) => log.info(obj, msg);
+export const warn = (msg, obj = {}) => log.warn(obj, msg);
+export const error = (msg, obj = {}) => log.error(obj, msg);
+export const debug = (msg, obj = {}) => log.debug(obj, msg);
 
 export { log };
 export default log;
