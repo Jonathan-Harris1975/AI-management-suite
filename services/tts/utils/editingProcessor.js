@@ -2,18 +2,18 @@
 // 🎚️ Editing Processor — Hybrid Mastering (Stage 1)
 // ============================================================
 //
-// Uses merged MP3 from R2 as the ONLY input.
-// Steps:
-//   1) Download merged MP3 → /tmp/edited_audio/<sessionId>_raw.mp3
-//   2) Run ffmpeg locally (NO remote streaming!)
-//   3) Apply minimal mastering:
-//        • highpass 110Hz
-//        • equalizer 7kHz, narrow notch anti-harshness
-//        • gentle compression
-//      (NO loudnorm – performed later in podcastProcessor)
-//   4) Upload edited MP3 as safenet
-//   5) If anything fails → return original merged MP3
+// Input:
+//   • Merged MP3 from MERGED public base (R2_PUBLIC_BASE_URL_MERGE)
+//     → downloaded to /tmp/edited_audio/<sessionId>_raw.mp3
 //
+// Output:
+//   • Edited MP3 at /tmp/edited_audio/<sessionId>_edited.mp3
+//   • Safenet upload to R2_BUCKET_EDITED_AUDIO
+//
+// Safety:
+//   • ffmpeg uses -xerror → hard fail on decode error
+//   • Output must be >= 10 KB or it is treated as corrupt
+//   • On total failure, returns original merged MP3 from R2
 // ============================================================
 
 import fs from "fs";
@@ -23,52 +23,67 @@ import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { putObject } from "#shared/r2-client.js";
 
-// ------------------------------------------------------------
-// ⚙ ENV
-// ------------------------------------------------------------
 const TMP_DIR = "/tmp/edited_audio";
+const MIN_VALID_BYTES = 10 * 1024; // 10 KB
 
-const MAX_RETRIES = Number(process.env.MAX_EDIT_RETRIES || 3);
-const RETRY_DELAY_MS = Number(process.env.EDIT_RETRY_DELAY_MS || 2000);
-const RETRY_BACKOFF = Number(process.env.RETRY_BACKOFF_MULTIPLIER || 2);
+const MAX_RETRIES = Number(
+  process.env.MAX_EDIT_RETRIES ||
+    process.env.MAX_CHUNK_RETRIES ||
+    3
+);
+
+const RETRY_DELAY_MS = Number(
+  process.env.EDIT_RETRY_DELAY_MS ||
+    process.env.RETRY_DELAY_MS ||
+    2000
+);
+
+const RETRY_BACKOFF = Number(
+  process.env.RETRY_BACKOFF_MULTIPLIER || 2
+);
 
 const MERGED_BASE = process.env.R2_PUBLIC_BASE_URL_MERGE || "";
+
 const EDITED_BUCKET = process.env.R2_BUCKET_EDITED_AUDIO || "";
 const PUBLIC_EDITED_BASE =
   process.env.R2_PUBLIC_BASE_URL_EDITED_AUDIO || "";
 
-// ensure /tmp exists
 if (!fs.existsSync(TMP_DIR)) {
   fs.mkdirSync(TMP_DIR, { recursive: true });
 }
 
 // ------------------------------------------------------------
-// 🎚 Filter chain (safe for Debian builds)
+// 🎚️ Stage 1 Filter Chain (no loudnorm; that happens later)
 // ------------------------------------------------------------
 function ffmpegStage1Filter() {
   return [
     "highpass=f=110",
     "equalizer=f=7000:t=h:w=200:g=-6",
-    "acompressor=threshold=-20dB:ratio=2:attack=10:release=80"
+    "acompressor=threshold=-20dB:ratio=2:attack=10:release=80",
   ].join(",");
 }
 
 // ------------------------------------------------------------
-// 📥 Download merged MP3 locally
+// 📥 Download merged MP3 from R2 → local file
 // ------------------------------------------------------------
 async function downloadMergedToLocal(sessionId, mergedUrl, localPath) {
-  const res = await fetch(mergedUrl);
-
-  if (!res.ok) {
-    throw new Error(`Download failed ${res.status}: ${mergedUrl}`);
+  const fetchFn = globalThis.fetch;
+  if (!fetchFn) {
+    throw new Error("fetch not available; cannot download merged MP3");
   }
 
-  const arr = await res.arrayBuffer();
-  const buf = Buffer.from(arr);
-
-  if (buf.length < 1000) {
+  const res = await fetchFn(mergedUrl);
+  if (!res.ok) {
     throw new Error(
-      `Downloaded merged MP3 too small (${buf.length} bytes)`
+      `Failed to download merged MP3: HTTP ${res.status}`
+    );
+  }
+
+  const buf = Buffer.from(await res.arrayBuffer());
+
+  if (buf.length < MIN_VALID_BYTES) {
+    throw new Error(
+      `Merged MP3 too small or invalid (bytes=${buf.length})`
     );
   }
 
@@ -84,22 +99,58 @@ async function downloadMergedToLocal(sessionId, mergedUrl, localPath) {
 }
 
 // ------------------------------------------------------------
-// 🔁 ffmpeg execution (local → local)
+// 🛰️ Fallback: fetch merged MP3 as Buffer (no local file used)
 // ------------------------------------------------------------
-function runEditingOnce(sessionId, inputLocalPath, outputLocalPath, attempt, total) {
+async function fetchMergedBuffer(mergedUrl) {
+  const fetchFn = globalThis.fetch;
+  if (!fetchFn) {
+    throw new Error(
+      "fetch not available; cannot download merged MP3 fallback"
+    );
+  }
+
+  const res = await fetchFn(mergedUrl);
+  if (!res.ok) {
+    throw new Error(
+      `Failed to fetch merged MP3 fallback: HTTP ${res.status}`
+    );
+  }
+
+  const buf = Buffer.from(await res.arrayBuffer());
+
+  if (buf.length < MIN_VALID_BYTES) {
+    throw new Error(
+      `Merged MP3 fallback too small or invalid (bytes=${buf.length})`
+    );
+  }
+
+  return buf;
+}
+
+// ------------------------------------------------------------
+// 🔁 Run ffmpeg once (LOCAL INPUT)
+// ------------------------------------------------------------
+function runEditingOnce(
+  sessionId,
+  inputPath,
+  outputPath,
+  attempt,
+  total
+) {
   const filters = ffmpegStage1Filter();
 
   const args = [
     "-y",
+    "-xerror", // 🔥 hard fail on decode error
     "-i",
-    inputLocalPath,
+    inputPath,
     "-filter:a",
     filters,
     "-c:a",
     "libmp3lame",
     "-b:a",
     "128k",
-    outputLocalPath,
+    outputPath,
   ];
 
   return new Promise((resolve, reject) => {
@@ -125,30 +176,49 @@ function runEditingOnce(sessionId, inputLocalPath, outputLocalPath, attempt, tot
       }
     });
 
-    ff.on("error", reject);
+    ff.on("error", (err) => reject(err));
 
     ff.on("close", (code) => {
-      if (code === 0) return resolve();
-      reject(new Error(`ffmpeg exited with code ${code}: ${stderr}`));
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(
+          new Error(
+            `ffmpeg exited with code ${code}: ${stderr}`
+          )
+        );
+      }
     });
   });
 }
 
 // ------------------------------------------------------------
-// 🎧 Main
+// 🎧 editingProcessor — Main
 // ------------------------------------------------------------
-export async function editingProcessor(sessionId) {
+// NOTE: second parameter is ignored so orchestrator signature
+//       `editingProcessor(sessionId, buffer)` still works.
+export async function editingProcessor(
+  sessionId,
+  _unusedAudioBuffer
+) {
   const label = `editingProcessor:${sessionId}`;
   startKeepAlive(label, 15000);
 
   if (!MERGED_BASE) {
     stopKeepAlive(label);
-    throw new Error("Missing R2_PUBLIC_BASE_URL_MERGE");
+    throw new Error(
+      "R2_PUBLIC_BASE_URL_MERGE is not set; cannot run editingProcessor"
+    );
   }
 
-  const mergedUrl = `${MERGED_BASE}/${encodeURIComponent(sessionId + ".mp3")}`;
+  const mergedUrl = `${MERGED_BASE}/${encodeURIComponent(
+    `${sessionId}.mp3`
+  )}`;
   const rawLocal = path.join(TMP_DIR, `${sessionId}_raw.mp3`);
-  const editedLocal = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
+  const editedLocal = path.join(
+    TMP_DIR,
+    `${sessionId}_edited.mp3`
+  );
 
   info("🔗 Using merged MP3 as editing input", {
     sessionId,
@@ -157,33 +227,35 @@ export async function editingProcessor(sessionId) {
     editedLocal,
   });
 
-  // ------------------------------------------------------------
-  // 1) Download merged MP3 locally (retry protected)
-  // ------------------------------------------------------------
-  let mergedBuffer = null;
+  let finalBuffer = null;
+  let lastError = null;
+
   try {
-    mergedBuffer = await downloadMergedToLocal(sessionId, mergedUrl, rawLocal);
+    // Download merged MP3 once per run
+    await downloadMergedToLocal(
+      sessionId,
+      mergedUrl,
+      rawLocal
+    );
   } catch (err) {
     stopKeepAlive(label);
-    error("💥 Failed to download merged MP3", {
+    error("💥 Failed to download merged MP3 for editing", {
       sessionId,
       error: err.message,
     });
+    // If we can't even download the merged file, bail
     throw err;
   }
 
-  // ------------------------------------------------------------
-  // 2) ffmpeg retry loop
-  // ------------------------------------------------------------
-  let finalBuffer = null;
-  let lastErr = null;
-
+  // 🔁 Retry loop
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      // Ensure no stale file
+      // remove stale output if any
       try {
         await fs.promises.unlink(editedLocal);
-      } catch {}
+      } catch {
+        // ignore
+      }
 
       await runEditingOnce(
         sessionId,
@@ -193,7 +265,17 @@ export async function editingProcessor(sessionId) {
         MAX_RETRIES
       );
 
-      finalBuffer = await fs.promises.readFile(editedLocal);
+      const candidate = await fs.promises.readFile(
+        editedLocal
+      );
+
+      if (candidate.length < MIN_VALID_BYTES) {
+        throw new Error(
+          `Edited MP3 too small or invalid (bytes=${candidate.length})`
+        );
+      }
+
+      finalBuffer = candidate;
 
       info("✅ editingProcessor produced cleaned audio", {
         sessionId,
@@ -203,59 +285,100 @@ export async function editingProcessor(sessionId) {
 
       break;
     } catch (err) {
-      lastErr = err;
+      lastError = err;
 
       warn("⚠️ editingProcessor ffmpeg attempt failed", {
         sessionId,
         attempt,
         error: err.message,
+        maxAttempts: MAX_RETRIES,
       });
 
       if (attempt < MAX_RETRIES) {
         const delay =
-          RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF, attempt - 1);
+          RETRY_DELAY_MS *
+          Math.pow(RETRY_BACKOFF, attempt - 1);
 
-        info("🔁 Retrying after delay", {
+        info("🔁 Retrying editingProcessor after delay", {
           sessionId,
           attempt,
           nextInMs: delay,
         });
 
-        await new Promise((r) => setTimeout(r, delay));
+        await new Promise((resolve) =>
+          setTimeout(resolve, delay)
+        );
       }
     }
   }
 
   stopKeepAlive(label);
 
-  // ------------------------------------------------------------
-  // 3) Total failure → return unedited merged MP3
-  // ------------------------------------------------------------
-  if (!finalBuffer) {
-    error("💥 editingProcessor failed all retries — returning raw merged MP3", {
-      sessionId,
-      error: lastErr?.message,
-    });
-    return mergedBuffer;
+  // Cleanup temp edited file (best-effort)
+  try {
+    await fs.promises.unlink(editedLocal);
+  } catch {
+    // ignore
   }
 
-  // ------------------------------------------------------------
-  // 4) Safenet upload to R2
-  // ------------------------------------------------------------
+  // ❌ All attempts failed → fall back to original merged MP3
+  if (!finalBuffer) {
+    error(
+      "💥 editingProcessor failed after all retries — returning original merged audio",
+      {
+        sessionId,
+        error: lastError?.message,
+      }
+    );
+
+    try {
+      const fallbackBuffer = await fetchMergedBuffer(
+        mergedUrl
+      );
+
+      info(
+        "🛟 Returned original merged MP3 as editing fallback",
+        {
+          sessionId,
+          bytes: fallbackBuffer.length,
+        }
+      );
+
+      return fallbackBuffer;
+    } catch (fallbackErr) {
+      error(
+        "💥 editingProcessor fallback to merged MP3 also failed",
+        {
+          sessionId,
+          error: fallbackErr.message,
+        }
+      );
+      throw lastError || fallbackErr;
+    }
+  }
+
+  // 📦 Safenet R2 Upload
   if (EDITED_BUCKET && PUBLIC_EDITED_BASE) {
     try {
       const key = `${sessionId}_edited.mp3`;
 
-      await putObject(EDITED_BUCKET, key, finalBuffer, "audio/mpeg");
+      await putObject(
+        EDITED_BUCKET,
+        key,
+        finalBuffer,
+        "audio/mpeg"
+      );
 
       info("💾 editingProcessor safenet upload OK", {
         sessionId,
         bucket: EDITED_BUCKET,
         key,
-        publicUrl: `${PUBLIC_EDITED_BASE}/${encodeURIComponent(key)}`,
+        publicUrl: `${PUBLIC_EDITED_BASE}/${encodeURIComponent(
+          key
+        )}`,
       });
     } catch (err) {
-      warn("⚠️ Failed safenet upload", {
+      warn("⚠️ editingProcessor safenet upload failed", {
         sessionId,
         error: err.message,
       });
