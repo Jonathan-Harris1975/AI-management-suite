@@ -1,4 +1,3 @@
-============================================================
 // 🎙️ STREAMING Editing Processor — Premium Radio Host Version
 // Mature UK Tone • Warm • Natural • Broadcast-Ready
 // ============================================================
@@ -21,10 +20,9 @@ function ensureTmpDir() {
 // ------------------------------------------------------------
 // ⭐ FINAL UK-PREMIUM RADIO HOST FILTER CHAIN (Stable)
 // ------------------------------------------------------------
-//
-//
 const filters = [
-    "asetrate=44100*1.018,aresample=44100,atempo=0.982",
+  // 1️⃣ Pitch correction
+  "asetrate=44100*1.018,aresample=44100,atempo=0.982",
 
   // 2️⃣ Warm body
   "equalizer=f=120:t=q:w=1.1:g=3",
@@ -45,7 +43,6 @@ const filters = [
   // 6️⃣ Broadcast limiter
   "alimiter=limit=0.92:attack=6:release=90"
 ];
-
 
 // ------------------------------------------------------------
 // 🧩 Streaming Editing Processor
@@ -232,8 +229,3 @@ export async function editingProcessor(sessionId, inputPathObj) {
 }
 
 export default editingProcessor;
-
-
-
-
-    
