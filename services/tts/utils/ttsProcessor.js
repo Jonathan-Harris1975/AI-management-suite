@@ -1,12 +1,12 @@
 // ============================================================
-// 🎙️ TTS Processor — Hardened Production Version with Retry Logic
+// 🎙️ TTS Processor — Production Ready
 // ============================================================
-//
-// • Uses full environment variable mapping (no hardcoded values)
-// • Cleans + truncates text using MAX_POLLY_NATURAL_CHUNK_CHARS
+// Features:
+// • Environment variable configuration
+// • Text cleaning & truncation
 // • Chunk-level retry with exponential backoff
-// • Logs detailed AWS/Polly errors
-// • Uploads successful chunks to R2 with env URLs
+// • Detailed error logging
+// • R2 upload for successful chunks
 // ============================================================
 
 import {
@@ -18,41 +18,27 @@ import { putObject } from "#shared/r2-client.js";
 import pLimit from "p-limit";
 
 // ------------------------------------------------------------
-// ⚙️ Environment (ALL FROM YOUR ENV LIST)
+// ⚙️ Configuration
 // ------------------------------------------------------------
-
 const REGION = process.env.AWS_REGION;
-const VOICE_ID = process.env.POLLY_VOICE_ID;
-
+const VOICE_ID = process.env.POLLY_VICE_ID;
 const CHUNKS_BUCKET = process.env.R2_BUCKET_CHUNKS;
 const PUBLIC_CHUNKS_BASE = process.env.R2_PUBLIC_BASE_URL_CHUNKS;
 
-// Max characters Polly can handle for natural engine
-const MAX_CHARS =
-  Number(process.env.MAX_POLLY_NATURAL_CHUNK_CHARS) || 2500;
-
-// Concurrency for chunk processing
-const CONCURRENCY =
-  Number(process.env.TTS_CONCURRENCY) || 3;
-
-// Chunk retry settings
-const MAX_CHUNK_RETRIES =
-  Number(process.env.MAX_CHUNK_RETRIES) || 4;
-
-const RETRY_DELAY_MS =
-  Number(process.env.RETRY_DELAY_MS) || 1200;
-
-const RETRY_BACKOFF_MULTIPLIER =
-  Number(process.env.RETRY_BACKOFF_MULTIPLIER) || 2.1;
+const MAX_CHARS = Number(process.env.MAX_POLLY_NATURAL_CHUNK_CHARS) || 2500;
+const CONCURRENCY = Number(process.env.TTS_CONCURRENCY) || 3;
+const MAX_CHUNK_RETRIES = Number(process.env.MAX_CHUNK_RETRIES) || 4;
+const RETRY_DELAY_MS = Number(process.env.RETRY_DELAY_MS) || 1200;
+const RETRY_BACKOFF_MULTIPLIER = Number(process.env.RETRY_BACKOFF_MULTIPLIER) || 2.1;
 
 const polly = new PollyClient({ region: REGION });
 
 // ------------------------------------------------------------
-// 🧼 Clean raw text before Polly
+// 🧼 Text Cleaning
 // ------------------------------------------------------------
 function cleanText(input) {
   return input
-    .replace(/[^\x09\x0A\x0D\x20-\x7EÀ-ÿ]/g, "")  // strip control chars
+    .replace(/[^\x09\x0A\x0D\x20-\x7EÀ-ÿ]/g, "")
     .replace(/&/g, "and")
     .replace(/<|>/g, "")
     .replace(/\n{2,}/g, ". ")
@@ -61,7 +47,7 @@ function cleanText(input) {
 }
 
 // ------------------------------------------------------------
-// 🔁 Polly Request with Retry
+// 🔁 Polly Synthesis with Retry
 // ------------------------------------------------------------
 async function synthesizeTextWithRetry(text, retries = 3) {
   const command = new SynthesizeSpeechCommand({
@@ -79,21 +65,21 @@ async function synthesizeTextWithRetry(text, retries = 3) {
       );
       return buffer;
     } catch (err) {
-      const msg = err?.message || err.toString();
-      const isRetryable =
-        msg.includes("Throttling") ||
-        msg.includes("TooManyRequests") ||
-        msg.includes("slow down") ||
-        msg.includes("Rate exceeded");
+      const message = err?.message || err.toString();
+      const isRetryable = 
+        message.includes("Throttling") ||
+        message.includes("TooManyRequests") ||
+        message.includes("slow down") ||
+        message.includes("Rate exceeded");
 
-      warn(`⚠️ Polly request failed (attempt ${attempt}/${retries})`, {
-        message: msg,
-        isRetryable,
+      warn(`Polly attempt ${attempt}/${retries} failed`, {
+        error: message,
+        retryable: isRetryable
       });
 
       if (attempt === retries || !isRetryable) throw err;
 
-      await new Promise((resolve) =>
+      await new Promise(resolve => 
         setTimeout(resolve, RETRY_DELAY_MS * attempt)
       );
     }
@@ -101,7 +87,7 @@ async function synthesizeTextWithRetry(text, retries = 3) {
 }
 
 // ------------------------------------------------------------
-// 🔁 Chunk-level retry with exponential backoff
+// 🔄 Chunk Processing with Exponential Backoff
 // ------------------------------------------------------------
 async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1) {
   try {
@@ -113,10 +99,15 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
 
     const url = `${PUBLIC_CHUNKS_BASE}/${encodeURIComponent(key)}`;
 
-    info(
-      `✅ TTS chunk ${chunkNumber} uploaded${attempt > 1 ? ` (retry ${attempt})` : ""}`,
-      { sessionId, key, url, bytes: audioBuffer.length, attempt }
-    );
+    const logMessage = attempt > 1 
+      ? `✅ Chunk ${chunkNumber} recovered (attempt ${attempt})`
+      : `✅ Chunk ${chunkNumber} processed`;
+
+    info(logMessage, {
+      sessionId,
+      key,
+      size: `${(audioBuffer.length / 1024).toFixed(1)}KB`
+    });
 
     return {
       success: true,
@@ -132,37 +123,29 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
       message.includes("slow down") ||
       message.includes("Rate exceeded");
 
-    warn(
-      `⚠️ TTS chunk ${chunkNumber} failed (attempt ${attempt}/${MAX_CHUNK_RETRIES})`,
-      {
-        sessionId,
-        message,
-        isRetryable,
-        attempt,
-      }
-    );
+    warn(`Chunk ${chunkNumber} failed (attempt ${attempt}/${MAX_CHUNK_RETRIES})`, {
+      sessionId,
+      error: message,
+      retryable: isRetryable
+    });
 
     if (attempt < MAX_CHUNK_RETRIES && isRetryable) {
       const delay = RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
+      
+      info(`Retrying chunk ${chunkNumber} in ${delay}ms`, {
+        sessionId,
+        nextAttempt: attempt + 1
+      });
 
-      info(
-        `🔄 Retrying chunk ${chunkNumber} after ${delay}ms`,
-        { sessionId, chunk: chunkNumber, delayMs: delay }
-      );
-
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      await new Promise(resolve => setTimeout(resolve, delay));
       return processChunkWithRetry(sessionId, chunk, chunkNumber, attempt + 1);
     }
 
-    error(
-      `❌ TTS chunk ${chunkNumber} permanently failed after ${attempt} attempts`,
-      {
-        sessionId,
-        chunk: chunkNumber,
-        message,
-        totalAttempts: attempt,
-      }
-    );
+    error(`Chunk ${chunkNumber} permanently failed after ${attempt} attempts`, {
+      sessionId,
+      chunk: chunkNumber,
+      finalError: message
+    });
 
     return {
       success: false,
@@ -174,57 +157,51 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
 }
 
 // ------------------------------------------------------------
-// 🎧 TTS Processor — Main Exported Function
+// 🎧 Main TTS Processor
 // ------------------------------------------------------------
 async function ttsProcessor(sessionId, chunkList = []) {
-  info("🎙 TTS Processor Start", {
+  info("🗣️🎙️Starting TTS processing", {
     sessionId,
     totalChunks: chunkList.length,
+    concurrency: CONCURRENCY
   });
 
   if (!Array.isArray(chunkList) || chunkList.length === 0) {
-    throw new Error("No text chunks provided to ttsProcessor");
+    throw new Error("No text chunks provided to TTS processor");
   }
 
   const limit = pLimit(CONCURRENCY);
-  const results = [];
-
+  
   const tasks = chunkList.map((chunk, index) =>
-    limit(async () => {
-      return processChunkWithRetry(sessionId, chunk, index + 1);
-    })
+    limit(() => processChunkWithRetry(sessionId, chunk, index + 1))
   );
 
-  const raw = await Promise.all(tasks);
+  const results = await Promise.all(tasks);
 
-  const successfulChunks = raw.filter((r) => r.success);
-  const failedChunks = raw.filter((r) => !r.success);
+  const successful = results.filter(r => r.success);
+  const failed = results.filter(r => !r.success);
 
-  if (failedChunks.length > 0) {
-    warn(
-      `⚠️ ${failedChunks.length} chunk(s) failed permanently`,
-      {
-        sessionId,
-        failures: failedChunks.map((f) => ({
-          index: f.index,
-          error: f.error,
-          attempts: f.attempts,
-        })),
-      }
-    );
+  // 📊 Processing Summary
+  if (failed.length > 0) {
+    warn(`Completed with ${failed.length} failed chunks`, {
+      sessionId,
+      successful: successful.length,
+      failed: failed.length,
+      failedChunks: failed.map(f => f.index)
+    });
+  } else {
+    info(" 🔉All chunks processed successfully", {
+      sessionId,
+      totalChunks: successful.length
+    });
   }
 
-  if (successfulChunks.length === 0) {
-    throw new Error(
-      "No TTS chunks were successfully produced. All chunks failed."
-    );
+  if (successful.length === 0) {
+    throw new Error("TTS processing failed - no chunks were successfully produced");
   }
 
-  return successfulChunks;
+  return successful;
 }
 
-// ------------------------------------------------------------
-// 📦 Exports (clean, correct, no duplicates)
-// ------------------------------------------------------------
 export { ttsProcessor };
 export default ttsProcessor;
