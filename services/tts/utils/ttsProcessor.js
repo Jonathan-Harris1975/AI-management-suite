@@ -160,7 +160,7 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
 // 🎧 Main TTS Processor
 // ------------------------------------------------------------
 async function ttsProcessor(sessionId, chunkList = []) {
-  info("🗣️🎙️Starting TTS processing", {
+  info("🗣️ Starting TTS processing", {
     sessionId,
     totalChunks: chunkList.length,
     concurrency: CONCURRENCY
@@ -181,19 +181,19 @@ async function ttsProcessor(sessionId, chunkList = []) {
   const successful = results.filter(r => r.success);
   const failed = results.filter(r => !r.success);
 
-  // 📊 Processing Summary
+  // 📊 Concise Completion Summary
+  const summary = {
+    sessionId,
+    total: chunkList.length,
+    successful: successful.length,
+    failed: failed.length,
+    successRate: `${((successful.length / chunkList.length) * 100).toFixed(1)}%`
+  };
+
   if (failed.length > 0) {
-    warn(`Completed with ${failed.length} failed chunks`, {
-      sessionId,
-      successful: successful.length,
-      failed: failed.length,
-      failedChunks: failed.map(f => f.index)
-    });
+    warn(`TTS completed with ${failed.length} failures`, summary);
   } else {
-    info(" 🔉All chunks processed successfully", {
-      sessionId,
-      totalChunks: successful.length
-    });
+    info(`TTS completed successfully`, summary);
   }
 
   if (successful.length === 0) {
