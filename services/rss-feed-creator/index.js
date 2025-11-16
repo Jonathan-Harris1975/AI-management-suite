@@ -1,8 +1,9 @@
 // services/rss-feed-creator/index.js
 import Parser from "rss-parser";
-import { info, error } from "#logger.js";
+import rssLogger from "./utils/rss-logger.js";
+const { info, error } = rssLogger;
 import { getObjectAsText, uploadBuffer } from "#shared/utils/r2-client.js";
-import { { resilientRequest } } from "../../shared/utils/ai-service.js";
+import { resilientRequest } from "../shared/utils/ai-service.js";
 import { RSS_PROMPTS } from "./utils/rss-prompts.js";
 
 const parser = new Parser();
