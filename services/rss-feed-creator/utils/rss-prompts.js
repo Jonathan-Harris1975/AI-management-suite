@@ -2,7 +2,8 @@
 // 🧠 RSS Feed Creator — Gen-X Tone, Long-Form Prompt (OpenRouter Optimized)
 // ============================================================
 
-import { warn } from "#logger.js";
+import rssLogger from "./rss-logger.js";
+const { warn } = rssLogger;
 //
 // Automatically pulls summary length limits from environment vars:
 // MIN_SUMMARY_CHARS / MAX_SUMMARY_CHARS

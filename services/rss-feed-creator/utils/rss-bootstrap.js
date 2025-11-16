@@ -1,7 +1,8 @@
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
-import { info, error } from "#logger.js";
+import rssLogger from "./rss-logger.js";
+const { info, error } = rssLogger;
 import { getObjectAsText, putText, putJson } from "#shared/r2-client.js";
 
 const __filename = fileURLToPath(import.meta.url);

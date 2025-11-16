@@ -7,7 +7,8 @@
 import crypto from "crypto";
 import { XMLBuilder } from "fast-xml-parser";
 import { r2Put, r2Get } from "../../shared/utils/r2-client.js";
-import { info, error } from "#logger.js";
+import rssLogger from "./rss-logger.js";
+const { info, error } = rssLogger;
 
 const FEED_RETENTION_DAYS = Number(process.env.FEED_RETENTION_DAYS) || 7; // default 7 days
 
