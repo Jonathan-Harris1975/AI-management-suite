@@ -27,12 +27,18 @@ async function runFFmpegStage(sessionId, inputPath, outputPath, filterStr, descr
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", [
       "-hide_banner",
-      "-loglevel", "error",
-      "-i", inputPath,
-      "-af", filterStr,
-      "-ar", "44100",
-      "-codec:a", "libmp3lame",
-      "-b:a", "192k",
+      "-loglevel",
+      "error",
+      "-i",
+      inputPath,
+      "-af",
+      filterStr,
+      "-ar",
+      "44100",
+      "-codec:a",
+      "libmp3lame",
+      "-b:a",
+      "192k",
       "-y",
       outputPath,
     ]);
@@ -79,14 +85,14 @@ export async function editingProcessor(sessionId, inputPathObj) {
   ensureTmpDir();
 
   const inputPath =
-    typeof inputPathObj === "string"
-      ? inputPathObj
-      : inputPathObj?.localPath;
+    typeof inputPathObj === "string" ? inputPathObj : inputPathObj?.localPath;
 
   if (!inputPath || typeof inputPath !== "string") {
     stopKeepAlive(keepAliveLabel);
     throw new Error(
-      `Invalid inputPath passed to editingProcessor. Received: ${JSON.stringify(inputPathObj)}`
+      `Invalid inputPath passed to editingProcessor. Received: ${JSON.stringify(
+        inputPathObj
+      )}`
     );
   }
 
@@ -150,16 +156,14 @@ export async function editingProcessor(sessionId, inputPathObj) {
     lastSuccessfulStage = stage1Path;
 
     // ------------------------------------------------------------
-    // STAGE 2: EQ — low-end body, tame harshness
+    // STAGE 2: EQ — low-end body, presence & de-harsh
     // ------------------------------------------------------------
     const eqFilters = [
-      "equalizer=f=80:t=q:w=1.2:g=4",
-      "equalizer=f=150:t=q:w=1.1:g=3.5",
-      "equalizer=f=250:t=q:w=1.0:g=2.5",
-      "equalizer=f=3000:t=q:w=2.0:g=-2.5",
-      "equalizer=f=6000:t=q:w=2.0:g=-3",
-      "equalizer=f=8500:t=h:g=-2",
-      "equalizer=f=2200:t=q:w=1.5:g=1.5",
+      "asubboost=boost=3:f=95:width=0.6", // Warmth without mud
+      "equalizer=f=2200:t=q:w=1.5:g=1.5", // Presence
+      "equalizer=f=4200:t=q:w=1.2:g=1.2", // Clarity / articulation
+      "equalizer=f=6000:t=q:w=2.0:g=-2.5", // Harshness control
+      "equalizer=f=8500:t=h:g=-2" // Gentle top-end taming
     ].join(",");
 
     currentInput = await runFFmpegStage(
@@ -195,8 +199,9 @@ export async function editingProcessor(sessionId, inputPathObj) {
     // STAGE 4: Compression + Limiting — broadcast style
     // ------------------------------------------------------------
     const dynamicsFilters = [
-      "acompressor=threshold=-20dB:ratio=4:attack=15:release=250:makeup=3",
+      "acompressor=threshold=-18dB:ratio=3:attack=10:release=200:makeup=2.5:knee=4",
       "alimiter=limit=0.95:attack=5:release=100",
+      "acompressor=threshold=-1dB:ratio=8:attack=0:release=50"
     ].join(",");
 
     currentInput = await runFFmpegStage(
@@ -213,14 +218,14 @@ export async function editingProcessor(sessionId, inputPathObj) {
     lastSuccessfulStage = stage4Path;
 
     // ------------------------------------------------------------
-    // STAGE 5: Mono → Stereo — dual mono for podcast players
+    // STAGE 5: Stereo enhancement — ear-friendly widening
     // ------------------------------------------------------------
     currentInput = await runFFmpegStage(
       sessionId,
       currentInput,
       stage5Path,
-      "pan=stereo|c0=c0|c1=c0",
-      "Stage 5: 🎧 Mono → Stereo Conversion"
+      "earwax",
+      "Stage 5: 🎧 Stereo Enhancement (earwax)"
     );
 
     if (lastSuccessfulStage && fs.existsSync(lastSuccessfulStage)) {
