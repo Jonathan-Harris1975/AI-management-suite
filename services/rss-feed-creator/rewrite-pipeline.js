@@ -12,7 +12,8 @@
 // ============================================================
 
 import rssLogger from "./utils/rss-logger.js";
-const { info, error } = rssLogger;
+const info = (...args) => rssLogger.info(...args);
+const error = (...args) => rssLogger.error(...args);
 import { fetchAndParseFeeds } from "./utils/fetchFeeds.js";
 import { rewriteRssFeedItems } from "./utils/models.js";
 import { generateFeed } from "./utils/feedGenerator.js";
