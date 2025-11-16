@@ -241,7 +241,15 @@ export async function uploadBuffer(
   const body = ensureBuffer(buffer);
   const size = body.length;
 
-  const base = getPublicBaseUrl(bucketKey);
+  let base = null;
+try {
+  base = getPublicBaseUrl(bucketKey);
+} catch (err) {
+  // Allow upload without public URL
+  if (DEBUG_MODE) {
+    log.warn("r2.upload.no-public-url", { bucketKey, key, reason: "No public URL configured" });
+  }
+}
 
   const startedAt = Date.now();
   let lastError = null;
@@ -285,7 +293,7 @@ export async function uploadBuffer(
       // Optional integrity verification (HEAD)
       await verifyUploadedObject(bucket, bucketKey, key, size, contentType);
 
-      const url = `${base}/${encodeURIComponent(key)}`;
+      const url = base ? `${base}/${encodeURIComponent(key)}` : null;
       return url;
     } catch (err) {
       lastError = err;
@@ -376,7 +384,15 @@ export const putJson = async (bucketKey, key, obj) =>
 
 // URL builder (legacy use)
 export function buildPublicUrl(bucketKey, key) {
-  const base = getPublicBaseUrl(bucketKey);
+  let base = null;
+try {
+  base = getPublicBaseUrl(bucketKey);
+} catch (err) {
+  // Allow upload without public URL
+  if (DEBUG_MODE) {
+    log.warn("r2.upload.no-public-url", { bucketKey, key, reason: "No public URL configured" });
+  }
+}
   return `${base}/${encodeURIComponent(key)}`;
 }
 
