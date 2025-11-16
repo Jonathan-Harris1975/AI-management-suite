@@ -15,7 +15,7 @@ export function startKeepAlive(label = "keepalive", intervalMs = 20000) {
   if (KA_MAP.has(label)) return;
   info(`⏳ Silent keep-alive active for ${label} (${Math.round(intervalMs / 1000)}s interval)`, { label, intervalMs });
   const id = setInterval(() => {
-    process.stdout.write(`🔋${label} alive @ ${new Date().toISOString()}\n`);
+    process.stdout.write(`🔋${label} alive and still working in the background `);
   }, intervalMs);
   KA_MAP.set(label, id);
 }
