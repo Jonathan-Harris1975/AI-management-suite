@@ -11,7 +11,7 @@ import path from "path";
 import { spawn, spawnSync } from "child_process";
 import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
-import { uploadBuffer } from "#shared/r2-client.js"; // ✅ ADDED
+import { uploadBuffer } from "#shared/r2-client.js"; // R2 upload
 
 // ============================================================
 // Configuration
@@ -40,6 +40,7 @@ const PODCAST_RETRY_BACKOFF = Number(process.env.RETRY_BACKOFF_MULTIPLIER || 2);
 const RAW_PODCAST_FFMPEG_TIMEOUT_MS = Number(
   process.env.PODCAST_FFMPEG_TIMEOUT_MS || 25 * 60 * 1000
 );
+
 const PODCAST_FFMPEG_TIMEOUT_MS = Math.max(
   RAW_PODCAST_FFMPEG_TIMEOUT_MS,
   10 * 60 * 1000
@@ -55,9 +56,7 @@ if (!fs.existsSync(TMP_DIR)) {
 async function verifyAudioFile(filePath, label, sessionId) {
   try {
     const stats = await fs.promises.stat(filePath);
-    if (stats.size === 0) {
-      throw new Error(`File is empty: 0 bytes`);
-    }
+    if (stats.size === 0) throw new Error(`File is empty: 0 bytes`);
 
     const result = spawnSync(
       "ffprobe",
@@ -75,14 +74,12 @@ async function verifyAudioFile(filePath, label, sessionId) {
       { encoding: "utf8", timeout: 10000 }
     );
 
-    if (result.status !== 0) {
+    if (result.status !== 0)
       throw new Error(`ffprobe failed: ${result.stderr || "Unknown error"}`);
-    }
 
     const probeInfo = JSON.parse(result.stdout);
-    if (!probeInfo.streams || probeInfo.streams.length === 0) {
+    if (!probeInfo.streams || probeInfo.streams.length === 0)
       throw new Error("No audio streams detected");
-    }
 
     const stream = probeInfo.streams[0];
     info(`✅ Audio file verified: ${label}`, {
@@ -105,7 +102,7 @@ async function verifyAudioFile(filePath, label, sessionId) {
 }
 
 // ============================================================
-// Utility: Execute FFmpeg with timeout
+// Utility: Run FFmpeg with timeout
 // ============================================================
 function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
@@ -118,10 +115,8 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
       timeoutId = setTimeout(() => {
         if (settled) return;
         settled = true;
-        warn(`⚠️ ${label} timed out, killing ffmpeg`, { sessionId, timeoutMs });
-        try {
-          ff.kill("SIGKILL");
-        } catch {}
+        warn(`⚠️ ${label} timed out — killing ffmpeg`, { sessionId, timeoutMs });
+        try { ff.kill("SIGKILL"); } catch {}
         reject(new Error(`ffmpeg timed out after ${timeoutMs} ms`));
       }, timeoutMs);
     }
@@ -132,18 +127,10 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
 
       const lower = txt.toLowerCase();
       if (
-        lower.includes("invalid argument") ||
-        lower.includes("format mp3 detected only with low score") ||
-        lower.includes("failed to read frame size") ||
-        lower.includes("could not seek to")
+        lower.includes("error") ||
+        lower.includes("invalid") ||
+        lower.includes("failed")
       ) {
-        warn(`🔴 Critical FFmpeg input error (${label})`, {
-          sessionId,
-          chunk: txt,
-        });
-      }
-
-      if (lower.includes("error")) {
         warn(`⚠️ ffmpeg stderr (${label})`, { sessionId, chunk: txt });
       }
     });
@@ -160,20 +147,14 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
       settled = true;
       if (timeoutId) clearTimeout(timeoutId);
 
-      if (code === 0) {
-        resolve();
-      } else {
-        const errorMsg = `ffmpeg failed (code ${code}) for ${label}: ${stderr.slice(
-          -500
-        )}`;
-        reject(new Error(errorMsg));
-      }
+      if (code === 0) return resolve();
+      reject(new Error(`ffmpeg failed (${label}) [code ${code}]: ${stderr}`));
     });
   });
 }
 
 // ============================================================
-// Utility: Download remote file with retry
+// Download remote file
 // ============================================================
 async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
   let lastError = null;
@@ -185,70 +166,41 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
         url,
       });
 
-      const res = await fetch(url, {
-        signal: AbortSignal.timeout(60000),
-      });
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      }
-
-      const contentLength = res.headers.get("content-length");
-      const expectedBytes = contentLength ? parseInt(contentLength, 10) : null;
+      const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 
       const fileStream = fs.createWriteStream(targetPath);
       let bytesWritten = 0;
 
-      try {
-        const reader = res.body.getReader();
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          fileStream.write(value);
-          bytesWritten += value.length;
-        }
-
-        await new Promise((resolve, reject) => {
-          fileStream.end();
-          fileStream.on("finish", resolve);
-          fileStream.on("error", reject);
-        });
-
-        if (expectedBytes && bytesWritten !== expectedBytes) {
-          throw new Error(
-            `Size mismatch: expected ${expectedBytes} bytes, got ${bytesWritten} bytes`
-          );
-        }
-
-        if (bytesWritten < 1000) {
-          throw new Error(`File too small: ${bytesWritten} bytes`);
-        }
-
-        info(`✅ Downloaded ${label}`, {
-          sessionId,
-          bytes: bytesWritten,
-          expected: expectedBytes,
-          targetPath,
-        });
-
-        await verifyAudioFile(targetPath, label, sessionId);
-        return;
-      } catch (err) {
-        fileStream.destroy();
-        throw err;
+      const reader = res.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        fileStream.write(value);
+        bytesWritten += value.length;
       }
+
+      await new Promise((resolve, reject) => {
+        fileStream.end();
+        fileStream.on("finish", resolve);
+        fileStream.on("error", reject);
+      });
+
+      if (bytesWritten < 1000)
+        throw new Error(`File too small: ${bytesWritten} bytes`);
+
+      info(`✅ Downloaded ${label}`, { sessionId, bytes: bytesWritten });
+
+      await verifyAudioFile(targetPath, label, sessionId);
+      return;
     } catch (err) {
       lastError = err;
-      warn(`⚠️ Download attempt ${attempt}/${retries} failed for ${label}`, {
+      warn(`⚠️ Download attempt ${attempt}/${retries} failed (${label})`, {
         sessionId,
         error: err.message,
       });
 
-      try {
-        await fs.promises.unlink(targetPath);
-      } catch {}
+      try { await fs.promises.unlink(targetPath); } catch {}
 
       if (attempt < retries) {
         const delay = 2000 * Math.pow(2, attempt - 1);
@@ -263,7 +215,7 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
 }
 
 // ============================================================
-// STEP 1: Apply fade in/out
+// STEP 1: Fades
 // ============================================================
 async function applyFades(sessionId, introPath, outroPath) {
   info("🔧 STEP 1: Applying fade in/out effects", { sessionId });
@@ -275,37 +227,16 @@ async function applyFades(sessionId, introPath, outroPath) {
   await verifyAudioFile(outroPath, "outro for fading", sessionId);
 
   await runFFmpeg(
-    [
-      "-y",
-      "-xerror",
-      "-i",
-      introPath,
-      "-af",
-      `afade=t=in:d=${INTRO_FADE_SEC}`,
-      "-c:a",
-      "libmp3lame",
-      "-b:a",
-      "128k",
-      introFadedPath,
-    ],
+    ["-y", "-xerror", "-i", introPath, "-af", `afade=t=in:d=${INTRO_FADE_SEC}`,
+     "-c:a", "libmp3lame", "-b:a", "128k", introFadedPath],
     "fade-intro",
     sessionId
   );
 
   await runFFmpeg(
-    [
-      "-y",
-      "-xerror",
-      "-i",
-      outroPath,
-      "-af",
-      `areverse,afade=t=in:d=${OUTRO_FADE_SEC},areverse`,
-      "-c:a",
-      "libmp3lame",
-      "-b:a",
-      "128k",
-      outroFadedPath,
-    ],
+    ["-y", "-xerror", "-i", outroPath,
+     "-af", `areverse,afade=t=in:d=${OUTRO_FADE_SEC},areverse`,
+     "-c:a", "libmp3lame", "-b:a", "128k", outroFadedPath],
     "fade-outro",
     sessionId
   );
@@ -332,65 +263,48 @@ async function applyAudioEffects(
   outroFadedPath,
   outputPath
 ) {
-  info(
-    "🔧 STEP 2: Applying audio effects (concat + compression + RMS norm + EQ)",
-    { sessionId }
-  );
+  info("🔧 STEP 2: Applying audio effects", { sessionId });
 
-  await verifyAudioFile(introFadedPath, "faded intro for effects", sessionId);
-  await verifyAudioFile(mainPath, "main audio for effects", sessionId);
-  await verifyAudioFile(outroFadedPath, "faded outro for effects", sessionId);
+  await verifyAudioFile(introFadedPath, "faded intro", sessionId);
+  await verifyAudioFile(mainPath, "main audio", sessionId);
+  await verifyAudioFile(outroFadedPath, "faded outro", sessionId);
 
   const concatPath = path.join(TMP_DIR, `${sessionId}_combined_concat.mp3`);
   const compressedPath = path.join(TMP_DIR, `${sessionId}_combined_compressed.mp3`);
 
-  // Concat
+  // Concat intro + main + outro
   await runFFmpeg(
     [
-      "-y",
-      "-xerror",
-      "-i",
-      introFadedPath,
-      "-i",
-      mainPath,
-      "-i",
-      outroFadedPath,
-      "-filter_complex",
-      "[0:a][1:a][2:a]concat=n=3:v=0:a=1[out]",
-      "-map",
-      "[out]",
-      "-c:a",
-      "libmp3lame",
-      "-b:a",
-      "256k",
+      "-y", "-xerror",
+      "-i", introFadedPath, "-i", mainPath, "-i", outroFadedPath,
+      "-filter_complex", "[0:a][1:a][2:a]concat=n=3:v=0:a=1[out]",
+      "-map", "[out]",
+      "-c:a", "libmp3lame", "-b:a", "256k",
       concatPath,
     ],
     "audio-effects-concat",
     sessionId
   );
+
   await verifyAudioFile(concatPath, "post-concat mix", sessionId);
 
-  // Bus compression
+  // Compression
   await runFFmpeg(
     [
-      "-y",
-      "-xerror",
-      "-i",
-      concatPath,
+      "-y", "-xerror",
+      "-i", concatPath,
       "-af",
       "acompressor=threshold=-18dB:ratio=2:attack=5:release=120",
-      "-c:a",
-      "libmp3lame",
-      "-b:a",
-      "256k",
+      "-c:a", "libmp3lame", "-b:a", "256k",
       compressedPath,
     ],
     "audio-effects-compressor",
     sessionId
   );
+
   await verifyAudioFile(compressedPath, "post-compressor mix", sessionId);
 
-  // RMS + EQ
+  // Final EQ + RMS norm
   const rmsEqFilter = `
     dynaudnorm=f=250:g=10:p=0.9:m=5,
     equalizer=f=120:t=h:width=200:g=2,
@@ -399,16 +313,10 @@ async function applyAudioEffects(
 
   await runFFmpeg(
     [
-      "-y",
-      "-xerror",
-      "-i",
-      compressedPath,
-      "-af",
-      rmsEqFilter,
-      "-c:a",
-      "libmp3lame",
-      "-b:a",
-      "256k",
+      "-y", "-xerror",
+      "-i", compressedPath,
+      "-af", rmsEqFilter,
+      "-c:a", "libmp3lame", "-b:a", "256k",
       outputPath,
     ],
     "audio-effects-rms-eq",
@@ -420,7 +328,7 @@ async function applyAudioEffects(
 }
 
 // ============================================================
-// Orchestrator
+// Pipeline wrapper
 // ============================================================
 async function runPodcastPipeline(
   sessionId,
@@ -463,7 +371,9 @@ async function cleanupTempFiles(sessionId) {
     const sessionFiles = files.filter((f) => f.includes(sessionId));
 
     await Promise.allSettled(
-      sessionFiles.map((file) => fs.promises.unlink(path.join(TMP_DIR, file)))
+      sessionFiles.map((file) =>
+        fs.promises.unlink(path.join(TMP_DIR, file))
+      )
     );
 
     info("🧹 Cleaned up temporary files", {
@@ -479,16 +389,13 @@ async function cleanupTempFiles(sessionId) {
 }
 
 // ============================================================
-// Main: podcastProcessor
+// MAIN PROCESSOR
 // ============================================================
 export async function podcastProcessor(sessionId, editedBuffer) {
   const label = `podcastProcessor:${sessionId}`;
 
   if (!PODCAST_INTRO_URL || !PODCAST_OUTRO_URL) {
-    warn(
-      "⚠️ PODCAST_INTRO_URL or PODCAST_OUTRO_URL missing — skipping mixdown",
-      { sessionId }
-    );
+    warn("⚠️ Missing intro/outro URLs — skipping mixdown", { sessionId });
     return editedBuffer;
   }
 
@@ -507,7 +414,7 @@ export async function podcastProcessor(sessionId, editedBuffer) {
   }
 
   if (!workingBuffer || workingBuffer.length === 0) {
-    warn("⚠️ Invalid editedBuffer - empty, skipping podcast processing", {
+    warn("⚠️ Invalid editedBuffer — skipping", {
       sessionId,
       bufferLength: workingBuffer?.length || 0,
     });
@@ -523,16 +430,11 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     await fs.promises.writeFile(mainPath, workingBuffer);
 
     const stats = await fs.promises.stat(mainPath);
-    if (stats.size === 0) {
-      throw new Error("Main audio file is empty after write");
-    }
-    if (stats.size < 5000) {
-      throw new Error(
-        `Main MP3 looks corrupted or truncated (${stats.size} bytes)`
-      );
-    }
+    if (stats.size === 0) throw new Error("Main audio file is empty");
+    if (stats.size < 5000)
+      throw new Error(`Main MP3 truncated (${stats.size} bytes)`);
 
-    info("💾 Main audio written to disk", { sessionId, bytes: stats.size });
+    info("💾 Main audio written", { sessionId, bytes: stats.size });
 
     await downloadToLocal(PODCAST_INTRO_URL, introPath, "intro", sessionId);
     await downloadToLocal(PODCAST_OUTRO_URL, outroPath, "outro", sessionId);
@@ -544,9 +446,7 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
     for (let attempt = 1; attempt <= MAX_PODCAST_RETRIES; attempt++) {
       try {
-        try {
-          await fs.promises.unlink(finalPath);
-        } catch {}
+        try { await fs.promises.unlink(finalPath); } catch {}
 
         await runPodcastPipeline(
           sessionId,
@@ -559,10 +459,8 @@ export async function podcastProcessor(sessionId, editedBuffer) {
         );
 
         const candidate = await fs.promises.readFile(finalPath);
-
-        if (candidate.length === 0) {
-          throw new Error("Final MP3 is empty");
-        }
+        if (candidate.length === 0)
+          throw new Error("Final MP3 empty");
 
         finalBuffer = candidate;
 
@@ -575,7 +473,7 @@ export async function podcastProcessor(sessionId, editedBuffer) {
       } catch (err) {
         lastError = err;
 
-        warn("⚠️ podcastProcessor pipeline attempt failed", {
+        warn("⚠️ podcastProcessor attempt failed", {
           sessionId,
           attempt,
           maxAttempts: MAX_PODCAST_RETRIES,
@@ -584,13 +482,15 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
         if (attempt < MAX_PODCAST_RETRIES) {
           const delay =
-            PODCAST_RETRY_DELAY_MS * Math.pow(PODCAST_RETRY_BACKOFF, attempt - 1);
+            PODCAST_RETRY_DELAY_MS *
+            Math.pow(PODCAST_RETRY_BACKOFF, attempt - 1);
 
           info("🔁 Retrying podcastProcessor", {
             sessionId,
             attempt,
             delayMs: delay,
           });
+
           await new Promise((res) => setTimeout(res, delay));
         }
       }
@@ -612,7 +512,7 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     });
 
     // ============================================================
-    // ✅ NEW: Upload final podcast to R2 bucket "podcast"
+    // FIXED — FINAL MP3 IS NOW UPLOADED TO R2 BUCKET "podcast"
     // ============================================================
     await uploadBuffer("podcast", `${sessionId}.mp3`, finalBuffer, "audio/mpeg");
 
@@ -635,4 +535,4 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
     throw err;
   }
-        }
+}
