@@ -1,5 +1,5 @@
 // ============================================================
-// 🧠 RSS Feed Creator — services/rss-feed-creator/rewrite-pipeline.js
+// 🧠 RSS Feed Creator — End-to-End Rewrite Pipeline (Shiper)
 // ============================================================
 //
 // Uses the ACTUAL file names from your repo:
@@ -11,58 +11,52 @@
 // Adds clear preview logging and a one-shot retry on upload.
 // ============================================================
 
-import { info, error } from "#logger.js";
+import { error } from "#logger.js";
 import { fetchAndParseFeeds } from "./utils/fetchFeeds.js";
 import { rewriteRssFeedItems } from "./utils/models.js";
 import { generateFeed } from "./utils/feedGenerator.js";
+import { rssLogger } from "./utils/rss-logger.js";
 
 export async function endToEndRewrite() {
+  rssLogger.startSession();
+  
   try {
-    info("rss-feed-creator.pipeline.start");
-
     // 1) Fetch source items
     const feedItems = await fetchAndParseFeeds();
     if (!Array.isArray(feedItems) || feedItems.length === 0) {
-      info("rss-feed-creator.pipeline.noItems", { reason: "no valid items" });
+      rssLogger.addWarning("No valid items found in feeds");
+      rssLogger.endSession();
       return { totalItems: 0, rewrittenItems: 0 };
     }
-
-    info("rss-feed-creator.pipeline.fetch.complete", {
-      items: feedItems.length,
-      sampleTitle: feedItems[0]?.title,
-    });
 
     // 2) Rewrite + enrich (adds shortTitle, shortUrl, rewritten, shortGuid, pubDate)
     const rewrittenItems = await rewriteRssFeedItems(feedItems);
     if (!Array.isArray(rewrittenItems) || rewrittenItems.length === 0) {
-      throw new Error("rewriteRssFeedItems() returned no results");
+      rssLogger.addWarning("Rewrite process returned no results");
+      rssLogger.endSession();
+      return { totalItems: feedItems.length, rewrittenItems: 0 };
     }
 
     // Preview the first enriched item to confirm correct fields
     const first = rewrittenItems[0] || {};
-    info("rss-feed-creator.pipeline.sample", {
-      shortTitle: first.shortTitle,
-      shortUrl: first.shortUrl,
-      guid: first.shortGuid,
-      hasRewritten: !!first.rewritten,
-    });
-
-    info("rss-feed-creator.batch.complete", {
-      totalItems: feedItems.length,
-      rewrittenItems: rewrittenItems.length,
-    });
+    rssLogger.addWarning(`Sample item - Title: "${first.shortTitle}", URL: ${first.shortUrl}, Has Content: ${!!first.rewritten}`);
 
     // 3) Build + upload RSS using the ENRICHED array (not the originals)
     await safeGenerateFeed("rss", rewrittenItems);
 
-    info("rss-feed-creator.pipeline.done", {
-      totalItems: feedItems.length,
-      rewrittenItems: rewrittenItems.length,
-    });
-
-    return { totalItems: feedItems.length, rewrittenItems: rewrittenItems.length };
+    rssLogger.endSession();
+    
+    return { 
+      totalItems: feedItems.length, 
+      rewrittenItems: rewrittenItems.length 
+    };
   } catch (err) {
-    error("rss-feed-creator.pipeline.fail", { message: err?.message, stack: err?.stack });
+    rssLogger.trackItemRewrite(false, `Pipeline failure: ${err.message}`);
+    rssLogger.endSession();
+    error("rss-feed-creator.pipeline.fail", { 
+      message: err?.message, 
+      stack: err?.stack 
+    });
     throw err;
   }
 }
@@ -73,21 +67,20 @@ export async function endToEndRewrite() {
 async function safeGenerateFeed(bucket, items) {
   try {
     if (items?.[0]) {
-      info("🧩 feed preview", {
-        title: items[0]?.shortTitle || items[0]?.title,
-        link: items[0]?.shortUrl || items[0]?.link,
-        hasRewritten: !!items[0]?.rewritten,
-      });
+      rssLogger.addWarning(`Feed preview - First item: "${items[0]?.shortTitle || items[0]?.title}"`);
     }
 
     await generateFeed(bucket, items);
-    info("rss-feed-creator.generateFeed.success", { bucket, items: items.length });
   } catch (err) {
-    error("rss-feed-creator.generateFeed.fail", { message: err?.message });
+    rssLogger.trackUpload(false, { 
+      bucket, 
+      error: err.message,
+      items: items.length 
+    });
 
     // retry once after 2s
     await new Promise((r) => setTimeout(r, 2000));
     await generateFeed(bucket, items);
-    info("rss-feed-creator.generateFeed.retry.success", { bucket });
+    rssLogger.addWarning("Feed generation succeeded on retry");
   }
 }
