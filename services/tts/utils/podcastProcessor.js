@@ -1,9 +1,9 @@
 // ============================================================
-// 🎵 Modular Podcast Processor (Optimized Version)
+// 🎵 Modular Podcast Processor (Optimized for Podcast Output)
 // ============================================================
 // Two-step pipeline:
-//   1. Apply fade in/out effects
-//   2. Apply audio effects (concat + compression + loudnorm)
+//   1. Apply fade in/out effects to intro/outro
+//   2. Concat intro + main + outro, apply bus compression + loudnorm
 // ============================================================
 
 import fs from "fs";
@@ -11,7 +11,6 @@ import path from "path";
 import { spawn, spawnSync } from "child_process";
 import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
-import { putObject } from "#shared/r2-client.js";
 
 // ============================================================
 // Configuration
@@ -55,21 +54,25 @@ async function verifyAudioFile(filePath, label, sessionId) {
       throw new Error(`File is empty: 0 bytes`);
     }
 
-    const result = spawnSync('ffprobe', [
-      '-v', 'error',
-      '-select_streams', 'a:0',
-      '-show_entries', 'stream=duration,codec_name,sample_rate,channels,bit_rate',
-      '-of', 'json',
-      filePath
-    ], { encoding: 'utf8', timeout: 10000 });
+    const result = spawnSync("ffprobe", [
+      "-v",
+      "error",
+      "-select_streams",
+      "a:0",
+      "-show_entries",
+      "stream=duration,codec_name,sample_rate,channels,bit_rate",
+      "-of",
+      "json",
+      filePath,
+    ], { encoding: "utf8", timeout: 10000 });
 
     if (result.status !== 0) {
-      throw new Error(`ffprobe failed: ${result.stderr || 'Unknown error'}`);
+      throw new Error(`ffprobe failed: ${result.stderr || "Unknown error"}`);
     }
 
     const probeInfo = JSON.parse(result.stdout);
     if (!probeInfo.streams || probeInfo.streams.length === 0) {
-      throw new Error('No audio streams detected');
+      throw new Error("No audio streams detected");
     }
 
     const stream = probeInfo.streams[0];
@@ -81,7 +84,7 @@ async function verifyAudioFile(filePath, label, sessionId) {
       duration: stream.duration,
       sampleRate: stream.sample_rate,
       channels: stream.channels,
-      bitRate: stream.bit_rate
+      bitRate: stream.bit_rate,
     });
 
     return probeInfo;
@@ -115,15 +118,18 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
     ff.stderr.on("data", (data) => {
       const txt = data.toString();
       stderr += txt;
-      
-      if (txt.toLowerCase().includes("invalid argument") || 
-          txt.toLowerCase().includes("format mp3 detected only with low score") ||
-          txt.toLowerCase().includes("failed to read frame size") ||
-          txt.toLowerCase().includes("could not seek to")) {
+
+      const lower = txt.toLowerCase();
+      if (
+        lower.includes("invalid argument") ||
+        lower.includes("format mp3 detected only with low score") ||
+        lower.includes("failed to read frame size") ||
+        lower.includes("could not seek to")
+      ) {
         warn(`🔴 Critical FFmpeg input error (${label})`, { sessionId, chunk: txt });
       }
-      
-      if (txt.toLowerCase().includes("error")) {
+
+      if (lower.includes("error")) {
         warn(`⚠️ ffmpeg stderr (${label})`, { sessionId, chunk: txt });
       }
     });
@@ -158,7 +164,10 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      info(`⬇️ Downloading ${label} (attempt ${attempt}/${retries})`, { sessionId, url });
+      info(`⬇️ Downloading ${label} (attempt ${attempt}/${retries})`, {
+        sessionId,
+        url,
+      });
 
       const res = await fetch(url, {
         signal: AbortSignal.timeout(60000),
@@ -168,7 +177,7 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
 
-      const contentLength = res.headers.get('content-length');
+      const contentLength = res.headers.get("content-length");
       const expectedBytes = contentLength ? parseInt(contentLength, 10) : null;
 
       const fileStream = fs.createWriteStream(targetPath);
@@ -187,8 +196,8 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
 
         await new Promise((resolve, reject) => {
           fileStream.end();
-          fileStream.on('finish', resolve);
-          fileStream.on('error', reject);
+          fileStream.on("finish", resolve);
+          fileStream.on("error", reject);
         });
 
         if (expectedBytes && bytesWritten !== expectedBytes) {
@@ -201,21 +210,19 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
           throw new Error(`File too small: ${bytesWritten} bytes`);
         }
 
-        info(`✅ Downloaded ${label}`, { 
-          sessionId, 
-          bytes: bytesWritten, 
+        info(`✅ Downloaded ${label}`, {
+          sessionId,
+          bytes: bytesWritten,
           expected: expectedBytes,
-          targetPath 
+          targetPath,
         });
 
         await verifyAudioFile(targetPath, label, sessionId);
         return;
-
       } catch (err) {
         fileStream.destroy();
         throw err;
       }
-
     } catch (err) {
       lastError = err;
       warn(`⚠️ Download attempt ${attempt}/${retries} failed for ${label}`, {
@@ -234,7 +241,9 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
     }
   }
 
-  throw new Error(`Failed to download ${label} after ${retries} attempts: ${lastError?.message}`);
+  throw new Error(
+    `Failed to download ${label} after ${retries} attempts: ${lastError?.message}`
+  );
 }
 
 // ============================================================
@@ -392,15 +401,21 @@ async function runPodcastPipeline(
 async function cleanupTempFiles(sessionId) {
   try {
     const files = await fs.promises.readdir(TMP_DIR);
-    const sessionFiles = files.filter(f => f.includes(sessionId));
-    
+    const sessionFiles = files.filter((f) => f.includes(sessionId));
+
     await Promise.allSettled(
-      sessionFiles.map(file => fs.promises.unlink(path.join(TMP_DIR, file)))
+      sessionFiles.map((file) => fs.promises.unlink(path.join(TMP_DIR, file)))
     );
-    
-    info("🧹 Cleaned up temporary files", { sessionId, files: sessionFiles.length });
+
+    info("🧹 Cleaned up temporary files", {
+      sessionId,
+      files: sessionFiles.length,
+    });
   } catch (cleanupErr) {
-    warn("⚠️ Failed to cleanup temporary files", { sessionId, error: cleanupErr.message });
+    warn("⚠️ Failed to cleanup temporary files", {
+      sessionId,
+      error: cleanupErr.message,
+    });
   }
 }
 
@@ -418,12 +433,28 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     return editedBuffer;
   }
 
-  if (!editedBuffer || editedBuffer.length === 0) {
+  // Normalise input: accept Buffer, file path string, or { localPath }
+  let workingBuffer = editedBuffer;
+
+  if (typeof workingBuffer === "string") {
+    // Path on disk
+    workingBuffer = await fs.promises.readFile(workingBuffer);
+  } else if (
+    workingBuffer &&
+    typeof workingBuffer === "object" &&
+    !(workingBuffer instanceof Buffer)
+  ) {
+    if (typeof workingBuffer.localPath === "string") {
+      workingBuffer = await fs.promises.readFile(workingBuffer.localPath);
+    }
+  }
+
+  if (!workingBuffer || workingBuffer.length === 0) {
     warn("⚠️ Invalid editedBuffer - empty, skipping podcast processing", {
       sessionId,
-      bufferLength: editedBuffer?.length || 0
+      bufferLength: workingBuffer?.length || 0,
     });
-    return editedBuffer;
+    return workingBuffer;
   }
 
   const introPath = path.join(TMP_DIR, `${sessionId}_intro.mp3`);
@@ -432,15 +463,22 @@ export async function podcastProcessor(sessionId, editedBuffer) {
   const finalPath = path.join(TMP_DIR, `${sessionId}_final.mp3`);
 
   try {
-    await fs.promises.writeFile(mainPath, editedBuffer);
-    
+    // Persist main audio to disk
+    await fs.promises.writeFile(mainPath, workingBuffer);
+
     const stats = await fs.promises.stat(mainPath);
     if (stats.size === 0) {
-      throw new Error(`Main audio file is empty after write`);
+      throw new Error("Main audio file is empty after write");
     }
-    
+    if (stats.size < 5000) {
+      throw new Error(
+        `Main MP3 looks corrupted or truncated (${stats.size} bytes)`
+      );
+    }
+
     info("💾 Main audio written to disk", { sessionId, bytes: stats.size });
 
+    // Fetch intro/outro from R2
     await downloadToLocal(PODCAST_INTRO_URL, introPath, "intro", sessionId);
     await downloadToLocal(PODCAST_OUTRO_URL, outroPath, "outro", sessionId);
 
@@ -468,7 +506,7 @@ export async function podcastProcessor(sessionId, editedBuffer) {
         const candidate = await fs.promises.readFile(finalPath);
 
         if (candidate.length === 0) {
-          throw new Error(`Final MP3 is empty`);
+          throw new Error("Final MP3 is empty");
         }
 
         finalBuffer = candidate;
@@ -493,7 +531,11 @@ export async function podcastProcessor(sessionId, editedBuffer) {
           const delay =
             PODCAST_RETRY_DELAY_MS * Math.pow(PODCAST_RETRY_BACKOFF, attempt - 1);
 
-          info("🔁 Retrying podcastProcessor", { sessionId, attempt, delayMs: delay });
+          info("🔁 Retrying podcastProcessor", {
+            sessionId,
+            attempt,
+            delayMs: delay,
+          });
           await new Promise((res) => setTimeout(res, delay));
         }
       }
@@ -518,15 +560,13 @@ export async function podcastProcessor(sessionId, editedBuffer) {
   } catch (err) {
     stopKeepAlive(label);
     await cleanupTempFiles(sessionId);
-    
+
     error("❌ podcastProcessor failed", {
       sessionId,
       error: err.message,
       stack: err.stack,
     });
-    
+
     throw err;
   }
 }
-
-
