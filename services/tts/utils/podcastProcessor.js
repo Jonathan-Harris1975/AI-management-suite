@@ -11,6 +11,7 @@ import path from "path";
 import { spawn, spawnSync } from "child_process";
 import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
+import { uploadBuffer } from "#shared/r2-client.js"; // ✅ ADDED
 
 // ============================================================
 // Configuration
@@ -36,7 +37,6 @@ const PODCAST_RETRY_DELAY_MS = Number(
 
 const PODCAST_RETRY_BACKOFF = Number(process.env.RETRY_BACKOFF_MULTIPLIER || 2);
 
-// Increase default timeout and enforce a sensible minimum so long runs don't get killed too early.
 const RAW_PODCAST_FFMPEG_TIMEOUT_MS = Number(
   process.env.PODCAST_FFMPEG_TIMEOUT_MS || 25 * 60 * 1000
 );
@@ -173,7 +173,7 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
 }
 
 // ============================================================
-// Utility: Download remote file with streaming and retry
+// Utility: Download remote file with retry
 // ============================================================
 async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
   let lastError = null;
@@ -263,7 +263,7 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
 }
 
 // ============================================================
-// STEP 1: Apply fade in/out effects
+// STEP 1: Apply fade in/out
 // ============================================================
 async function applyFades(sessionId, introPath, outroPath) {
   info("🔧 STEP 1: Applying fade in/out effects", { sessionId });
@@ -274,7 +274,6 @@ async function applyFades(sessionId, introPath, outroPath) {
   await verifyAudioFile(introPath, "intro for fading", sessionId);
   await verifyAudioFile(outroPath, "outro for fading", sessionId);
 
-  // Fade in intro
   await runFFmpeg(
     [
       "-y",
@@ -293,7 +292,6 @@ async function applyFades(sessionId, introPath, outroPath) {
     sessionId
   );
 
-  // Fade out outro (reverse trick)
   await runFFmpeg(
     [
       "-y",
@@ -325,10 +323,7 @@ async function applyFades(sessionId, introPath, outroPath) {
 }
 
 // ============================================================
-// STEP 2: Apply audio effects (split into multiple lighter stages)
-//   2A: concat intro + main + outro
-//   2B: apply bus compression
-//   2C: apply RMS normalisation (dynaudnorm) + light EQ
+// STEP 2: Concat + Effects
 // ============================================================
 async function applyAudioEffects(
   sessionId,
@@ -342,7 +337,6 @@ async function applyAudioEffects(
     { sessionId }
   );
 
-  // Validate inputs for this stage
   await verifyAudioFile(introFadedPath, "faded intro for effects", sessionId);
   await verifyAudioFile(mainPath, "main audio for effects", sessionId);
   await verifyAudioFile(outroFadedPath, "faded outro for effects", sessionId);
@@ -350,7 +344,7 @@ async function applyAudioEffects(
   const concatPath = path.join(TMP_DIR, `${sessionId}_combined_concat.mp3`);
   const compressedPath = path.join(TMP_DIR, `${sessionId}_combined_compressed.mp3`);
 
-  // ---------- STEP 2A: Concat only ----------
+  // Concat
   await runFFmpeg(
     [
       "-y",
@@ -376,8 +370,7 @@ async function applyAudioEffects(
   );
   await verifyAudioFile(concatPath, "post-concat mix", sessionId);
 
-  // ---------- STEP 2B: Bus compression ----------
-  // Gentle bus compression to keep dynamics controlled but natural
+  // Bus compression
   await runFFmpeg(
     [
       "-y",
@@ -397,7 +390,7 @@ async function applyAudioEffects(
   );
   await verifyAudioFile(compressedPath, "post-compressor mix", sessionId);
 
-  // ---------- STEP 2C: RMS normalisation (dynaudnorm) + light vocal EQ ----------
+  // RMS + EQ
   const rmsEqFilter = `
     dynaudnorm=f=250:g=10:p=0.9:m=5,
     equalizer=f=120:t=h:width=200:g=2,
@@ -427,7 +420,7 @@ async function applyAudioEffects(
 }
 
 // ============================================================
-// Pipeline orchestrator
+// Orchestrator
 // ============================================================
 async function runPodcastPipeline(
   sessionId,
@@ -446,14 +439,12 @@ async function runPodcastPipeline(
   await verifyAudioFile(mainPath, "pipeline main", sessionId);
   await verifyAudioFile(outroPath, "pipeline outro", sessionId);
 
-  // STEP 1: Apply fades
   const { introFadedPath, outroFadedPath } = await applyFades(
     sessionId,
     introPath,
     outroPath
   );
 
-  // STEP 2: Apply audio effects
   await applyAudioEffects(
     sessionId,
     introFadedPath,
@@ -464,7 +455,7 @@ async function runPodcastPipeline(
 }
 
 // ============================================================
-// Cleanup helper
+// Cleanup
 // ============================================================
 async function cleanupTempFiles(sessionId) {
   try {
@@ -501,11 +492,9 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     return editedBuffer;
   }
 
-  // Normalise input: accept Buffer, file path string, or { localPath }
   let workingBuffer = editedBuffer;
 
   if (typeof workingBuffer === "string") {
-    // Path on disk
     workingBuffer = await fs.promises.readFile(workingBuffer);
   } else if (
     workingBuffer &&
@@ -531,7 +520,6 @@ export async function podcastProcessor(sessionId, editedBuffer) {
   const finalPath = path.join(TMP_DIR, `${sessionId}_final.mp3`);
 
   try {
-    // Persist main audio to disk
     await fs.promises.writeFile(mainPath, workingBuffer);
 
     const stats = await fs.promises.stat(mainPath);
@@ -546,7 +534,6 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
     info("💾 Main audio written to disk", { sessionId, bytes: stats.size });
 
-    // Fetch intro/outro from R2
     await downloadToLocal(PODCAST_INTRO_URL, introPath, "intro", sessionId);
     await downloadToLocal(PODCAST_OUTRO_URL, outroPath, "outro", sessionId);
 
@@ -624,6 +611,17 @@ export async function podcastProcessor(sessionId, editedBuffer) {
       finalSize: finalBuffer.length,
     });
 
+    // ============================================================
+    // ✅ NEW: Upload final podcast to R2 bucket "podcast"
+    // ============================================================
+    await uploadBuffer("podcast", `${sessionId}.mp3`, finalBuffer, "audio/mpeg");
+
+    info("📡 Uploaded final podcast MP3 to R2 bucket 'podcast'", {
+      sessionId,
+      key: `${sessionId}.mp3`,
+      size: finalBuffer.length,
+    });
+
     return finalBuffer;
   } catch (err) {
     stopKeepAlive(label);
@@ -637,4 +635,4 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
     throw err;
   }
-}
+        }
