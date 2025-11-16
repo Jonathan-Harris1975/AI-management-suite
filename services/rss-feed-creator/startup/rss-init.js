@@ -1,7 +1,8 @@
 // services/rss-feed-creator/startup/rss-init.js
 import { ensureR2Sources } from "../utils/rss-bootstrap.js";
 import rssLogger from "../utils/rss-logger.js";
-const { info, error } = rssLogger;
+const info = (...args) => rssLogger.info(...args);
+const error = (...args) => rssLogger.error(...args);
 
 (async () => {
   try {
