@@ -146,8 +146,8 @@ export async function editingProcessor(sessionId, inputPathObj) {
       sessionId,
       currentInput,
       stage1Path,
-      "rubberband=pitch=0.89:tempo=1.0",
-      "Stage 1: Pitch Shift (Rubberband)"
+      "rubberband=pitch=0.92:tempo=1.0",
+      "Stage 1:🗣️ Pitch Shift "
     );
     lastSuccessfulStage = stage1Path;
 
@@ -169,7 +169,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       currentInput,
       stage2Path,
       eqFilters,
-      "Stage 2: EQ Processing"
+      "Stage 2: 🎛️ EQ Processing"
     );
 
     // Clean up previous stage
@@ -187,7 +187,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       currentInput,
       stage3Path,
       "deesser=i=0.4:m=0.75:f=0.5",
-      "Stage 3: De-esser"
+      "Stage 3: 🎛️ De-esser"
     );
 
     // Clean up previous stage
@@ -210,7 +210,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       currentInput,
       finalPath,
       dynamicsFilters,
-      "Stage 4: Compression + Limiting"
+      "Stage 4: 🎛️ Compression + Limiting"
     );
 
     // Clean up previous stage
