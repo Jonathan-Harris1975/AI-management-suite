@@ -1,14 +1,33 @@
-// services/rss-feed-creator/utils/rss-logger.js
-// Centralised logger for all RSS feed creator activity.
-// ✅ Emoji-first, human readable
-// ✅ Message-only (all context baked into the string)
-// ✅ UK-style timestamps: 2025.11.16 14:22:10
-// ✅ Grouped by runId (e.g. RSS-2025-11-16)
-// ✅ Integrated with global #logger.js and #shared/keepalive.js
+// ============================================================
+// 📡 Centralised RSS Feed Creator Logger (Hardened)
+// ============================================================
+//
+// Features:
+//   • Emoji-first, human readable messages
+//   • UK timestamps: 2025.11.16 14:22:10
+//   • Run-scoped IDs: RSS-2025-11-16
+//   • Structured summary events for Shiper + dashboards
+//   • Built-in silent keepalive to protect long RSS runs
+//   • Stage helpers for pipeline-style logs
+//   • Verbose debug mode via RSS_DEBUG=true
+//
+// No behaviour changes for existing callers.
+// Drop-in compatible.
+//
+// ============================================================
 
-import { info as baseInfo, warn as baseWarn, error as baseError } from "#logger.js";
+import {
+  info as baseInfo,
+  warn as baseWarn,
+  error as baseError,
+} from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 
+const DEBUG = process.env.RSS_DEBUG === "true";
+
+// ------------------------------------------------------------
+// 📅 Time helpers (UK format)
+// ------------------------------------------------------------
 function formatDateUK(date = new Date()) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -24,6 +43,9 @@ function formatDateTimeUK(date = new Date()) {
   return `${datePart} ${h}:${min}:${s}`;
 }
 
+// ------------------------------------------------------------
+// 🧠 Logger Class
+// ------------------------------------------------------------
 class RssLogger {
   constructor() {
     this.currentRunId = null;
@@ -58,7 +80,7 @@ class RssLogger {
     return `${ts}${run}`;
   }
 
-  // Expose a log facade so legacy code can do log.info(...)
+  // Legacy facade support: logger.log.info(...)
   get log() {
     return {
       info: (...args) => this.info(...args),
@@ -67,10 +89,9 @@ class RssLogger {
     };
   }
 
-  // ─────────────────────────────────────────────
-  // 🧵 Run lifecycle
-  // ─────────────────────────────────────────────
-
+  // ------------------------------------------------------------
+  // 🏁 Run lifecycle
+  // ------------------------------------------------------------
   startRun(optionalRunId) {
     const datePart = formatDateUK();
     const runId = optionalRunId || `RSS-${datePart}`;
@@ -79,15 +100,20 @@ class RssLogger {
     this.resetMetrics();
     this.metrics.startTime = Date.now();
 
-    // Silent keep-alive to avoid idle timeouts
     this.keepAliveLabel = `rss-feed-creator:${runId}`;
+
     try {
       startKeepAlive(this.keepAliveLabel, 15000);
-    } catch {
-      // keepalive is best-effort; never break the app
+    } catch (err) {
+      baseWarn("rss.keepalive.start.failed", { error: err.message });
     }
 
-    this.info(`🟧 RSS run started (${runId}). Logs will show progress.`);
+    this.info(`📝 RSS run started (${runId}). Logs will show progress.`);
+
+    if (DEBUG) {
+      this.info("🔍 DEBUG MODE ENABLED — verbose RSS logging active");
+    }
+
     return runId;
   }
 
@@ -99,8 +125,8 @@ class RssLogger {
     if (this.keepAliveLabel) {
       try {
         stopKeepAlive(this.keepAliveLabel);
-      } catch {
-        // ignore
+      } catch (err) {
+        baseWarn("rss.keepalive.stop.failed", { error: err.message });
       }
       this.keepAliveLabel = null;
     }
@@ -111,20 +137,18 @@ class RssLogger {
         : null;
 
     this.info(
-      `🟩 RSS run completed${seconds != null ? ` in ${seconds}s` : ""}. ` +
-        `Feeds: ${this.metrics.feedsProcessed}, ` +
-        `Rewritten items: ${this.metrics.itemsRewritten}, ` +
-        `Uploaded items: ${this.metrics.itemsUploaded}.`
+      `🗃️ RSS run completed${
+        seconds != null ? ` in ${seconds}s` : ""
+      }. Feeds: ${this.metrics.feedsProcessed}, Rewritten items: ${
+        this.metrics.itemsRewritten
+      }, Uploaded: ${this.metrics.itemsUploaded}.`
     );
 
-    const summary = {
+    baseInfo("rss-feed-creator.run.summary", {
       runId: this.currentRunId,
       ...this.metrics,
       ...extra,
-    };
-
-    // Structured summary (single machine-friendly event)
-    baseInfo("rss-feed-creator.run.summary", summary);
+    });
   }
 
   runError(err, extra = {}) {
@@ -134,13 +158,12 @@ class RssLogger {
     if (this.keepAliveLabel) {
       try {
         stopKeepAlive(this.keepAliveLabel);
-      } catch {
-        // ignore
-      }
+      } catch {}
       this.keepAliveLabel = null;
     }
 
     this.error(`RSS run failed: ${message}`);
+
     baseError("rss-feed-creator.run.error", {
       runId: this.currentRunId,
       message,
@@ -148,24 +171,27 @@ class RssLogger {
     });
   }
 
-  // ─────────────────────────────────────────────
+  // ------------------------------------------------------------
   // 📊 Metrics helpers
-  // ─────────────────────────────────────────────
-
+  // ------------------------------------------------------------
   incFeedsProcessed(n = 1) {
     this.metrics.feedsProcessed += n;
+    if (DEBUG) this.info(`🧮 feedsProcessed += ${n}`);
   }
 
   incItemsFetched(n = 1) {
     this.metrics.itemsFetched += n;
+    if (DEBUG) this.info(`🧮 itemsFetched += ${n}`);
   }
 
   incItemsRewritten(n = 1) {
     this.metrics.itemsRewritten += n;
+    if (DEBUG) this.info(`🧮 itemsRewritten += ${n}`);
   }
 
   incItemsUploaded(n = 1) {
     this.metrics.itemsUploaded += n;
+    if (DEBUG) this.info(`🧮 itemsUploaded += ${n}`);
   }
 
   addWarning(message) {
@@ -178,10 +204,9 @@ class RssLogger {
     this.error(message);
   }
 
-  // ─────────────────────────────────────────────
-  // 🎙️ Log wrappers (emoji-first, message-only)
-  // ─────────────────────────────────────────────
-
+  // ------------------------------------------------------------
+  // 🎙️ Log wrappers (emoji-first)
+  // ------------------------------------------------------------
   info(message, meta) {
     if (meta && typeof meta === "object") {
       baseInfo(`📰 ${this._prefix()} — ${message}`, meta);
@@ -206,13 +231,20 @@ class RssLogger {
     }
   }
 
-  // Optional stage helpers for nicer pipeline logs
+  // ------------------------------------------------------------
+  // 🧩 Stage helpers (nicely structured pipeline logs)
+  // ------------------------------------------------------------
   stageStart(stageName, message) {
     this.info(`🟧 [${stageName}] ${message || "started"}`);
   }
 
   stageEnd(stageName, message) {
     this.info(`🟩 [${stageName}] ${message || "completed"}`);
+  }
+
+  writeRaw(msg) {
+    // Low-level direct log (used for debugging raw fetch)
+    baseInfo(`📜 ${this._prefix()} — ${msg}`);
   }
 }
 
