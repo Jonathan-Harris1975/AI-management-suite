@@ -1,7 +1,7 @@
 // services/rss-feed-creator/routes/index.js
 import express from "express";
 import rssLogger from "../utils/rss-logger.js";
-const { log } = rssLogger;
+const log = (...args) => rssLogger.log(...args);
 
 const router = express.Router();
 
