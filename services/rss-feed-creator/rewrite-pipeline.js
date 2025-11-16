@@ -1,5 +1,5 @@
 // ============================================================
-// 🧠 RSS Feed Creator — End-to-End Rewrite Pipeline (Shiper)
+// 🧠 RSS Feed Creator — services/rss-feed-creator/rewrite-pipeline.js
 // ============================================================
 //
 // Uses the ACTUAL file names from your repo:
