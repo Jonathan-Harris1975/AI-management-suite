@@ -1,5 +1,5 @@
 // ============================================================
-// 🎵 Modular Podcast Processor
+// 🎵 Modular Podcast Processor (Robust Version)
 // ============================================================
 // Four-step pipeline:
 //   1. Normalize intro/outro to 48kHz mono s16 (temp memory)
@@ -158,49 +158,99 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
 }
 
 // ============================================================
-// Utility: Download remote file with streaming
+// Utility: Download remote file with streaming and retry
 // ============================================================
-async function downloadToLocal(url, targetPath, label, sessionId) {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to download ${label}: HTTP ${res.status}`);
-  }
+async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
+  let lastError = null;
 
-  // Stream directly to file instead of loading into memory
-  const fileStream = fs.createWriteStream(targetPath);
-  
-  try {
-    // Convert web ReadableStream to Node.js stream
-    const reader = res.body.getReader();
-    let bytesWritten = 0;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      info(`⬇️ Downloading ${label} (attempt ${attempt}/${retries})`, { sessionId, url });
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      fileStream.write(value);
-      bytesWritten += value.length;
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(60000), // 60s timeout
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+
+      const contentLength = res.headers.get('content-length');
+      const expectedBytes = contentLength ? parseInt(contentLength, 10) : null;
+
+      // Stream directly to file
+      const fileStream = fs.createWriteStream(targetPath);
+      let bytesWritten = 0;
+
+      try {
+        const reader = res.body.getReader();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          fileStream.write(value);
+          bytesWritten += value.length;
+        }
+
+        await new Promise((resolve, reject) => {
+          fileStream.end();
+          fileStream.on('finish', resolve);
+          fileStream.on('error', reject);
+        });
+
+        // Validate file size
+        if (expectedBytes && bytesWritten !== expectedBytes) {
+          throw new Error(
+            `Size mismatch: expected ${expectedBytes} bytes, got ${bytesWritten} bytes`
+          );
+        }
+
+        if (bytesWritten < 1000) {
+          throw new Error(`File too small: ${bytesWritten} bytes`);
+        }
+
+        info(`✅ Downloaded ${label}`, { 
+          sessionId, 
+          bytes: bytesWritten, 
+          expected: expectedBytes,
+          targetPath 
+        });
+
+        // Verify the downloaded file
+        await verifyAudioFile(targetPath, label, sessionId);
+
+        return; // Success!
+
+      } catch (err) {
+        fileStream.destroy();
+        throw err;
+      }
+
+    } catch (err) {
+      lastError = err;
+      warn(`⚠️ Download attempt ${attempt}/${retries} failed for ${label}`, {
+        sessionId,
+        error: err.message,
+      });
+
+      // Clean up failed download
+      try {
+        await fs.promises.unlink(targetPath);
+      } catch {}
+
+      if (attempt < retries) {
+        const delay = 2000 * Math.pow(2, attempt - 1);
+        await new Promise((res) => setTimeout(res, delay));
+      }
     }
-
-    await new Promise((resolve, reject) => {
-      fileStream.end();
-      fileStream.on('finish', resolve);
-      fileStream.on('error', reject);
-    });
-
-    info(`⬇️ Downloaded ${label}`, { sessionId, bytes: bytesWritten, targetPath });
-
-    // Verify the downloaded file
-    await verifyAudioFile(targetPath, label, sessionId);
-
-  } catch (err) {
-    fileStream.destroy();
-    throw err;
   }
+
+  throw new Error(`Failed to download ${label} after ${retries} attempts: ${lastError?.message}`);
 }
 
 // ============================================================
-// STEP 1: Normalize intro/outro to 48kHz mono s16
+// STEP 1: Normalize intro/outro to 48kHz mono s16 (with retry)
 // ============================================================
 async function normalizeIntroOutro(sessionId, introPath, outroPath) {
   info("🔧 STEP 1: Normalizing intro/outro to 48kHz mono s16", { sessionId });
@@ -212,51 +262,74 @@ async function normalizeIntroOutro(sessionId, introPath, outroPath) {
   await verifyAudioFile(introPath, "intro input", sessionId);
   await verifyAudioFile(outroPath, "outro input", sessionId);
 
-  // Normalize intro
-  await runFFmpeg(
-    [
-      "-y",
-      "-xerror",
-      "-i",
-      introPath,
-      "-ar",
-      "48000",
-      "-ac",
-      "1",
-      "-sample_fmt",
-      "s16",
-      "-acodec",
-      "pcm_s16le",
-      introNormPath,
-    ],
-    "normalize-intro",
-    sessionId
-  );
+  // Helper function to normalize a single file with retry
+  async function normalizeSingleFile(inputPath, outputPath, label, retries = 2) {
+    let lastError = null;
 
-  // Normalize outro
-  await runFFmpeg(
-    [
-      "-y",
-      "-xerror",
-      "-i",
-      outroPath,
-      "-ar",
-      "48000",
-      "-ac",
-      "1",
-      "-sample_fmt",
-      "s16",
-      "-acodec",
-      "pcm_s16le",
-      outroNormPath,
-    ],
-    "normalize-outro",
-    sessionId
-  );
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        info(`🔄 Normalizing ${label} (attempt ${attempt}/${retries})`, { sessionId });
 
-  // Verify output files
-  await verifyAudioFile(introNormPath, "normalized intro", sessionId);
-  await verifyAudioFile(outroNormPath, "normalized outro", sessionId);
+        // Remove any existing output file
+        try {
+          await fs.promises.unlink(outputPath);
+        } catch {}
+
+        // More robust ffmpeg args with error handling
+        await runFFmpeg(
+          [
+            "-y",
+            "-xerror",
+            "-err_detect", "ignore_err", // More lenient error detection
+            "-fflags", "+genpts+igndts", // Generate timestamps if missing
+            "-i", inputPath,
+            "-ar", "48000",
+            "-ac", "1",
+            "-sample_fmt", "s16",
+            "-acodec", "pcm_s16le",
+            "-avoid_negative_ts", "make_zero",
+            outputPath,
+          ],
+          `normalize-${label}`,
+          sessionId,
+          90000 // 90s timeout for normalization
+        );
+
+        // Verify output
+        const stats = await fs.promises.stat(outputPath);
+        if (stats.size < 1000) {
+          throw new Error(`Output file too small: ${stats.size} bytes`);
+        }
+
+        await verifyAudioFile(outputPath, `normalized ${label}`, sessionId);
+
+        info(`✅ Successfully normalized ${label}`, { 
+          sessionId, 
+          outputSize: stats.size 
+        });
+
+        return; // Success!
+
+      } catch (err) {
+        lastError = err;
+        warn(`⚠️ Normalization attempt ${attempt}/${retries} failed for ${label}`, {
+          sessionId,
+          error: err.message,
+        });
+
+        if (attempt < retries) {
+          const delay = 2000 * attempt;
+          await new Promise((res) => setTimeout(res, delay));
+        }
+      }
+    }
+
+    throw new Error(`Failed to normalize ${label} after ${retries} attempts: ${lastError?.message}`);
+  }
+
+  // Normalize both files
+  await normalizeSingleFile(introPath, introNormPath, "intro");
+  await normalizeSingleFile(outroPath, outroNormPath, "outro");
 
   info("✅ STEP 1 complete: Intro/outro normalized", {
     sessionId,
@@ -282,6 +355,8 @@ async function normalizeMainAudio(sessionId, mainPath) {
     [
       "-y",
       "-xerror",
+      "-err_detect", "ignore_err",
+      "-fflags", "+genpts+igndts",
       "-i",
       mainPath,
       "-ar",
@@ -292,6 +367,7 @@ async function normalizeMainAudio(sessionId, mainPath) {
       "s16",
       "-acodec",
       "pcm_s16le",
+      "-avoid_negative_ts", "make_zero",
       mainNormPath,
     ],
     "normalize-main",
@@ -531,7 +607,7 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     
     info("💾 Main audio written to disk", { sessionId, bytes: stats.size });
 
-    // Download intro & outro (streaming)
+    // Download intro & outro (streaming with retry)
     await downloadToLocal(PODCAST_INTRO_URL, introPath, "intro", sessionId);
     await downloadToLocal(PODCAST_OUTRO_URL, outroPath, "outro", sessionId);
 
@@ -597,50 +673,4 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     // Cleanup temporary files
     await cleanupTempFiles(sessionId);
 
-    // All attempts failed → return editedBuffer unchanged
-    if (!finalBuffer) {
-      error("💥 podcastProcessor failed after all retries", {
-        sessionId,
-        error: lastError?.message,
-      });
-      return editedBuffer;
-    }
-
-    // Safenet upload
-    if (EDITED_BUCKET && PUBLIC_EDITED_BASE) {
-      try {
-        const key = `${sessionId}_final.mp3`;
-
-        await putObject(EDITED_BUCKET, key, finalBuffer, "audio/mpeg");
-
-        info("💾 podcastProcessor safenet upload OK", {
-          sessionId,
-          bucket: EDITED_BUCKET,
-          key,
-          url: `${PUBLIC_EDITED_BASE}/${encodeURIComponent(key)}`,
-        });
-      } catch (err) {
-        warn("⚠️ podcastProcessor safenet upload failed", {
-          sessionId,
-          error: err.message,
-        });
-      }
-    }
-
-    return finalBuffer;
-  } catch (err) {
-    stopKeepAlive(label);
-
-    error("💥 podcastProcessor crashed", {
-      sessionId,
-      error: err.message,
-    });
-
-    // Attempt cleanup even on crash
-    await cleanupTempFiles(sessionId);
-
-    return editedBuffer;
-  }
-}
-
-export default podcastProcessor;
+    // All attempts failed → 
