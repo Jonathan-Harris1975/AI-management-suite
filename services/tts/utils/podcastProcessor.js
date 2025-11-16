@@ -3,7 +3,7 @@
 // ============================================================
 // Two-step pipeline:
 //   1. Apply fade in/out effects to intro/outro
-//   2. Concat intro + main + outro, apply bus compression + loudnorm
+//   2. Concat intro + main + outro, apply bus compression + RMS normalisation + light EQ
 // ============================================================
 
 import fs from "fs";
@@ -36,8 +36,13 @@ const PODCAST_RETRY_DELAY_MS = Number(
 
 const PODCAST_RETRY_BACKOFF = Number(process.env.RETRY_BACKOFF_MULTIPLIER || 2);
 
-const PODCAST_FFMPEG_TIMEOUT_MS = Number(
-  process.env.PODCAST_FFMPEG_TIMEOUT_MS || 5 * 60 * 1000
+// Increase default timeout and enforce a sensible minimum so long runs don't get killed too early.
+const RAW_PODCAST_FFMPEG_TIMEOUT_MS = Number(
+  process.env.PODCAST_FFMPEG_TIMEOUT_MS || 25 * 60 * 1000
+);
+const PODCAST_FFMPEG_TIMEOUT_MS = Math.max(
+  RAW_PODCAST_FFMPEG_TIMEOUT_MS,
+  10 * 60 * 1000
 );
 
 if (!fs.existsSync(TMP_DIR)) {
@@ -54,17 +59,21 @@ async function verifyAudioFile(filePath, label, sessionId) {
       throw new Error(`File is empty: 0 bytes`);
     }
 
-    const result = spawnSync("ffprobe", [
-      "-v",
-      "error",
-      "-select_streams",
-      "a:0",
-      "-show_entries",
-      "stream=duration,codec_name,sample_rate,channels,bit_rate",
-      "-of",
-      "json",
-      filePath,
-    ], { encoding: "utf8", timeout: 10000 });
+    const result = spawnSync(
+      "ffprobe",
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=duration,codec_name,sample_rate,channels,bit_rate",
+        "-of",
+        "json",
+        filePath,
+      ],
+      { encoding: "utf8", timeout: 10000 }
+    );
 
     if (result.status !== 0) {
       throw new Error(`ffprobe failed: ${result.stderr || "Unknown error"}`);
@@ -89,7 +98,9 @@ async function verifyAudioFile(filePath, label, sessionId) {
 
     return probeInfo;
   } catch (err) {
-    throw new Error(`Audio file verification failed for ${label}: ${err.message}`);
+    throw new Error(
+      `Audio file verification failed for ${label}: ${err.message}`
+    );
   }
 }
 
@@ -126,7 +137,10 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
         lower.includes("failed to read frame size") ||
         lower.includes("could not seek to")
       ) {
-        warn(`🔴 Critical FFmpeg input error (${label})`, { sessionId, chunk: txt });
+        warn(`🔴 Critical FFmpeg input error (${label})`, {
+          sessionId,
+          chunk: txt,
+        });
       }
 
       if (lower.includes("error")) {
@@ -149,7 +163,9 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
       if (code === 0) {
         resolve();
       } else {
-        const errorMsg = `ffmpeg failed (code ${code}) for ${label}: ${stderr.slice(-500)}`;
+        const errorMsg = `ffmpeg failed (code ${code}) for ${label}: ${stderr.slice(
+          -500
+        )}`;
         reject(new Error(errorMsg));
       }
     });
@@ -309,7 +325,10 @@ async function applyFades(sessionId, introPath, outroPath) {
 }
 
 // ============================================================
-// STEP 2: Apply audio effects (concat + compression + loudnorm)
+// STEP 2: Apply audio effects (split into multiple lighter stages)
+//   2A: concat intro + main + outro
+//   2B: apply bus compression
+//   2C: apply RMS normalisation (dynaudnorm) + light EQ
 // ============================================================
 async function applyAudioEffects(
   sessionId,
@@ -318,20 +337,20 @@ async function applyAudioEffects(
   outroFadedPath,
   outputPath
 ) {
-  info("🔧 STEP 2: Applying audio effects (concat + compression + loudnorm)", {
-    sessionId,
-  });
+  info(
+    "🔧 STEP 2: Applying audio effects (concat + compression + RMS norm + EQ)",
+    { sessionId }
+  );
 
+  // Validate inputs for this stage
   await verifyAudioFile(introFadedPath, "faded intro for effects", sessionId);
   await verifyAudioFile(mainPath, "main audio for effects", sessionId);
   await verifyAudioFile(outroFadedPath, "faded outro for effects", sessionId);
 
-  const filterComplex = `
-    [0:a][1:a][2:a]concat=n=3:v=0:a=1,
-    acompressor=threshold=-18dB:ratio=2:attack=5:release=120,
-    loudnorm=I=-16:TP=-1.5:LRA=11:print_format=none[out]
-  `.replace(/\s+/g, " ");
+  const concatPath = path.join(TMP_DIR, `${sessionId}_combined_concat.mp3`);
+  const compressedPath = path.join(TMP_DIR, `${sessionId}_combined_compressed.mp3`);
 
+  // ---------- STEP 2A: Concat only ----------
   await runFFmpeg(
     [
       "-y",
@@ -343,16 +362,63 @@ async function applyAudioEffects(
       "-i",
       outroFadedPath,
       "-filter_complex",
-      filterComplex,
+      "[0:a][1:a][2:a]concat=n=3:v=0:a=1[out]",
       "-map",
       "[out]",
       "-c:a",
       "libmp3lame",
       "-b:a",
-      "128k",
+      "256k",
+      concatPath,
+    ],
+    "audio-effects-concat",
+    sessionId
+  );
+  await verifyAudioFile(concatPath, "post-concat mix", sessionId);
+
+  // ---------- STEP 2B: Bus compression ----------
+  // Gentle bus compression to keep dynamics controlled but natural
+  await runFFmpeg(
+    [
+      "-y",
+      "-xerror",
+      "-i",
+      concatPath,
+      "-af",
+      "acompressor=threshold=-18dB:ratio=2:attack=5:release=120",
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "256k",
+      compressedPath,
+    ],
+    "audio-effects-compressor",
+    sessionId
+  );
+  await verifyAudioFile(compressedPath, "post-compressor mix", sessionId);
+
+  // ---------- STEP 2C: RMS normalisation (dynaudnorm) + light vocal EQ ----------
+  const rmsEqFilter = `
+    dynaudnorm=f=250:g=10:p=0.9:m=5,
+    equalizer=f=120:t=h:width=200:g=2,
+    equalizer=f=3500:t=h:width=1000:g=2
+  `.replace(/\s+/g, " ");
+
+  await runFFmpeg(
+    [
+      "-y",
+      "-xerror",
+      "-i",
+      compressedPath,
+      "-af",
+      rmsEqFilter,
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "256k",
       outputPath,
     ],
-    "audio-effects",
+    "audio-effects-rms-eq",
     sessionId
   );
 
@@ -372,7 +438,9 @@ async function runPodcastPipeline(
   attempt,
   total
 ) {
-  info(`🎵 Running podcast pipeline (attempt ${attempt}/${total})`, { sessionId });
+  info(`🎵 Running podcast pipeline (attempt ${attempt}/${total})`, {
+    sessionId,
+  });
 
   await verifyAudioFile(introPath, "pipeline intro", sessionId);
   await verifyAudioFile(mainPath, "pipeline main", sessionId);
