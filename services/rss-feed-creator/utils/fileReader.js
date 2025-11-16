@@ -8,7 +8,8 @@
 import fs from "fs";
 import path from "path";
 import rssLogger from "./rss-logger.js";
-const { info, error } = rssLogger;
+const info = (...args) => rssLogger.info(...args);
+const error = (...args) => rssLogger.error(...args);
 import { getObjectAsText } from "../../shared/utils/r2-client.js";
 
 const R2_BUCKET = process.env.R2_BUCKET_RSS_FEEDS || "rss-feeds";

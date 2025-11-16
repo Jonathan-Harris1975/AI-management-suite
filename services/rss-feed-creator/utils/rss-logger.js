@@ -51,6 +51,22 @@ class RssLogger {
     this.currentRunId = null;
     this.keepAliveLabel = null;
     this.resetMetrics();
+
+// Bind methods to preserve `this` when used in callbacks or destructured
+this.info = this.info.bind(this);
+this.warn = this.warn.bind(this);
+this.error = this.error.bind(this);
+this.stageStart = this.stageStart.bind(this);
+this.stageEnd = this.stageEnd.bind(this);
+this.startRun = this.startRun.bind(this);
+this.endRun = this.endRun.bind(this);
+this.runError = this.runError.bind(this);
+this.incFeedsProcessed = this.incFeedsProcessed.bind(this);
+this.incItemsFetched = this.incItemsFetched.bind(this);
+this.incItemsRewritten = this.incItemsRewritten.bind(this);
+this.incItemsUploaded = this.incItemsUploaded.bind(this);
+this.addWarning = this.addWarning.bind(this);
+this.addError = this.addError.bind(this);
   }
 
   resetMetrics() {

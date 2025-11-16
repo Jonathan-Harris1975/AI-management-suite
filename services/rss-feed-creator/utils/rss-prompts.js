@@ -3,7 +3,7 @@
 // ============================================================
 
 import rssLogger from "./rss-logger.js";
-const { warn } = rssLogger;
+const warn = (...args) => rssLogger.warn(...args);
 //
 // Automatically pulls summary length limits from environment vars:
 // MIN_SUMMARY_CHARS / MAX_SUMMARY_CHARS

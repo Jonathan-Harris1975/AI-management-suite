@@ -2,7 +2,7 @@
 import { uploadRssDataFiles } from "./bootstrap.js";
 import { runRewritePipeline } from "./rewrite-pipeline.js";
 import rssLogger from "./rss-logger.js";
-const { log } = rssLogger;
+const log = (...args) => rssLogger.log(...args);
 
 export async function startFeedCreator() {
   log.info("rss.pipeline.start");

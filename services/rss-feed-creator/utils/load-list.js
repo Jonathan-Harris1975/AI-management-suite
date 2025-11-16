@@ -1,7 +1,7 @@
 import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
 import fs from "fs";
 import rssLogger from "./rss-logger.js";
-const { log } = rssLogger;
+const log = (...args) => rssLogger.log(...args);
 
 /**
  * Load and sanitize a list of URLs from a file.
