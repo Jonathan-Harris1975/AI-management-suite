@@ -1,12 +1,11 @@
-
-import { log } from "../../../utils/root-logger.js";
+// r2-client.js — minimal logging, root-logger wired
+import log from "../../../utils/root-logger.js";
 import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
   DeleteObjectCommand,
-  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 
 const {
@@ -32,7 +31,7 @@ const {
   R2_PUBLIC_BASE_URL_RSS,
   R2_PUBLIC_BASE_URL_TRANSCRIPT,
   R2_PUBLIC_BASE_URL_CHUNKS,
-  R2_PUBLIC_BASE_URL_EDITED_AUDIO
+  R2_PUBLIC_BASE_URL_EDITED_AUDIO,
 } = process.env;
 
 export const s3 = new S3Client({
@@ -63,7 +62,7 @@ export const R2_BUCKETS = {
   transcript: R2_BUCKET_TRANSCRIPTS,
   edited: R2_BUCKET_EDITED_AUDIO,
   editedAudio: R2_BUCKET_EDITED_AUDIO,
-  "edited-audio": R2_BUCKET_EDITED_AUDIO
+  "edited-audio": R2_BUCKET_EDITED_AUDIO,
 };
 
 export const R2_PUBLIC_URLS = {
@@ -80,18 +79,23 @@ export const R2_PUBLIC_URLS = {
   "podcast-chunks": R2_PUBLIC_BASE_URL_CHUNKS,
   edited: R2_PUBLIC_BASE_URL_EDITED_AUDIO,
   editedAudio: R2_PUBLIC_BASE_URL_EDITED_AUDIO,
-  "edited-audio": R2_PUBLIC_BASE_URL_EDITED_AUDIO
+  "edited-audio": R2_PUBLIC_BASE_URL_EDITED_AUDIO,
 };
 
 export function ensureBucketKey(bucketKey) {
   const bucket = R2_BUCKETS[bucketKey];
-  if (!bucket) throw new Error(`Invalid bucketKey: ${bucketKey}`);
+  if (!bucket) {
+    throw new Error(`Invalid bucketKey: ${bucketKey}`);
+  }
   return bucket;
 }
 
 export function buildPublicUrl(bucketKey, key) {
   const base = R2_PUBLIC_URLS[bucketKey];
-  return `${base}/${encodeURIComponent(key)}`;
+  if (!base) {
+    throw new Error(`No public URL configured for bucketKey: ${bucketKey}`);
+  }
+  return `${base.replace(/\/+$/, "")}/${encodeURIComponent(key)}`;
 }
 
 export async function uploadBuffer(bucketKey, key, buffer) {
@@ -102,7 +106,7 @@ export async function uploadBuffer(bucketKey, key, buffer) {
         Bucket: bucket,
         Key: key,
         Body: buffer,
-      })
+      }),
     );
   } catch (err) {
     log.error("r2.upload.failed", { bucketKey, key });
@@ -110,10 +114,26 @@ export async function uploadBuffer(bucketKey, key, buffer) {
   }
 }
 
+export async function uploadText(bucketKey, key, text) {
+  return uploadBuffer(bucketKey, key, Buffer.from(text, "utf-8"));
+}
+
+export async function getObjectAsText(bucketKey, key) {
+  const bucket = ensureBucketKey(bucketKey);
+  const res = await s3.send(
+    new GetObjectCommand({ Bucket: bucket, Key: key }),
+  );
+  const chunks = [];
+  for await (const chunk of res.Body) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
 export async function listKeys(bucketKey, prefix = "") {
   const bucket = ensureBucketKey(bucketKey);
   const { Contents } = await s3.send(
-    new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix })
+    new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix }),
   );
   return Contents ? Contents.map((c) => c.Key) : [];
 }
@@ -123,12 +143,18 @@ export async function deleteObject(bucketKey, key) {
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
 
+// Minimal startup log
+log.info("r2.client.ready", { endpoint: R2_ENDPOINT, region: R2_REGION || "auto" });
+
 export default {
   s3,
   R2_BUCKETS,
   R2_PUBLIC_URLS,
+  ensureBucketKey,
   buildPublicUrl,
   uploadBuffer,
+  uploadText,
+  getObjectAsText,
   listKeys,
-  deleteObject
+  deleteObject,
 };

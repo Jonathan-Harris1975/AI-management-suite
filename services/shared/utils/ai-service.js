@@ -1,14 +1,18 @@
-
+// ai-service.js — minimal resilient requester, root-logger ready
 import log from "../../../utils/root-logger.js";
 import aiConfig from "./ai-config.js";
 import fetch from "node-fetch";
 
-const OPENROUTER_BASE = process.env.OPENROUTER_API_BASE || "https://openrouter.ai/api/v1";
+const OPENROUTER_BASE =
+  process.env.OPENROUTER_API_BASE || "https://openrouter.ai/api/v1";
 const ENDPOINT = `${OPENROUTER_BASE}/chat/completions`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function resilientRequest(routeName, { messages } = {}) {
+export async function resilientRequest(
+  routeName,
+  { messages } = {},
+) {
   const chain = aiConfig.routeModels[routeName] || [];
   let lastErr;
 
@@ -29,7 +33,10 @@ export async function resilientRequest(routeName, { messages } = {}) {
         }),
       });
 
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
       const json = await res.json();
       return json?.choices?.[0]?.message?.content || "";
     } catch (err) {
@@ -38,6 +45,7 @@ export async function resilientRequest(routeName, { messages } = {}) {
     }
   }
 
+  log.error("ai.resilient.failed", { routeName });
   throw lastErr || new Error("all providers failed");
 }
 
