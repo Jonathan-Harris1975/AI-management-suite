@@ -1,4 +1,3 @@
-import log from ;
 // ============================================================
 // 🌍 Unified Environment Bootstrap
 // ============================================================
@@ -11,7 +10,7 @@ import log from ;
 // • Provides a single exported `config` object
 // ============================================================
 
-import { info, warn } from ;
+import { info, warn } from "#logger.js";
 
 // Helper: convert numeric envs
 const toNumber = (value) => {
@@ -20,131 +19,131 @@ const toNumber = (value) => {
   return Number.isNaN(n) ? undefined : n;
 };
 
-// Helper: boolean envs (, , , )
+// Helper: boolean envs ("true", "1", "false", "0")
 const toBoolean = (value) => {
   if (value === undefined) return undefined;
-  return [, , ].includes(value.toLowerCase());
+  return ["true", "1", "yes"].includes(value.toLowerCase());
 };
 
 // === FULL ENV LIST (from your message + confirmations) ======
 const ALL_ENV_VARS = [
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
+  "APP_URL",
+  "APP_TITLE",
+  "FEED_FRESHNESS_HOURS",
+  "FEED_RETENTION_DAYS",
+  "FEED_URL",
+  "FEED_CUTOFF_HOURS",
+  "LOG_LEVEL",
+  "MAX_FEEDS_PER_RUN",
+  "MAX_ITEMS_PER_FEED",
+  "MAX_RSS_FEEDS_PER_RUN",
+  "MAX_SUMMARY_CHARS",
+  "MAX_TOTAL_ITEMS",
+  "MAX_URL_FEEDS_PER_RUN",
+  "MIN_INTRO_DURATION",
+  "MIN_OUTRO_DURATION",
+  "MIN_SUMMARY_CHARS",
+  "NODE_ENV",
 
   // OpenRouter — models & API keys
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
+  "OPENROUTER_ANTHROPIC",
+  "OPENROUTER_API_KEY_ANTHROPIC",
+  "OPENROUTER_API_KEY_ART",
+  "OPENROUTER_API_KEY_CHATGPT",
+  "OPENROUTER_API_KEY_DEEPSEEK",
+  "OPENROUTER_API_KEY_GOOGLE",
+  "OPENROUTER_API_KEY_GROK",
+  "OPENROUTER_API_KEY_META",
+  "OPENROUTER_ART",
+  "OPENROUTER_CHATGPT",
+  "OPENROUTER_DEEPSEEK",
+  "OPENROUTER_GOOGLE",
+  "OPENROUTER_META",
+  "OPENROUTER_API_BASE",
 
   // Cloudflare R2
-  ,
-  ,
-  ,
-  ,
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
+  "R2_REGION",
+  "R2_ENDPOINT",
 
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  , // (fixed typo)
+  "R2_BUCKET_ART",
+  "R2_BUCKET_CHUNKS",
+  "R2_BUCKET_MERGED",
+  "R2_BUCKET_META",
+  "R2_BUCKET_PODCAST_RSS_FEEDS",
+  "R2_BUCKET_PODCAST",
+  "R2_BUCKET_RAW_TEXT",
+  "R2_BUCKET_RSS_FEEDS",
+  "R2_BUCKET_TRANSCRIPTS",
+  "R2_BUCKET_EDITED_AUDIO", // (fixed typo)
 
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
-  , // paired with bucket
+  "R2_PUBLIC_BASE_URL_ART",
+  "R2_PUBLIC_BASE_URL_CHUNKS",
+  "R2_PUBLIC_BASE_URL_MERGE",
+  "R2_PUBLIC_BASE_URL_META",
+  "R2_PUBLIC_BASE_URL_PODCAST_RSS",
+  "R2_PUBLIC_BASE_URL_PODCAST",
+  "R2_PUBLIC_BASE_URL_RAW_TEXT",
+  "R2_PUBLIC_BASE_URL_RSS",
+  "R2_PUBLIC_BASE_URL_TRANSCRIPT",
+  "R2_PUBLIC_BASE_URL_EDITED_AUDIO", // paired with bucket
 
   // AWS / Polly
-  ,
-  ,
-  ,
-  ,
-  ,
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_REGION",
+  "POLLY_VOICE_ID",
+  "MAX_POLLY_NATURAL_CHUNK_CHARS",
 
   // Podcast + TTS
-  ,
-  ,
-  ,
-  ,
-  ,
+  "PODCAST_INTRO_URL",
+  "PODCAST_OUTRO_URL",
+  "TTS_CONCURRENCY",
+  "PODCAST_RSS_EP",
+  "PODCAST_RSS_ENABLED",
 
   // AI runtime + retry
-  ,
-  ,
-  ,
-  ,
-  ,
-  ,
+  "AI_MAX_RETRIES",
+  "AI_MAX_TOKENS",
+  "AI_RETRY_BASE_MS",
+  "AI_TEMPERATURE",
+  "AI_TIMEOUT",
+  "AI_TOP_P",
 
   // Internal networking
-  ,
-  ,
+  "INTERNAL_BASE_HOST",
+  "INTERNAL_BASE_PROTO",
 
   // Rapid API
-  ,
-  ,
+  "RAPIDAPI_HOST",
+  "RAPIDAPI_KEY",
 
   // RSS feed metadata
-  ,
-  ,
+  "RSS_FEED_TITLE",
+  "RSS_FEED_DESCRIPTION",
 
   // Short.io
-  ,
-  ,
+  "SHORTIO_API_KEY",
+  "SHORTIO_DOMAIN",
 
   // System
-  ,
-  ,
+  "PORT",
+  "SHIPER",
 
   // Retry tuning for processors
-  ,
-  ,
-  ,
+  "MAX_CHUNK_RETRIES",
+  "RETRY_DELAY_MS",
+  "RETRY_BACKOFF_MULTIPLIER",
 ];
 
 // ============================================================
 // Main bootstrap
 // ============================================================
 export function validateEnvironment() {
-  info();
-  info();
-  info();
+  info("=============================================");
+  info("🧠 Environment Bootstrap");
+  info("=============================================");
 
   const missing = [];
 
