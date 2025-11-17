@@ -2,7 +2,6 @@ import log from "../utils/root-logger.js";
 
 try {
   log.info("🚀 startupCheck.reached");
-  log.info("---------------------------------------------");
   log.info(`📂 startupCheck.cwd: ${process.cwd()}`);
   log.info(`📦 startupCheck.node: ${process.version}`);
   log.info("📦 startupCheck.moduleType: module (from package.json)");
