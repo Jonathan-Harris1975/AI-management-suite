@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 // services/script/utils/models.js
 // ============================================================
 // ✨ Generates Intro/Main/Outro → edits → chunked text files

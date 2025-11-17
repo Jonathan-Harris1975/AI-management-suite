@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 // services/script/utils/podcastHelper.js  
 // LLM-driven metadata generation for the podcast: title, description, SEO keywords, and artwork prompt (cached only).
 

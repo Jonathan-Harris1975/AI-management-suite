@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 import { warn, info, error } from "#logger.js";
 // services/script/utils/getSponsor.js
 import fs from "fs";

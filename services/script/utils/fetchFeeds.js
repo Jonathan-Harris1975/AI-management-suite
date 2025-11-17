@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 // services/script/utils/fetchFeeds.js
 import Parser from "rss-parser";
 import fetch from "node-fetch";

@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 // services/script/utils/getTuringQuote.js
 /**
  * Retrieves a random Alan Turing quote from the local data file.

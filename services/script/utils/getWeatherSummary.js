@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 // services/script/utils/getWeatherSummary.js
 import fetch from "node-fetch";
 import { info, error } from "#logger.js";

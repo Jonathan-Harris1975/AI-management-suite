@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 import { info, error } from "#logger.js";
 import { generateIntro, generateMain, generateOutro } from "../utils/models.js";
 import { composeEpisode } from "../routes/composeScript.js";

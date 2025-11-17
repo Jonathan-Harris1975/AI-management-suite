@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
 export default function splitPlainText(text, maxLength = 2500) {
   const chunks = [];

@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 import { info } from "#logger.js";
 
 // ============================================================

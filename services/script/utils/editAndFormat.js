@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 
 // A small helper to add subtle random bias in word choice / punctuation
 function humanizeText(text) {

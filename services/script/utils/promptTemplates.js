@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 // ============================================================
 // 🎙️ services/script/utils/promptTemplates.js (UPDATED)
 // ============================================================

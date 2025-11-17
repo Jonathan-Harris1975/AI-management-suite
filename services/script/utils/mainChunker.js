@@ -1,3 +1,4 @@
+import scriptLogger from "./script-logger.js";
 // services/script/utils/mainChunker.js
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { getMainPrompt } from "./promptTemplates.js";
