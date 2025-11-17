@@ -1,4 +1,4 @@
-// services/shared/utils/root-logger.js
+// utils/root-logger.js
 import pino from "pino";
 
 const logger = pino({
@@ -7,36 +7,45 @@ const logger = pino({
   timestamp: pino.stdTimeFunctions.isoTime, // ISO time only
 });
 
-export default {
+/**
+ * Minimal, emoji-friendly root logger.
+ * All logs are flat objects:
+ * { "level": 30, "time": "...", "event": "string", ...extra }
+ */
+function logAt(level, event, data = {}) {
+  logger[level]({ event, ...data });
+}
+
+const log = {
   info(event, data = {}) {
-    logger.info({ event, ...data });
+    logAt("info", event, data);
   },
 
   warn(event, data = {}) {
-    logger.warn({ event, ...data });
+    logAt("warn", event, data);
   },
 
   error(event, data = {}) {
-    logger.error({ event, ...data });
+    logAt("error", event, data);
   },
 
-  // High-level startup events (bootstrap, env checks, etc.)
-  startup(msg, data = {}) {
-    logger.info({ event: "startup", msg, ...data });
+  // Convenience helpers – they just pass the event through,
+  // so everything still looks like the RSS logger style.
+  startup(event, data = {}) {
+    logAt("info", event, data);
   },
 
-  // HTTP routes (all services)
-  route(route, msg, data = {}) {
-    logger.info({ event: "route", route, msg, ...data });
+  route(event, data = {}) {
+    logAt("info", event, data);
   },
 
-  // Background workers, processors, scripts
-  script(name, msg, data = {}) {
-    logger.info({ event: "script", script: name, msg, ...data });
+  script(event, data = {}) {
+    logAt("info", event, data);
   },
 
-  // Server-level info: listening, health, shutdown
-  server(msg, data = {}) {
-    logger.info({ event: "server", msg, ...data });
+  server(event, data = {}) {
+    logAt("info", event, data);
   },
 };
+
+export default log;
