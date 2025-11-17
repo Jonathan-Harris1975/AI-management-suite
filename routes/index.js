@@ -8,12 +8,14 @@ import ttsRoutes from "../services/tts/routes/tts.js";
 import artworkRoutes from "../services/artwork/index.js";
 import podcastRoutes from "../services/podcast/index.js";
 
-
 const router = Router();
 
-// Log that routes are being registered (minimal + emoji)
-log.info("🧩 routes.register", {
-  services: ["rss", "script", "tts", "artwork", "podcast"],
+const SERVICES = ["rss", "script", "tts", "artwork", "podcast"];
+
+// Log route registration
+log.info("🟧 Registering service routes", {
+  services: SERVICES,
+  count: SERVICES.length,
 });
 
 // Mount service routes
@@ -23,11 +25,13 @@ router.use("/tts", ttsRoutes);
 router.use("/artwork", artworkRoutes);
 router.use("/podcast", podcastRoutes);
 
-// Optional: a simple index route
+log.debug("🟩 Service routes mounted successfully");
+
+// Health check / index route
 router.get("/", (_req, res) => {
   res.json({
     ok: true,
-    services: ["rss", "script", "tts", "artwork", "podcast"],
+    services: SERVICES,
   });
 });
 
