@@ -1,3 +1,4 @@
+import scriptLogger from "../utils/script-logger.js";
 import express from "express";
 import { info, error } from "#logger.js";
 

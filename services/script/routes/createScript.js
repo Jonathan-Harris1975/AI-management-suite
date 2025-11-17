@@ -1,3 +1,4 @@
+import scriptLogger from "../utils/script-logger.js";
 // services/script/routes/createScript.js
 
 import express from 'express';
