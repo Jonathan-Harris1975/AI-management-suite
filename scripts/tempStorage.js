@@ -1,17 +1,20 @@
-import log from ;
-// ============================================================
-// 🧠 AI Podcast Suite — Temporary Storage Check (Fixed)
-// ============================================================
+// scripts/tempStorage.js
+import fs from "fs";
+import path from "path";
+import log from "#shared/utils/root-logger.js";
 
-import fs from ;
-import path from ;
-import { log } from ;
+const TEMP_DIR = path.resolve("/app/tmp");
 
-const TEMP_DIR = path.resolve();
+try {
+  if (!fs.existsSync(TEMP_DIR)) {
+    fs.mkdirSync(TEMP_DIR, { recursive: true });
+    log.script("tempStorage", "created", { dir: TEMP_DIR });
+  } else {
+    log.script("tempStorage", "exists", { dir: TEMP_DIR });
+  }
 
-if (!fs.existsSync(TEMP_DIR)) {
-  fs.mkdirSync(TEMP_DIR, { recursive: true });
-  log.info(, { TEMP_DIR });
+  log.script("tempStorage", "ok");
+} catch (err) {
+  log.script("tempStorage", "error", { error: err.message });
+  process.exit(1);
 }
-
-log.info(, { TEMP_DIR });
