@@ -1,8 +1,9 @@
+import log from ;
 // routes/script-orchestrate.js
-import express from "express";
-import { info, error } from "#logger.js";
+import express from ;
+import { info, error } from ;
 // Import the orchestrator utility from the script service
-import { orchestrateScript } from "../services/script/utils/orchestrator.js";
+import { orchestrateScript } from ;
 
 const router = express.Router();
 
@@ -10,9 +11,9 @@ const router = express.Router();
  * POST /script/orchestrate
  * Body: { sessionId, date, ... }
  */
-router.post("/script/orchestrate", async (req, res) => {
+router.post(, async (req, res) => {
   const { sessionId, ...rest } = req.body || {};
-  info("🎬 Script orchestration start", { sessionId });
+  info(, { sessionId });
 
   try {
     const result = await orchestrateScript({
@@ -22,8 +23,8 @@ router.post("/script/orchestrate", async (req, res) => {
 
     res.status(200).json({ ok: true, result });
   } catch (err) {
-    error("💥 Script orchestration failed", { sessionId, error: err?.message || String(err) });
-    res.status(500).json({ ok: false, error: err?.message || "orchestration failed" });
+    error(, { sessionId, error: err?.message || String(err) });
+    res.status(500).json({ ok: false, error: err?.message ||  });
   }
 });
 

@@ -1,10 +1,11 @@
+import log from ;
 // ============================================================
 // 📰 RSS Rewrite Route — Manual Trigger
 // ============================================================
 
-import express from "express";
-import { info, error } from "#logger.js";
-import { rewriteRSSFeeds } from "../services/rss-feed-creator/rewrite-pipeline.js";
+import express from ;
+import { info, error } from ;
+import { rewriteRSSFeeds } from ;
 
 const router = express.Router();
 
@@ -14,15 +15,15 @@ const router = express.Router();
  * - Rotates/rewrites active feeds and writes a manifest to R2.
  * - Manual trigger only (not automatic at startup).
  */
-router.post("/rss/rewrite", async (req, res) => {
+router.post(, async (req, res) => {
   const batchSize = Number(req.body?.batchSize) || 5;
-  info("📰 RSS rewrite requested", { batchSize });
+  info(, { batchSize });
 
   try {
     const result = await rewriteRSSFeeds({ batchSize });
     return res.json({ ok: true, ...result });
   } catch (err) {
-    error("💥 RSS rewrite failed", { error: err.message });
+    error(, { error: err.message });
     return res.status(500).json({ ok: false, error: err.message });
   }
 });

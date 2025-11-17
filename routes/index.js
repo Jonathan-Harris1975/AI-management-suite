@@ -1,35 +1,36 @@
+import log from ;
 // routes/index.js
-import express from "express";
-import { info, error } from "#logger.js";
+import express from ;
+import { info, error } from ;
 
 // ─────────────────────────────
 //  SERVICE ROUTES
 // ─────────────────────────────
-import rssRoutes from "../services/rss-feed-creator/routes/rewrite.js";
-import scriptRoutes from "../services/script/routes/index.js";
-import ttsRoutes from "../services/tts/routes/tts.js";
-import artworkRoutes from "../services/artwork/index.js";
-import podcastRoutes from "../services/podcast/index.js";
+import rssRoutes from ;
+import scriptRoutes from ;
+import ttsRoutes from ;
+import artworkRoutes from ;
+import podcastRoutes from ;
 
 const router = express.Router();
 
 const routeRegistry = [
-  { path: "/rss", name: "RSS Feed Creator", routes: rssRoutes },
-  { path: "/script", name: "Script Generation", routes: scriptRoutes },
-  { path: "/tts", name: "TTS Service", routes: ttsRoutes },
-  { path: "/artwork", name: "Artwork Creation", routes: artworkRoutes },
-  { path: "/podcast", name: "Podcast Generation", routes: podcastRoutes }
+  { path: , name: , routes: rssRoutes },
+  { path: , name: , routes: scriptRoutes },
+  { path: , name: , routes: ttsRoutes },
+  { path: , name: , routes: artworkRoutes },
+  { path: , name: , routes: podcastRoutes }
 ];
 
-info("📡 Starting route registration...");
+info();
 
 try {
   // Health endpoints
-  router.get("/api/rss/health", (_req, res) => 
-    res.status(200).json({ status: "ok", service: "rss-feed-creator" })
+  router.get(, (_req, res) => 
+    res.status(200).json({ status: , service:  })
   );
-  router.get("/api/podcast/health", (_req, res) => 
-    res.status(200).json({ status: "ok", service: "podcast" })
+  router.get(, (_req, res) => 
+    res.status(200).json({ status: , service:  })
   );
 
   // Mount all routes
@@ -41,7 +42,7 @@ try {
   info(`🟩 Routes mounted: ${routeRegistry.length} services registered`);
   
 } catch (err) {
-  error("💥 Route registration failed", { error: err.stack });
+  error(, { error: err.stack });
   throw err;
 }
 

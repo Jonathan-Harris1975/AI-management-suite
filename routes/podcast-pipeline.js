@@ -1,17 +1,18 @@
+import log from ;
 // ============================================================
 // 🧵 Podcast Pipeline Route
 // Runs: script/orchestrate -> tts -> artwork/generate
 // ============================================================
 
-import express from "express";
-import { info, error } from "#logger.js";
+import express from ;
+import { info, error } from ;
 
 const router = express.Router();
 
 function baseUrl() {
   const port = process.env.PORT || 3000;
-  const host = process.env.INTERNAL_BASE_HOST || "127.0.0.1";
-  const proto = process.env.INTERNAL_BASE_PROTO || "http";
+  const host = process.env.INTERNAL_BASE_HOST || ;
+  const proto = process.env.INTERNAL_BASE_PROTO || ;
   return `${proto}://${host}:${port}`;
 }
 
@@ -19,20 +20,20 @@ function baseUrl() {
  * POST /podcast/pipeline
  * Body: { sessionId?: string, date?: string, topic?: string, tone?: object }
  */
-router.post("/podcast/pipeline", async (req, res) => {
+router.post(, async (req, res) => {
   const sessionId = req.body?.sessionId || `TT-${Date.now()}`;
   const date = req.body?.date;
   const topic = req.body?.topic || null;
   const tone = req.body?.tone || {};
 
   const base = baseUrl();
-  info("🎧 Podcast pipeline start", { sessionId });
+  info(, { sessionId });
 
   try {
     // 1) SCRIPT ORCHESTRATION
     const scriptResp = await fetch(`${base}/script/orchestrate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: ,
+      headers: { :  },
       body: JSON.stringify({ sessionId, date, topic, tone }),
     });
     if (!scriptResp.ok) throw new Error(`Script orchestration failed: ${scriptResp.status}`);
@@ -46,8 +47,8 @@ router.post("/podcast/pipeline", async (req, res) => {
 
     // 2) TTS (services/tts/routes/tts.js mounted at /tts)
     const ttsResp = await fetch(`${base}/tts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: ,
+      headers: { :  },
       body: JSON.stringify({ sessionId }),
     });
     if (!ttsResp.ok) throw new Error(`TTS failed: ${ttsResp.status}`);
@@ -57,17 +58,17 @@ router.post("/podcast/pipeline", async (req, res) => {
     let artworkData = { ok: false };
     try {
       const artResp = await fetch(`${base}/artwork/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: ,
+        headers: { :  },
         body: JSON.stringify({ sessionId, metaUrls }),
       });
       if (!artResp.ok) throw new Error(`Artwork failed: ${artResp.status}`);
       artworkData = await artResp.json();
     } catch (artErr) {
-      error("🎨 Artwork generation failed (non-blocking)", { sessionId, error: artErr.message });
+      error(, { sessionId, error: artErr.message });
     }
 
-    info("✅ Podcast pipeline complete", { sessionId });
+    info(, { sessionId });
 
     res.json({
       ok: true,
@@ -77,7 +78,7 @@ router.post("/podcast/pipeline", async (req, res) => {
       artwork: artworkData,
     });
   } catch (err) {
-    error("💥 Podcast pipeline failed", { sessionId, error: err.message });
+    error(, { sessionId, error: err.message });
     res.status(500).json({ ok: false, error: err.message, sessionId });
   }
 });
