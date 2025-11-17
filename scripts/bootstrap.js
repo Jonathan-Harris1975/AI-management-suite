@@ -1,3 +1,4 @@
+import log from ;
 // ============================================================
 // 🧠 AI Podcast Suite — Bootstrap Sequence
 // ============================================================
@@ -5,13 +6,13 @@
 // before the web server starts.
 // ============================================================
 
-import { execSync } from "child_process";
-import { log,info} from "#logger.js";
+import { execSync } from ;
+import { log,info} from ;
 
 async function run(cmd, label) {
   try {
     info(`🚀 Running ${label}...`);
-    execSync(cmd, { stdio: "inherit" });
+    execSync(cmd, { stdio:  });
     info(`✅ ${label} completed successfully.`);
   } catch (err) {
     log.error(`❌ ${label} failed: ${err.message}`);
@@ -19,24 +20,24 @@ async function run(cmd, label) {
 }
 
 (async () => {
-  info('🧩 Starting AI Podcast Suite bootstrap sequence...');
-  info('---------------------------------------------');
+  info();
+  info();
 
   // 1️⃣ Load and validate environment variables
-  await run("node ./scripts/envBootstrap.js", "Environment Bootstrap");
+  await run(, );
 
   // 2️⃣ Initialize RSS feed data into R2 (critical)
-  await run("node ./services/rss-feed-creator/startup/rss-init.js", "RSS Init");
+  await run(, );
 
   // 3️⃣ Perform runtime sanity checks
-  await run("node ./scripts/startupCheck.js", "Startup Check");
+  await run(, );
 
   // 4️⃣ Validate temp storage + Cloudflare R2 connectivity
-  await run("node ./scripts/tempStorage.js", "R2 Check");
+  await run(, );
 
   // 5️⃣ Launch the main web server
-  await run("node ./server.js", "Start Server");
+  await run(, );
 
-  info('---------------------------------------------');
-  info( '🏁 Bootstrap complete — container entering idle mode.');
+  info();
+  info( );
 })();
