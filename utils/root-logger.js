@@ -1,24 +1,14 @@
 // utils/root-logger.js
-// ------------------------------------------------------------
-// Root logger aligned with unified global logger (#logger.js)
-// ------------------------------------------------------------
-// - Delegates to the unified global logger
-// - No msg field
-// - Flat structured logs
-// - Puts data FIRST and event LAST (as requested)
-// - Adds full debug support
-// ------------------------------------------------------------
-
 import {
   info as baseInfo,
   warn as baseWarn,
   error as baseError,
-  debug as baseDebug,
+  debug as baseDebug
 } from "#logger.js";
 
 function emit(levelFn, event, data = {}) {
-  // Data first, event last
-  levelFn("log", { ...data, event });
+  // Correct signature: (event, data)
+  levelFn(event, data);
 }
 
 class RootLogger {
@@ -38,26 +28,11 @@ class RootLogger {
     emit(baseDebug, event, data);
   }
 
-  // ------------------------------------------------------------------
-  // Semantic convenience wrappers
-  // Behave exactly like .info() unless debug is explicitly used.
-  // ------------------------------------------------------------------
-
-  startup(event, data = {}) {
-    emit(baseInfo, event, data);
-  }
-
-  route(event, data = {}) {
-    emit(baseInfo, event, data);
-  }
-
-  script(event, data = {}) {
-    emit(baseInfo, event, data);
-  }
-
-  server(event, data = {}) {
-    emit(baseInfo, event, data);
-  }
+  // Semantic wrappers
+  startup(event, data = {}) { emit(baseInfo, event, data); }
+  route(event, data = {}) { emit(baseInfo, event, data); }
+  script(event, data = {}) { emit(baseInfo, event, data); }
+  server(event, data = {}) { emit(baseInfo, event, data); }
 }
 
 const log = new RootLogger();
