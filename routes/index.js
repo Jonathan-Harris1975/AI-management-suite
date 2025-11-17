@@ -22,7 +22,7 @@ const routeRegistry = [
   { path: "/podcast", name: "Podcast Generation", routes: podcastRoutes }
 ];
 
-log("📡 Starting route registration...");
+info("📡 Starting route registration...");
 
 try {
   // Health endpoints
@@ -39,7 +39,7 @@ try {
   });
 
   // Summary log
-  log(`🟩 Routes mounted: ${routeRegistry.length} services registered`);
+  info(`🟩 Routes mounted: ${routeRegistry.length} services registered`);
   
 } catch (err) {
   error("💥 Route registration failed", { error: err.stack });
