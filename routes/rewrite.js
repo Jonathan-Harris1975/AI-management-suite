@@ -6,13 +6,13 @@ const router = express.Router();
 
 router.post("/rss/rewrite", async (req, res) => {
   const batchSize = Number(req.body?.batchSize) || 5;
-  log.info("📰 RSS rewrite requested", { batchSize });
+  log.info("📰 rss.rewrite.requested", { batchSize });
 
   try {
     const result = await rewriteRSSFeeds({ batchSize });
     return res.json({ ok: true, ...result });
   } catch (err) {
-    log.error("💥 RSS rewrite failed", { error: err.message });
+    log.error("💥 rss.rewrite.failed", { error: err.message });
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
