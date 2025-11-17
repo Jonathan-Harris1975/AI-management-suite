@@ -1,4 +1,5 @@
 import scriptLogger from "./script-logger.js";
+const { info, warn, error, debug } = scriptLogger;
 // ============================================================
 // 🧠 Tone Setter — Persona Builder for Episodes
 // ============================================================

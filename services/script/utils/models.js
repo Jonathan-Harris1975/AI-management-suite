@@ -1,4 +1,5 @@
 import scriptLogger from "./script-logger.js";
+const { info, warn, error, debug } = scriptLogger;
 // services/script/utils/models.js
 // ============================================================
 // ✨ Generates Intro/Main/Outro → edits → chunked text files
@@ -18,8 +19,6 @@ import chunkText from "./chunkText.js";
 import { generateMainLongform } from "./mainChunker.js";
 import * as sessionCache from "./sessionCache.js";
 import { generateEpisodeMetaLLM } from "./podcastHelper.js";
-import { info, error } from "#logger.js";
-
 function toPlainText(s) {
   if (!s) return "";
   return String(s)
@@ -76,7 +75,7 @@ export async function generateMain(sessionIdLike) {
     .filter((a) => a.title || a.summary);
 
   const { mainSeconds, targetMins } = calculateDuration("main", sessionMeta, articles.length);
-  info("Main script generation", { 
+  info("script.main.plan", { 
     targetMinutes: targetMins, 
     articles: articles.length 
   });
@@ -148,7 +147,7 @@ export async function generateComposedEpisode(sessionIdLike) {
   const meta = await generateEpisodeMetaLLM(edited, sessionMeta);
   await putJson("meta", `${id}-meta.json`, meta);
 
-  info("Script orchestration complete", { 
+  info("script.composed.complete", { 
     sessionId: id, 
     chunks: files.length 
   });

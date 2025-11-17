@@ -1,3 +1,5 @@
+import scriptLogger from "./script-logger.js";
+const { info, warn, error, debug } = scriptLogger;
 // services/script/utils/script-logger.js
 import {
   info as baseInfo,

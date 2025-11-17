@@ -1,4 +1,5 @@
 import scriptLogger from "./script-logger.js";
+const { info, warn, error, debug } = scriptLogger;
 
 export default function generateCta(book) {
   const safeTitle = book?.title?.replace(/[-]/g, ' ') ?? 'this topic';

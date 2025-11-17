@@ -1,4 +1,5 @@
 import scriptLogger from "./script-logger.js";
+const { info, warn, error, debug } = scriptLogger;
 // ============================================================
 // 🎧 services/script/utils/chunkText.js
 // ============================================================
@@ -9,9 +10,6 @@ import scriptLogger from "./script-logger.js";
 // - Zero dependencies, optimal memory usage
 // - Comprehensive edge case handling
 // ============================================================
-
-import { info } from "#logger.js";
-
 /**
  * Chunks text for AWS Polly Natural voice synthesis with intelligent splitting
  * @param {string} text - Input text to chunk

@@ -1,11 +1,10 @@
 import scriptLogger from "./script-logger.js";
+const { info, warn, error, debug } = scriptLogger;
 // services/script/utils/mainChunker.js
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { getMainPrompt } from "./promptTemplates.js";
 import { cleanTranscript } from "./textHelpers.js";
 import * as sessionCache from "./sessionCache.js";
-import { info } from "#logger.js";
-
 /**
  * Split array into chunks of size n (last chunk may be smaller)
  */

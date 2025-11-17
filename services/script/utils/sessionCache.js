@@ -1,4 +1,5 @@
 import scriptLogger from "./script-logger.js";
+const { info, warn, error, debug } = scriptLogger;
 // services/script/utils/sessionCache.js
 // Simple in-memory cache for script sections and ephemeral data (e.g., artworkPrompt)
 

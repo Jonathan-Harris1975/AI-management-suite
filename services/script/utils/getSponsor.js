@@ -1,5 +1,5 @@
 import scriptLogger from "./script-logger.js";
-import { warn, info, error } from "#logger.js";
+const { info, warn, error, debug } = scriptLogger;
 // services/script/utils/getSponsor.js
 import fs from "fs";
 import path from "path";
