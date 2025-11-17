@@ -3,7 +3,7 @@
 // ============================================================
 
 import express from "express";
-import { info, error } from "#logger.js";
+import { info, error } from "#shared/root-logger.js";
 import { rewriteRSSFeeds } from "../services/rss-feed-creator/rewrite-pipeline.js";
 
 const router = express.Router();
