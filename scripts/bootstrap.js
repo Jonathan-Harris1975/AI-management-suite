@@ -12,15 +12,15 @@ async function run(cmd, label) {
 }
 
 (async () => {
-  log.info("🧩 bootstrap.sequence.start");
-  log.info("---------------------------------------------");
+  log.info("🧩 bootstrap start");
+  
 
-  await run("node ./scripts/envBootstrap.js", "Environment Bootstrap");
+await run("node ./scripts/envBootstrap.js", "Environment Bootstrap");
   await run("node ./services/rss-feed-creator/startup/rss-init.js", "RSS Init");
   await run("node ./scripts/startupCheck.js", "Startup Check");
   await run("node ./scripts/tempStorage.js", "R2 Check");
   await run("node ./server.js", "Start Server");
 
-  log.info("---------------------------------------------");
-  log.info("🏁 bootstrap.sequence.complete");
+  all
+  log.info("🏁 bootstrap complete");
 })();
