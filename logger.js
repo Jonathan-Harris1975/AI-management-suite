@@ -1,11 +1,10 @@
 // #logger.js - Human-Friendly Pretty Logger ---------------------------------
 import pino from "pino";
 
-// Pretty print transformer (flatten booleans into lists, short arrays, etc)
+// Pretty print transformer
 function humanise(data = {}) {
   const newData = { ...data };
 
-  // Convert bucketsConfigured object into clean bucket list
   if (newData.bucketsConfigured && typeof newData.bucketsConfigured === "object") {
     const buckets = Object.entries(newData.bucketsConfigured)
       .filter(([_, v]) => v)
@@ -17,58 +16,79 @@ function humanise(data = {}) {
   return newData;
 }
 
-// ---------------------------------------------------------------------------
-// PRETTY PRINT TRANSPORT (Option B)
-// ---------------------------------------------------------------------------
-// This makes logs human-readable by default, without needing "pino-pretty"
-// in the terminal pipeline.
-//
-// Supported in Node 20+ (you are on Node 22), completely safe.
-// ---------------------------------------------------------------------------
-
+// Pretty-print transport
 const transport = pino.transport({
   target: "pino-pretty",
   options: {
     colorize: true,
     translateTime: "SYS:standard",
     singleLine: false,
-    ignore: "pid,hostname",   // hide useless fields
+    ignore: "pid,hostname",
   },
 });
 
-// Create logger with pretty output enabled
 const instance = pino(
   {
     level: process.env.LOG_LEVEL || "info",
-    base: null, // remove pid + hostname
+    base: null,
     timestamp: pino.stdTimeFunctions.isoTime,
   },
   transport
 );
 
-// Generic writer used by all exports
-function write(level, event, data = {}) {
-  const cleaned = humanise(data);
-  instance[level]({ event, ...cleaned });
+// ------------------------------------------------------------
+// SAFE WRITE WRAPPER (fixes string spreading)
+// ------------------------------------------------------------
+function write(level, event, data) {
+  let evt = event;
+  let meta = data;
+
+  // Allow: info("message")
+  if (typeof event === "string" && data === undefined) {
+    evt = event;
+    meta = {};
+  }
+
+  // Allow: info({foo:1}) → auto-label as "log"
+  if (typeof event === "object" && data === undefined) {
+    meta = event;
+    evt = "log";
+  }
+
+  // Prevent spreading strings
+  if (typeof evt !== "string") {
+    evt = String(evt);
+  }
+
+  // Guarantee data is safe object
+  if (typeof meta !== "object" || meta === null || Array.isArray(meta)) {
+    meta = { value: meta };
+  }
+
+  const cleaned = humanise(meta);
+
+  instance[level](
+    {
+      event: evt,
+      ...cleaned,
+    }
+  );
 }
 
-// ---------------------------------------------------------------------------
-// PUBLIC LOGGING API (EVENT-FIRST STYLE)
-// ---------------------------------------------------------------------------
+// ------------------------------------------------------------
+// PUBLIC API — fixed signatures
+// ------------------------------------------------------------
+export const info = (event, data) => write("info", event, data);
+export const warn = (event, data) => write("warn", event, data);
+export const error = (event, data) => write("error", event, data);
+export const debug = (event, data) => write("debug", event, data);
 
-export const info = (data,event= {}) => write("info", data,event);
-export const warn = (data,event=  {}) => write("warn", data,event);
-export const error = (data,event= {}) => write("error", data,event);
-export const debug = (data,event= {}) => write("debug", data,event); // <-- Added
-
-// ---------------------------------------------------------------------------
-// BACKWARDS COMPATIBILITY FOR SERVICES
-// ---------------------------------------------------------------------------
+// Backwards compatible .log namespace
 export const log = {
-  info: (event, data = {}) => write("info", event, data),
-  warn: (event, data = {}) => write("warn", event, data),
-  error: (event, data = {}) => write("error", event, data),
-  debug: (event, data = {}) => write("debug", event, data), // <-- Added
+  info: (event, data) => write("info", event, data),
+  warn: (event, data) => write("warn", event, data),
+  error: (event, data) => write("error", event, data),
+  debug: (event, data) => write("debug", event, data),
 };
 
 export default instance;
