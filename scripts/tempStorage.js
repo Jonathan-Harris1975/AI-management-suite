@@ -1,3 +1,7 @@
+// ============================================================
+// 🧠 AI Podcast Suite — Temporary Storage Check
+// ============================================================
+
 import fs from "fs";
 import path from "path";
 import log from "../utils/root-logger.js";
