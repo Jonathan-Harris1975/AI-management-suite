@@ -3,24 +3,33 @@ import log from "../utils/root-logger.js";
 
 async function run(cmd, label) {
   try {
-    log.info(`🚀 bootstrap.step.start.${label}`);
+    log.info(`Starting: ${label}`);
     execSync(cmd, { stdio: "inherit" });
-    log.info(`✅ bootstrap.step.ok.${label}`);
+    log.info(`Completed: ${label}`);
   } catch (err) {
-    log.error("💥 bootstrap.step.failed", { label, error: err.message });
+    log.error(`Failed: ${label}`, { 
+      command: cmd,
+      error: err.message 
+    });
+    throw err; // Re-throw to stop bootstrap on failure
   }
 }
 
 (async () => {
-  log.info("🧩 bootstrap start");
-  
+  const startTime = Date.now();
+  log.info("🟧 Bootstrap sequence initiated");
 
-await run("node ./scripts/envBootstrap.js", "Environment Bootstrap");
-  await run("node ./services/rss-feed-creator/startup/rss-init.js", "RSS Init");
-  await run("node ./scripts/startupCheck.js", "Startup Check");
-  await run("node ./scripts/tempStorage.js", "R2 Check");
-  await run("node ./server.js", "Start Server");
+  try {
+    await run("node ./scripts/envBootstrap.js", "Environment Bootstrap");
+    await run("node ./services/rss-feed-creator/startup/rss-init.js", "RSS Initialization");
+    await run("node ./scripts/startupCheck.js", "Startup Health Check");
+    await run("node ./scripts/tempStorage.js", "R2 Storage Check");
+    await run("node ./server.js", "Server Start");
 
-  all
-  log.info("🏁 bootstrap complete");
+    const duration = Date.now() - startTime;
+    log.info("🟩 Bootstrap sequence completed", { durationMs: duration });
+  } catch (err) {
+    log.error("🔴 Bootstrap sequence failed", { error: err.message });
+    process.exit(1);
+  }
 })();
