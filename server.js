@@ -26,12 +26,12 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "AI Podcast Suite" });
 });
 
-// Startup logs (now via root logger)
-log.startup("bootstrap.start");
-log.startup("env.verified");
+// Startup logs via minimal root logger
+log.info("🧩 startup.bootstrap.start");
+log.info("✅ startup.env.verified");
 
 app.listen(PORT, () => {
-  log.server("listening", { port: PORT });
+  log.info("👂 server.listening", { port: PORT });
 });
 
 export default app;
