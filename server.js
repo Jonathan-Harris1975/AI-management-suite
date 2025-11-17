@@ -1,4 +1,4 @@
-import log from "#shared/root-logger.js";
+import log from "./utils/root-logger.js";
 import "dotenv/config.js";
 import express from "express";
 import cors from "cors";
