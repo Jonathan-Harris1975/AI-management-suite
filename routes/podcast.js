@@ -1,6 +1,6 @@
 import express from "express";
 import { runPodcastPipeline } from "../services/podcast/runPodcastPipeline.js";
-import { info, error } from "#shared/root-logger.js";
+import { info, error } from "./utils/root-logger.js";
 
 const router = express.Router();
 
