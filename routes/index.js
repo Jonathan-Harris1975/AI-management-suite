@@ -1,5 +1,5 @@
 // routes/index.js
-import log from "./utils/root-logger.js";
+import log from "../utils/root-logger.js";
 import { Router } from "express";
 
 import rssRoutes from "./rss.js";
