@@ -14,7 +14,7 @@ router.post("/rewrite", async (req, res) => {
   const runIdFromBody = req.body?.runId;
   const runId = rssLogger.startRun(runIdFromBody);
 
-  rssLogger.info(`RSS rewrite route triggered (runId: ${runId}).`);
+// SILENT   rssLogger.info(`RSS rewrite route triggered (runId: ${runId}).`);
   rssLogger.stageStart("pipeline", "Running RSS end-to-end rewrite pipeline.");
 
   try {
