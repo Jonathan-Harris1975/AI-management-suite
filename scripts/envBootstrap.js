@@ -158,16 +158,16 @@ export function validateEnvironment() {
     }
   }
 
-  log.script("envBootstrap", "scan", {
+  log.info("envBootstrap.scan", {
     total: ALL_ENV_VARS.length,
     missing: missing.length,
   });
 
   if (missing.length > 0) {
-    log.script("envBootstrap", "missing", { keys: missing });
+    log.warn("envBootstrap.missing", { keys: missing });
   }
 
-  return true; // warn only (your preference)
+  return true; // warn only
 }
 
 // -------------------------------
@@ -297,72 +297,7 @@ export const config = {
   SHIPER: process.env.SHIPER,
 };
 
-export default validateEnvironment;																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
-																									
+export default validateEnvironment;																	
 																									
 																									
 																									
