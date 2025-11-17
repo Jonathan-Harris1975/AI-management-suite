@@ -1,6 +1,6 @@
 // routes/script-orchestrate.js
 import express from "express";
-import { info, error } from "#logger.js";
+import { info, error } from "#shared/root-logger.js";
 // Import the orchestrator utility from the script service
 import { orchestrateScript } from "../services/script/utils/orchestrator.js";
 
