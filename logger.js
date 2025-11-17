@@ -1,63 +1,25 @@
-// ============================================================
-// 🧠 AI Podcast Suite — Ultra-Clean Logger (Pino v8)
-// ============================================================
-
+// #logger.js
 import pino from "pino";
 
-const isProd = process.env.NODE_ENV === "production" || process.env.SHIPER === "true";
+const instance = pino({
+  level: process.env.LOG_LEVEL || "info",
+  base: null,               // remove pid / hostname
+  timestamp: pino.stdTimeFunctions.isoTime,
+});
 
-let loggerInstance = globalThis.__AI_PODCAST_LOGGER__;
-
-if (!loggerInstance) {
-  if (isProd) {
-    loggerInstance = pino({
-      level: process.env.LOG_LEVEL || "info",
-      base: null,
-      timestamp: false,
-      formatters: {
-        level: () => ({}),
-        bindings: () => ({}),
-        log: (obj) => {
-          // Production: return only custom fields, exclude msg
-          const { msg, ...rest } = obj;
-          return rest;
-        },
-      },
+// Wrap pino so the first argument becomes `event`
+// and the second is flattened into the log.
+function wrap(level) {
+  return (event, data = {}) => {
+    instance[level]({
+      event,        // 👈 no msg, event only
+      ...data       // 👈 flatten extra fields
     });
-  } else {
-    loggerInstance = pino({
-      level: process.env.LOG_LEVEL || "debug",
-      base: { service: "ai-podcast-suite" },
-      timestamp: pino.stdTimeFunctions.isoTime,
-      transport: {
-        target: "pino-pretty",
-        options: {
-          colorize: true,
-          singleLine: false,
-          translateTime: "SYS:standard",
-          ignore: "pid,hostname,msg",
-        },
-      },
-      formatters: {
-        log: (obj) => {
-          // Development: also exclude msg from output
-          const { msg, ...rest } = obj;
-          return rest;
-        },
-      },
-    });
-  }
-
-  globalThis.__AI_PODCAST_LOGGER__ = loggerInstance;
+  };
 }
 
-const log = loggerInstance;
+export const info = wrap("info");
+export const warn = wrap("warn");
+export const error = wrap("error");
 
-// Wrapper functions with proper msg parameter
-export const info = (msg, obj = {}) => log.info(obj, msg);
-export const warn = (msg, obj = {}) => log.warn(obj, msg);
-export const error = (msg, obj = {}) => log.error(obj, msg);
-export const debug = (msg, obj = {}) => log.debug(obj, msg);
-export const success = (msg, obj = {}) => log.success(obj, msg);
-export { log };
-export default log;
+export default instance;
