@@ -8,7 +8,7 @@
 import fs from "fs";
 import path from "path";
 import rssLogger from "./rss-logger.js";
-// SILENT const info = (...args) => rssLogger.info(...args);
+const info = (...args) => rssLogger.info(...args);
 const error = (...args) => rssLogger.error(...args);
 import { getObjectAsText } from "../../shared/utils/r2-client.js";
 

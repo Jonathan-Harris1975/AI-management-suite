@@ -2,7 +2,7 @@
 // Centralised logger for all RSS feed creator processes.
 // Clean, minimal, human-readable logs with compact summaries.
 
-// SILENT import { info as baseInfo, warn as baseWarn, error as baseError } from "#logger.js";
+import { info as baseInfo, warn as baseWarn, error as baseError } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 
 function formatDateUK(date = new Date()) {
@@ -176,7 +176,7 @@ class RssLogger {
   // ─────────────────────────────────────────────
 
   info(message) {
-// SILENT     baseInfo(`📰 ${this._prefix()} — ${message}`);
+    baseInfo(`📰 ${this._prefix()} — ${message}`);
   }
 
   warn(message) {
