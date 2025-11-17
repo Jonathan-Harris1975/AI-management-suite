@@ -17,7 +17,7 @@ router.post("/podcast/pipeline", async (req, res) => {
   const tone = req.body?.tone || {};
 
   const base = baseUrl();
-  log.info("🎧 Podcast pipeline start", { sessionId });
+  log.info("🎧 podcast.pipeline.start", { sessionId });
 
   try {
     const scriptResp = await fetch(`${base}/script/orchestrate`, {
@@ -25,7 +25,9 @@ router.post("/podcast/pipeline", async (req, res) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId, date, topic, tone }),
     });
-    if (!scriptResp.ok) throw new Error(`Script orchestration failed: ${scriptResp.status}`);
+    if (!scriptResp.ok) {
+      throw new Error(`Script orchestration failed: ${scriptResp.status}`);
+    }
     const scriptData = await scriptResp.json();
 
     const metaUrls =
@@ -38,7 +40,9 @@ router.post("/podcast/pipeline", async (req, res) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId }),
     });
-    if (!ttsResp.ok) throw new Error(`TTS failed: ${ttsResp.status}`);
+    if (!ttsResp.ok) {
+      throw new Error(`TTS failed: ${ttsResp.status}`);
+    }
     const ttsData = await ttsResp.json();
 
     let artworkData = { ok: false };
@@ -48,13 +52,18 @@ router.post("/podcast/pipeline", async (req, res) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId, metaUrls }),
       });
-      if (!artResp.ok) throw new Error(`Artwork failed: ${artResp.status}`);
+      if (!artResp.ok) {
+        throw new Error(`Artwork failed: ${artResp.status}`);
+      }
       artworkData = await artResp.json();
     } catch (artErr) {
-      log.error("🎨 Artwork generation failed (non-blocking)", { sessionId, error: artErr.message });
+      log.error("🎨 artwork.generate.failed.nonblocking", {
+        sessionId,
+        error: artErr.message,
+      });
     }
 
-    log.info("✅ Podcast pipeline complete", { sessionId });
+    log.info("✅ podcast.pipeline.complete", { sessionId });
 
     res.json({
       ok: true,
@@ -64,7 +73,7 @@ router.post("/podcast/pipeline", async (req, res) => {
       artwork: artworkData,
     });
   } catch (err) {
-    log.error("💥 Podcast pipeline failed", { sessionId, error: err.message });
+    log.error("💥 podcast.pipeline.failed", { sessionId, error: err.message });
     res.status(500).json({ ok: false, error: err.message, sessionId });
   }
 });
