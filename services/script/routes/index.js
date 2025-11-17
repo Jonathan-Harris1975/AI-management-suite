@@ -1,8 +1,8 @@
 import scriptLogger from "../utils/script-logger.js";
+const { info, warn, error, debug } = scriptLogger;
 // services/script/routes/index.js
 
 import express from "express";
-import { info, error } from "#logger.js";
 import {
   generateIntro,
   generateMain,
