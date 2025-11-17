@@ -1,17 +1,26 @@
-import log from ;
 // scripts/startupCheck.js
-import { info, error } from ;
+import log from "#shared/utils/root-logger.js";
+import fs from "fs";
 
-try {
-  info();
-  info();
-  info(`📂 Working directory: ${process.cwd()}`);
-  info(`📦 Node version: ${process.version}`);
-  info();
-  info();
-  info();
-  process.exit(0);
-} catch (err) {
-  error(, { error: err });
-  process.exit(1);
+export default function startupCheck() {
+  try {
+    const cwd = process.cwd();
+    const nodeVersion = process.version;
+
+    log.script("startupCheck", "runtime", { cwd, nodeVersion });
+
+    // optional: check required folders
+    const tempDir = "/tmp/podcast_master";
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+      log.script("startupCheck", "temp.dir.created");
+    } else {
+      log.script("startupCheck", "temp.dir.exists");
+    }
+
+    log.script("startupCheck", "ok");
+  } catch (err) {
+    log.script("startupCheck", "error", { error: err.message });
+    throw err;
+  }
 }
