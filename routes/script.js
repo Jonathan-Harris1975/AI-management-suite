@@ -6,7 +6,7 @@ const router = express.Router();
 
 router.post("/script/orchestrate", async (req, res) => {
   const { sessionId, ...rest } = req.body || {};
-  log.info("🎬 Script orchestration start", { sessionId });
+  log.info("🎬 script.orchestrate.start", { sessionId });
 
   try {
     const result = await orchestrateScript({
@@ -16,7 +16,10 @@ router.post("/script/orchestrate", async (req, res) => {
 
     res.status(200).json({ ok: true, result });
   } catch (err) {
-    log.error("💥 Script orchestration failed", { sessionId, error: err?.message || String(err) });
+    log.error("💥 script.orchestrate.failed", {
+      sessionId,
+      error: err?.message || String(err),
+    });
     res.status(500).json({ ok: false, error: err?.message || "orchestration failed" });
   }
 });
