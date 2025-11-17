@@ -1,10 +1,5 @@
-// ============================================================
-// 🧵 Podcast Pipeline Route
-// Runs: script/orchestrate -> tts -> artwork/generate
-// ============================================================
-
 import express from "express";
-import { info, error } from "../utils/root-logger.js";
+import log from "../utils/root-logger.js";
 
 const router = express.Router();
 
@@ -15,10 +10,6 @@ function baseUrl() {
   return `${proto}://${host}:${port}`;
 }
 
-/**
- * POST /podcast/pipeline
- * Body: { sessionId?: string, date?: string, topic?: string, tone?: object }
- */
 router.post("/podcast/pipeline", async (req, res) => {
   const sessionId = req.body?.sessionId || `TT-${Date.now()}`;
   const date = req.body?.date;
@@ -26,10 +17,9 @@ router.post("/podcast/pipeline", async (req, res) => {
   const tone = req.body?.tone || {};
 
   const base = baseUrl();
-  info("🎧 Podcast pipeline start", { sessionId });
+  log.info("🎧 Podcast pipeline start", { sessionId });
 
   try {
-    // 1) SCRIPT ORCHESTRATION
     const scriptResp = await fetch(`${base}/script/orchestrate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -38,13 +28,11 @@ router.post("/podcast/pipeline", async (req, res) => {
     if (!scriptResp.ok) throw new Error(`Script orchestration failed: ${scriptResp.status}`);
     const scriptData = await scriptResp.json();
 
-    // Some script flows emit metaUrl data under compose step; keep optional.
     const metaUrls =
       scriptData?.steps?.compose?.metaUrls ||
       scriptData?.metaUrls ||
       null;
 
-    // 2) TTS (services/tts/routes/tts.js mounted at /tts)
     const ttsResp = await fetch(`${base}/tts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -53,7 +41,6 @@ router.post("/podcast/pipeline", async (req, res) => {
     if (!ttsResp.ok) throw new Error(`TTS failed: ${ttsResp.status}`);
     const ttsData = await ttsResp.json();
 
-    // 3) ARTWORK (non-blocking; return warning if fails)
     let artworkData = { ok: false };
     try {
       const artResp = await fetch(`${base}/artwork/generate`, {
@@ -64,10 +51,10 @@ router.post("/podcast/pipeline", async (req, res) => {
       if (!artResp.ok) throw new Error(`Artwork failed: ${artResp.status}`);
       artworkData = await artResp.json();
     } catch (artErr) {
-      error("🎨 Artwork generation failed (non-blocking)", { sessionId, error: artErr.message });
+      log.error("🎨 Artwork generation failed (non-blocking)", { sessionId, error: artErr.message });
     }
 
-    info("✅ Podcast pipeline complete", { sessionId });
+    log.info("✅ Podcast pipeline complete", { sessionId });
 
     res.json({
       ok: true,
@@ -77,7 +64,7 @@ router.post("/podcast/pipeline", async (req, res) => {
       artwork: artworkData,
     });
   } catch (err) {
-    error("💥 Podcast pipeline failed", { sessionId, error: err.message });
+    log.error("💥 Podcast pipeline failed", { sessionId, error: err.message });
     res.status(500).json({ ok: false, error: err.message, sessionId });
   }
 });
