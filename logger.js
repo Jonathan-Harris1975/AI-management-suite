@@ -1,42 +1,40 @@
 // #logger.js
 // ------------------------------------------------------------
-// Unified global logger (Root + RSS compatible)
+// Global Logger — RSS-Compatible + Backwards-Compatible
 // ------------------------------------------------------------
-// - No msg field
-// - Flat structured logs
-// - Emoji-first event strings supported
-// - Services can still use: import { log } from "#logger.js"
-// - Root logger & RSS logger both rely on this
+// Supports both:
+//    log("event", {...})
+// AND
+//    log.info("event", {...})
 // ------------------------------------------------------------
 
 import pino from "pino";
 
 const instance = pino({
   level: process.env.LOG_LEVEL || "info",
-  base: null,                                // remove pid/hostname
-  timestamp: pino.stdTimeFunctions.isoTime,  // ISO timestamps
+  base: null,
+  timestamp: pino.stdTimeFunctions.isoTime,
 });
 
-// Wrapper so:
-// info("event", {a:1}) → { "event":"event", "a":1 }
-function wrap(level) {
-  return (event, data = {}) => {
-    instance[level]({ event, ...data });
-  };
+// Internal wrapper: (level, event, data) → flat structured log
+function write(level, event, data = {}) {
+  instance[level]({ event, ...data });
 }
 
-export const info = wrap("info");
-export const warn = wrap("warn");
-export const error = wrap("error");
+// Exported functions
+export const info = (event, data = {}) => write("info", event, data);
+export const warn = (event, data = {}) => write("warn", event, data);
+export const error = (event, data = {}) => write("error", event, data);
 
 // ------------------------------------------------------------
-// COMPATIBILITY: legacy "log()" used by services
+// Backwards-compatible `log` object used by all services
 // ------------------------------------------------------------
-// This matches the RSS-logger behaviour exactly.
-// ------------------------------------------------------------
-export function log(event, data = {}) {
-  instance.info({ event, ...data });
-}
 
-// By default export the underlying pino instance (not required but kept)
+export const log = {
+  info: (event, data = {}) => write("info", event, data),
+  warn: (event, data = {}) => write("warn", event, data),
+  error: (event, data = {}) => write("error", event, data),
+};
+
+// Also allow direct call: log("event")
 export default instance;
