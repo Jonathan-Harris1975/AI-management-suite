@@ -1,34 +1,19 @@
-// ============================================================
-// 🌙 keepalive — Render-safe, silent, global heartbeat manager
-// ============================================================
+// keepalive.js (updated minimal logging + root-logger)
+import log from "../utils/root-logger.js";
 
-import { info } from "#logger.js";
-
-// Store all intervals in global scope
 const KA_MAP = globalThis.__KEEPALIVES__ || (globalThis.__KEEPALIVES__ = new Map());
 
-/**
- * Start a silent keep-alive for a given label.
- * Prevents idle timeout during long ffmpeg or API operations.
- */
 export function startKeepAlive(label = "keepalive", intervalMs = 20000) {
   if (KA_MAP.has(label)) return;
-  info(`🔋Silent keep-alive active for ${label} (${Math.round(intervalMs / 1000)}s interval)`, { label, intervalMs });
-  const id = setInterval(() => {
-    process.stdout.write(`🔋${label} alive and still working in the background `);
-  }, intervalMs);
+  const id = setInterval(() => {}, intervalMs);
   KA_MAP.set(label, id);
 }
 
-/**
- * Stop a running keep-alive by label.
- */
 export function stopKeepAlive(label) {
   const id = KA_MAP.get(label);
   if (id) {
     clearInterval(id);
     KA_MAP.delete(label);
-    info("🔋 Keep-alive stopped.", { label });
   }
 }
 
