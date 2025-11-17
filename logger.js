@@ -52,10 +52,14 @@ function write(level, event, data = {}) {
   instance[level]({ event, ...cleaned });
 }
 
-// Public logging API
-export const info = (event, data = {}) => write("info", event, data);
-export const warn = (event, data = {}) => write("warn", event, data);
-export const error = (event, data = {}) => write("error", event, data);
+// ---------------------------------------------------------------------------
+// PUBLIC LOGGING API (EVENT-FIRST STYLE)
+// ---------------------------------------------------------------------------
+
+export const info = (data,event= {}) => write("info", data,event);
+export const warn = (data,event= = {}) => write("warn", data,event);
+export const error = (data,event= = {}) => write("error", data,event);
+export const debug = (data,event= = {}) => write("debug", data,event); // <-- Added
 
 // ---------------------------------------------------------------------------
 // BACKWARDS COMPATIBILITY FOR SERVICES
@@ -64,6 +68,7 @@ export const log = {
   info: (event, data = {}) => write("info", event, data),
   warn: (event, data = {}) => write("warn", event, data),
   error: (event, data = {}) => write("error", event, data),
+  debug: (event, data = {}) => write("debug", event, data), // <-- Added
 };
 
 export default instance;
