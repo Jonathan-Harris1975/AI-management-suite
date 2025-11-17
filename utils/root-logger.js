@@ -1,51 +1,46 @@
 // utils/root-logger.js
-import pino from "pino";
+// ------------------------------------------------------------
+// Root logger aligned with the RSS logger behaviour
+// ------------------------------------------------------------
+// - Delegates to the unified global logger (#logger.js)
+// - No msg field
+// - Flat structured logs
+// - Minimal, tidy output
+// - Emojis allowed directly in event strings
+// ------------------------------------------------------------
 
-const logger = pino({
-  level: process.env.LOG_LEVEL || "info",
-  base: null, // no pid/hostname clutter
-  timestamp: pino.stdTimeFunctions.isoTime, // ISO time only
-});
+import { info as baseInfo, warn as baseWarn, error as baseError } from "#logger.js";
 
-/**
- * Minimal, emoji-friendly root logger.
- * All logs are flat objects:
- * { "level": 30, "time": "...", "event": "string", ...extra }
- */
-function logAt(level, event, data = {}) {
-  logger[level]({ event, ...data });
-}
-
-const log = {
+class RootLogger {
   info(event, data = {}) {
-    logAt("info", event, data);
-  },
+    baseInfo(event, data);
+  }
 
   warn(event, data = {}) {
-    logAt("warn", event, data);
-  },
+    baseWarn(event, data);
+  }
 
   error(event, data = {}) {
-    logAt("error", event, data);
-  },
+    baseError(event, data);
+  }
 
-  // Convenience helpers – they just pass the event through,
-  // so everything still looks like the RSS logger style.
+  // semantic convenience wrappers (behave exactly the same)
   startup(event, data = {}) {
-    logAt("info", event, data);
-  },
+    baseInfo(event, data);
+  }
 
   route(event, data = {}) {
-    logAt("info", event, data);
-  },
+    baseInfo(event, data);
+  }
 
   script(event, data = {}) {
-    logAt("info", event, data);
-  },
+    baseInfo(event, data);
+  }
 
   server(event, data = {}) {
-    logAt("info", event, data);
-  },
-};
+    baseInfo(event, data);
+  }
+}
 
+const log = new RootLogger();
 export default log;
