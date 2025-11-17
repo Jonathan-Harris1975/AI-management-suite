@@ -8,7 +8,7 @@
 // - Uses root-level logger (minimal output)
 // ------------------------------------------------------------
 
-import log from "#shared/utils/root-logger.js";
+import log from "#shared/root-logger.js";
 
 // -------------------------------
 // Helpers
