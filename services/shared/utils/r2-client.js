@@ -141,6 +141,7 @@ export default {
   buildPublicUrl,
   uploadBuffer,
   uploadText,
+  putText,
   putJson,
   getObjectAsText,
   listKeys,
