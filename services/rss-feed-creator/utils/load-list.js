@@ -27,7 +27,7 @@ export function loadList(file) {
       }
     }
 
-    log.info(
+// SILENT     log.info(
       { file, count: urls.length },
       `📖 Loaded ${urls.length} valid entries from ${file}`
     );

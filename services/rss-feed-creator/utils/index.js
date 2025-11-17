@@ -5,7 +5,7 @@ import rssLogger from "./rss-logger.js";
 const log = (...args) => rssLogger.log(...args);
 
 export async function startFeedCreator() {
-  log.info("rss.pipeline.start");
+// SILENT   log.info("rss.pipeline.start");
 
   // 1️⃣ Ensure feeds.txt + urls.txt are present in R2 before anything else
   await uploadRssDataFiles();

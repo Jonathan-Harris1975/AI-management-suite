@@ -11,7 +11,7 @@
 
 import crypto from "crypto";
 import rssLogger from "./rss-logger.js";
-const info = (...args) => rssLogger.info(...args);
+// SILENT const info = (...args) => rssLogger.info(...args);
 const error = (...args) => rssLogger.error(...args);
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { RSS_PROMPTS } from "./rss-prompts.js";

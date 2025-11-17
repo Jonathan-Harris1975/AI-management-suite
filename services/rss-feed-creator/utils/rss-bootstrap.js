@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import rssLogger from "./rss-logger.js";
-const info = (...args) => rssLogger.info(...args);
+// SILENT const info = (...args) => rssLogger.info(...args);
 const error = (...args) => rssLogger.error(...args);
 import { getObjectAsText, putText, putJson } from "#shared/r2-client.js";
 
