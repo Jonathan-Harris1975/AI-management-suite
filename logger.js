@@ -57,9 +57,9 @@ function write(level, event, data = {}) {
 // ---------------------------------------------------------------------------
 
 export const info = (data,event= {}) => write("info", data,event);
-export const warn = (data,event= = {}) => write("warn", data,event);
-export const error = (data,event= = {}) => write("error", data,event);
-export const debug = (data,event= = {}) => write("debug", data,event); // <-- Added
+export const warn = (data,event=  {}) => write("warn", data,event);
+export const error = (data,event= {}) => write("error", data,event);
+export const debug = (data,event= {}) => write("debug", data,event); // <-- Added
 
 // ---------------------------------------------------------------------------
 // BACKWARDS COMPATIBILITY FOR SERVICES
