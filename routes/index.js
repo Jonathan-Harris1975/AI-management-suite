@@ -1,49 +1,33 @@
 // routes/index.js
 import log from "../utils/root-logger.js";
-import express from "express";
+import { Router } from "express";
 
+import rssRoutes from "./rss.js";
+import scriptRoutes from "./script.js";
+import ttsRoutes from "./tts.js";
+import artworkRoutes from "./artwork.js";
+import podcastRoutes from "./podcast.js";
 
-// ─────────────────────────────
-//  SERVICE ROUTES
-// ─────────────────────────────
-import rssRoutes from "../services/rss-feed-creator/routes/rewrite.js";
-import scriptRoutes from "../services/script/routes/index.js";
-import ttsRoutes from "../services/tts/routes/tts.js";
-import artworkRoutes from "../services/artwork/index.js";
-import podcastRoutes from "../services/podcast/index.js";
+const router = Router();
 
-const router = express.Router();
+// Log that routes are being registered (minimal + emoji)
+log.info("🧩 routes.register", {
+  services: ["rss", "script", "tts", "artwork", "podcast"],
+});
 
-const routeRegistry = [
-  { path: "/rss", name: "RSS Feed Creator", routes: rssRoutes },
-  { path: "/script", name: "Script Generation", routes: scriptRoutes },
-  { path: "/tts", name: "TTS Service", routes: ttsRoutes },
-  { path: "/artwork", name: "Artwork Creation", routes: artworkRoutes },
-  { path: "/podcast", name: "Podcast Generation", routes: podcastRoutes }
-];
+// Mount service routes
+router.use("/rss", rssRoutes);
+router.use("/script", scriptRoutes);
+router.use("/tts", ttsRoutes);
+router.use("/artwork", artworkRoutes);
+router.use("/podcast", podcastRoutes);
 
-info("📡 Starting route registration...");
-
-try {
-  // Health endpoints
-  router.get("/api/rss/health", (_req, res) => 
-    res.status(200).json({ status: "ok", service: "rss-feed-creator" })
-  );
-  router.get("/api/podcast/health", (_req, res) => 
-    res.status(200).json({ status: "ok", service: "podcast" })
-  );
-
-  // Mount all routes
-  routeRegistry.forEach(({ path, name, routes }) => {
-    router.use(path, routes);
+// Optional: a simple index route
+router.get("/", (_req, res) => {
+  res.json({
+    ok: true,
+    services: ["rss", "script", "tts", "artwork", "podcast"],
   });
-
-  // Summary log
-  info(`🟩 Routes mounted: ${routeRegistry.length} services registered`);
-  
-} catch (err) {
-  error("💥 Route registration failed", { error: err.stack });
-  throw err;
-}
+});
 
 export default router;
