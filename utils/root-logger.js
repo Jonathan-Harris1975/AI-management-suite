@@ -1,44 +1,62 @@
 // utils/root-logger.js
 // ------------------------------------------------------------
-// Root logger aligned with the RSS logger behaviour
+// Root logger aligned with unified global logger (#logger.js)
 // ------------------------------------------------------------
-// - Delegates to the unified global logger (#logger.js)
+// - Delegates to the unified global logger
 // - No msg field
 // - Flat structured logs
-// - Minimal, tidy output
-// - Emojis allowed directly in event strings
+// - Puts data FIRST and event LAST (as requested)
+// - Adds full debug support
 // ------------------------------------------------------------
 
-import { info as baseInfo, warn as baseWarn, error as baseError } from "#logger.js";
+import {
+  info as baseInfo,
+  warn as baseWarn,
+  error as baseError,
+  debug as baseDebug,
+} from "#logger.js";
+
+function emit(levelFn, event, data = {}) {
+  // Data first, event last
+  levelFn("log", { ...data, event });
+}
 
 class RootLogger {
   info(event, data = {}) {
-    baseInfo(event, data);
+    emit(baseInfo, event, data);
   }
 
   warn(event, data = {}) {
-    baseWarn(event, data);
+    emit(baseWarn, event, data);
   }
 
   error(event, data = {}) {
-    baseError(event, data);
+    emit(baseError, event, data);
   }
 
-  // semantic convenience wrappers (behave exactly the same)
+  debug(event, data = {}) {
+    emit(baseDebug, event, data);
+  }
+
+  // ------------------------------------------------------------------
+  // Semantic convenience wrappers
+  // Behave exactly like .info() unless debug is explicitly used.
+  // ------------------------------------------------------------------
+
   startup(event, data = {}) {
-    baseInfo(event, data);
+    emit(baseInfo, event, data);
   }
 
   route(event, data = {}) {
-    baseInfo(event, data);
+    emit(baseInfo, event, data);
   }
 
   script(event, data = {}) {
-    baseInfo(event, data);
+    emit(baseInfo, event, data);
   }
 
   server(event, data = {}) {
-    baseInfo(event, data);
+    emit(baseInfo, event, data);
   }
 }
 
