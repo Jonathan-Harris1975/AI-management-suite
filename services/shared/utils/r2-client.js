@@ -1,5 +1,5 @@
-// r2-client.js (updated to use root-logger minimal logs)
-import { log } from "../utils/root-logger.js";
+
+import { log } from "../../../utils/root-logger.js";
 import {
   S3Client,
   PutObjectCommand,
@@ -105,7 +105,7 @@ export async function uploadBuffer(bucketKey, key, buffer) {
       })
     );
   } catch (err) {
-    log.error("r2.upload", { bucketKey, key });
+    log.error("r2.upload.failed", { bucketKey, key });
     throw err;
   }
 }

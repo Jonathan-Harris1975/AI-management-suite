@@ -1,5 +1,5 @@
-// ai-service.js (updated to minimal root-logger usage)
-import log from "../utils/root-logger.js";
+
+import log from "../../../utils/root-logger.js";
 import aiConfig from "./ai-config.js";
 import fetch from "node-fetch";
 
@@ -26,8 +26,6 @@ export async function resilientRequest(routeName, { messages } = {}) {
         body: JSON.stringify({
           model: provider.name,
           messages,
-          max_tokens: 2048,
-          temperature: 0.7,
         }),
       });
 
@@ -40,7 +38,7 @@ export async function resilientRequest(routeName, { messages } = {}) {
     }
   }
 
-  throw lastErr || new Error(`All AI providers failed`);
+  throw lastErr || new Error("all providers failed");
 }
 
 export default { resilientRequest };
