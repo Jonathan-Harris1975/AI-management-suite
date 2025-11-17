@@ -1,5 +1,5 @@
 import { info as baseInfo, warn as baseWarn, error as baseError } from "#logger.js";
-import { startKeepAlive, stopKeepAlive } from "#shared/utils/keepalive.js";
+import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 
 function formatDateUK() {
   const d = new Date();
