@@ -157,4 +157,6 @@ export default {
   getObjectAsText,
   listKeys,
   deleteObject,
+  putJson,
+  
 };
