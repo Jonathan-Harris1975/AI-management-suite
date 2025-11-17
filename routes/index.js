@@ -1,49 +1,33 @@
-import log from ;
 // routes/index.js
-import express from ;
-import { info, error } from ;
+import log from "#shared/utils/root-logger.js";
+import { Router } from "express";
 
-// ─────────────────────────────
-//  SERVICE ROUTES
-// ─────────────────────────────
-import rssRoutes from ;
-import scriptRoutes from ;
-import ttsRoutes from ;
-import artworkRoutes from ;
-import podcastRoutes from ;
+import rssRoutes from "./rss.js";
+import scriptRoutes from "./script.js";
+import ttsRoutes from "./tts.js";
+import artworkRoutes from "./artwork.js";
+import podcastRoutes from "./podcast.js";
 
-const router = express.Router();
+const router = Router();
 
-const routeRegistry = [
-  { path: , name: , routes: rssRoutes },
-  { path: , name: , routes: scriptRoutes },
-  { path: , name: , routes: ttsRoutes },
-  { path: , name: , routes: artworkRoutes },
-  { path: , name: , routes: podcastRoutes }
-];
+// Log that routes are being registered
+log.startup("routes.register", {
+  services: ["rss", "script", "tts", "artwork", "podcast"],
+});
 
-info();
+// Mount service routes
+router.use("/rss", rssRoutes);
+router.use("/script", scriptRoutes);
+router.use("/tts", ttsRoutes);
+router.use("/artwork", artworkRoutes);
+router.use("/podcast", podcastRoutes);
 
-try {
-  // Health endpoints
-  router.get(, (_req, res) => 
-    res.status(200).json({ status: , service:  })
-  );
-  router.get(, (_req, res) => 
-    res.status(200).json({ status: , service:  })
-  );
-
-  // Mount all routes
-  routeRegistry.forEach(({ path, name, routes }) => {
-    router.use(path, routes);
+// Optional: a simple index route
+router.get("/", (_req, res) => {
+  res.json({
+    ok: true,
+    services: ["rss", "script", "tts", "artwork", "podcast"],
   });
-
-  // Summary log
-  info(`🟩 Routes mounted: ${routeRegistry.length} services registered`);
-  
-} catch (err) {
-  error(, { error: err.stack });
-  throw err;
-}
+});
 
 export default router;
