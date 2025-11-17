@@ -3,17 +3,17 @@ import log from "../utils/root-logger.js";
 
 async function run(cmd, label) {
   try {
-    log.info(`🚀 Running ${label}...`);
+    log.info(`🚀 bootstrap.step.start.${label}`);
     execSync(cmd, { stdio: "inherit" });
-    log.info(`✅ ${label} completed successfully.`);
+    log.info(`✅ bootstrap.step.ok.${label}`);
   } catch (err) {
-    log.error(`❌ ${label} failed: ${err.message}`);
+    log.error("💥 bootstrap.step.failed", { label, error: err.message });
   }
 }
 
 (async () => {
-  log.info('🧩 Starting AI Podcast Suite bootstrap sequence...');
-  log.info('---------------------------------------------');
+  log.info("🧩 bootstrap.sequence.start");
+  log.info("---------------------------------------------");
 
   await run("node ./scripts/envBootstrap.js", "Environment Bootstrap");
   await run("node ./services/rss-feed-creator/startup/rss-init.js", "RSS Init");
@@ -21,6 +21,6 @@ async function run(cmd, label) {
   await run("node ./scripts/tempStorage.js", "R2 Check");
   await run("node ./server.js", "Start Server");
 
-  log.info('---------------------------------------------');
-  log.info('🏁 Bootstrap complete — container entering idle mode.');
+  log.info("---------------------------------------------");
+  log.info("🏁 bootstrap.sequence.complete");
 })();
