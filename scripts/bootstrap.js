@@ -18,7 +18,7 @@ async function run(cmd, label) {
 (async () => {
   const startTime = Date.now();
   log.info("🟧 Bootstrap sequence initiated");
-
+  log.debug("🟧 Bootstrap sequence initiated");
   try {
     await run("node ./scripts/envBootstrap.js", "Environment Bootstrap");
     await run("node ./services/rss-feed-creator/startup/rss-init.js", "RSS Initialization");
@@ -27,7 +27,8 @@ async function run(cmd, label) {
     await run("node ./server.js", "Server Start");
 
     const duration = Date.now() - startTime;
-    log.info("🟩 Bootstrap sequence completed", { durationMs: duration });
+    log.debug("🟩 Bootstrap sequence completed", { durationMs: duration });
+    log.info("🟩 Bootstrap completed");
   } catch (err) {
     log.error("🔴 Bootstrap sequence failed", { error: err.message });
     process.exit(1);
