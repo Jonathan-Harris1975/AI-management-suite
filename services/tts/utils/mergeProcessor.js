@@ -1,3 +1,5 @@
+import logger from "../../service-logger.js";
+const { info, warn, error, debug } = logger;
 // =======================================================================
 // 🎧 MODULAR STREAMING MERGE PROCESSOR
 // Supports mixing remote URLs + local batch files safely
@@ -7,7 +9,6 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import fetch from "node-fetch";
-import { info, error, warn } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 

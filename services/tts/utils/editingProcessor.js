@@ -1,10 +1,11 @@
+import logger from "../../service-logger.js";
+const { info, warn, error, debug } = logger;
 // 🎙️ REBUILT — STABLE EDITING PROCESSOR
 // Crash-resistant multi-stage FFmpeg pipeline
 
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
-import { log } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 

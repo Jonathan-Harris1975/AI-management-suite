@@ -1,3 +1,5 @@
+import logger from "../../service-logger.js";
+const { info, warn, error, debug } = logger;
 // ============================================================
 // 🎵 Modular Podcast Processor (Optimized for Podcast Output)
 // ============================================================
@@ -9,7 +11,6 @@
 import fs from "fs";
 import path from "path";
 import { spawn, spawnSync } from "child_process";
-import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { uploadBuffer } from "#shared/r2-client.js"; // R2 upload
 
