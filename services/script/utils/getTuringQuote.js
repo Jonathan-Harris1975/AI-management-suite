@@ -22,8 +22,8 @@ export async function getTuringQuote() {
       return quotesCache[Math.floor(Math.random() * quotesCache.length)];
     }
 
-    info("turingQuote.load", { file: QUOTES_PATH });
-
+    debug ("turingQuote.load", { file: QUOTES_PATH });
+    info("📃 turingQuote.load")
     // ✅ Read from local text file
     const fileData = await fs.readFile(QUOTES_PATH, "utf-8");
 
