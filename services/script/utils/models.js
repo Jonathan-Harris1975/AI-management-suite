@@ -75,11 +75,12 @@ export async function generateMain(sessionIdLike) {
     .filter((a) => a.title || a.summary);
 
   const { mainSeconds, targetMins } = calculateDuration("main", sessionMeta, articles.length);
-  info("script.main.plan", { 
+  debug("script.main.plan", { 
     targetMinutes: targetMins, 
     articles: articles.length 
   });
-
+info("script.main.plan", { 
+    targetMinutes: targetMins});
   const combined = await generateMainLongform(sessionMeta, articles, mainSeconds);
   await sessionCache.storeTempPart(sessionMeta, "main", combined);
   return sanitizeOutput(combined);
@@ -116,7 +117,7 @@ export async function generateComposedEpisode(sessionIdLike) {
   let ttsChunks = chunkText(edited, maxBytes);
   
   if (ttsChunks.length <= 1 && byteLen(edited) > maxBytes) {
-    info("Force splitting large chunk", { reason: "single-chunk-too-large" });
+    debug("Force splitting large chunk", { reason: "single-chunk-too-large" });
     const out = [];
     let remaining = edited.trim();
     while (Buffer.byteLength(remaining, "utf8") > maxBytes) {
@@ -147,7 +148,7 @@ export async function generateComposedEpisode(sessionIdLike) {
   const meta = await generateEpisodeMetaLLM(edited, sessionMeta);
   await putJson("meta", `${id}-meta.json`, meta);
 
-  info("script.composed.complete", { 
+  debug("script.composed.complete", { 
     sessionId: id, 
     chunks: files.length 
   });
