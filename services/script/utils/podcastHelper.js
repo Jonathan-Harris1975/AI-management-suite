@@ -467,9 +467,9 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
     episodeNumber,
     createdAt: new Date().toISOString(),
   };
-
+info("🔗 meta.generation.complete")
   // Single comprehensive summary log
-  info("🔗 meta.generation.complete", {
+  debug("🔗 meta.generation.complete", {
     sessionId: id,
     episodeNumber,
     mainExtract: opStatus.mainExtract.success ? "success" : "fallback",
