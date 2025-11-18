@@ -1,4 +1,4 @@
-import logger from "../service-logger.js";
+import logger from "./service-logger.js";
 const { info, warn, error, debug } = logger;
 // services/artwork/createPodcastArtwork.js
 import { uploadBuffer } from "#shared/r2-client.js";
