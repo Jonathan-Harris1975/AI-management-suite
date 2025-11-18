@@ -1,4 +1,4 @@
-import logger from "../../service-logger.js";
+import logger from "../service-logger.js";
 const { info, warn, error, debug } = logger;
 // ============================================================
 // 🎙 TTS Router — Handles TTS orchestration API endpoints
