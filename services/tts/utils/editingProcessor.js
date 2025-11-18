@@ -1,4 +1,4 @@
-import logger from "../../service-logger.js";
+import logger from "../service-logger.js";
 const { info, warn, error, debug } = logger;
 // 🎙️ REBUILT — STABLE EDITING PROCESSOR
 // Crash-resistant multi-stage FFmpeg pipeline
