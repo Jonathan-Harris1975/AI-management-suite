@@ -1,5 +1,9 @@
-import express from "express";
+// ============================================================
+// 🧵 Podcast Pipeline Route
+// Runs: script/orchestrate -> tts -> artwork/generate
+// ============================================================
 import log from "../utils/root-logger.js";
+import express from "express";
 
 const router = express.Router();
 
@@ -10,6 +14,10 @@ function baseUrl() {
   return `${proto}://${host}:${port}`;
 }
 
+/**
+ * POST /podcast/pipeline
+ * Body: { sessionId?: string, date?: string, topic?: string, tone?: object }
+ */
 router.post("/podcast/pipeline", async (req, res) => {
   const sessionId = req.body?.sessionId || `TT-${Date.now()}`;
   const date = req.body?.date;
@@ -17,34 +25,34 @@ router.post("/podcast/pipeline", async (req, res) => {
   const tone = req.body?.tone || {};
 
   const base = baseUrl();
-  log.info("🎧 podcast.pipeline.start", { sessionId });
+  info("🎧 Podcast pipeline start", { sessionId });
 
   try {
+    // 1) SCRIPT ORCHESTRATION
     const scriptResp = await fetch(`${base}/script/orchestrate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId, date, topic, tone }),
     });
-    if (!scriptResp.ok) {
-      throw new Error(`Script orchestration failed: ${scriptResp.status}`);
-    }
+    if (!scriptResp.ok) throw new Error(`Script orchestration failed: ${scriptResp.status}`);
     const scriptData = await scriptResp.json();
 
+    // Some script flows emit metaUrl data under compose step; keep optional.
     const metaUrls =
       scriptData?.steps?.compose?.metaUrls ||
       scriptData?.metaUrls ||
       null;
 
+    // 2) TTS (services/tts/routes/tts.js mounted at /tts)
     const ttsResp = await fetch(`${base}/tts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId }),
     });
-    if (!ttsResp.ok) {
-      throw new Error(`TTS failed: ${ttsResp.status}`);
-    }
+    if (!ttsResp.ok) throw new Error(`TTS failed: ${ttsResp.status}`);
     const ttsData = await ttsResp.json();
 
+    // 3) ARTWORK (non-blocking; return warning if fails)
     let artworkData = { ok: false };
     try {
       const artResp = await fetch(`${base}/artwork/generate`, {
@@ -52,18 +60,13 @@ router.post("/podcast/pipeline", async (req, res) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId, metaUrls }),
       });
-      if (!artResp.ok) {
-        throw new Error(`Artwork failed: ${artResp.status}`);
-      }
+      if (!artResp.ok) throw new Error(`Artwork failed: ${artResp.status}`);
       artworkData = await artResp.json();
     } catch (artErr) {
-      log.error("🎨 artwork.generate.failed.nonblocking", {
-        sessionId,
-        error: artErr.message,
-      });
+      error("🎨 Artwork generation failed (non-blocking)", { sessionId, error: artErr.message });
     }
 
-    log.info("✅ podcast.pipeline.complete", { sessionId });
+    info("✅ Podcast pipeline complete", { sessionId });
 
     res.json({
       ok: true,
@@ -73,9 +76,10 @@ router.post("/podcast/pipeline", async (req, res) => {
       artwork: artworkData,
     });
   } catch (err) {
-    log.error("💥 podcast.pipeline.failed", { sessionId, error: err.message });
+    error("💥 Podcast pipeline failed", { sessionId, error: err.message });
     res.status(500).json({ ok: false, error: err.message, sessionId });
   }
 });
 
 export default router;
+      
