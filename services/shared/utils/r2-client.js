@@ -1,4 +1,5 @@
-// r2-client.js — minimal logging, root-logger wired + putJson restored
+// r2-client.js — fixed logging, correct signature usage, minimal + consistent
+
 import log from "../../../utils/root-logger.js";
 import {
   S3Client,
@@ -8,7 +9,7 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 
-  // ------------------------------------------------------------
+// ------------------------------------------------------------
 // 🔧 Environment Variables
 // ------------------------------------------------------------
 const {
@@ -61,22 +62,22 @@ export const R2_BUCKETS = {
   raw: R2_BUCKET_RAW,
   rawtext: R2_BUCKET_RAW_TEXT,
   rawText: R2_BUCKET_RAW_TEXT,
-  "raw-text": R2_BUCKET_RAW_TEXT, // ✅ new alias
+  "raw-text": R2_BUCKET_RAW_TEXT,
   meta: R2_BUCKET_META,
   merged: R2_BUCKET_MERGED,
   art: R2_BUCKET_ART,
 
-  // ✅ Chunks
+  // Chunks
   chunks: R2_BUCKET_CHUNKS || "podcast-chunks",
   "podcast-chunks": R2_BUCKET_CHUNKS || "podcast-chunks",
 
-  // ✅ RSS
+  // RSS
   rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
   "rss-feeds": R2_BUCKET_RSS_FEEDS || "rss-feeds",
   podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS || R2_BUCKET_RSS_FEEDS || "rss-feeds",
   rssfeeds: R2_BUCKET_RSS_FEEDS || "rss-feeds",
 
-  // ✅ Transcripts
+  // Transcripts
   transcripts: R2_BUCKET_TRANSCRIPTS,
   transcript: R2_BUCKET_TRANSCRIPTS,
 };
@@ -124,6 +125,7 @@ export async function uploadBuffer(bucketKey, key, buffer, contentType = "applic
       ContentType: contentType,
     })
   );
+
   return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
 }
 
@@ -147,10 +149,11 @@ export const r2Put = uploadBuffer;
 export const putText = uploadText;
 export const getObject = getObjectAsText;
 export const r2Get = getObjectAsText;
+
 export const putJson = async (bucketKey, key, obj) =>
   uploadText(bucketKey, key, JSON.stringify(obj, null, 2), "application/json");
 
-// ✅ Legacy URL builder (used by models.js, rss, etc.)
+// URL builder
 export function buildPublicUrl(bucketKey, key) {
   const base = R2_PUBLIC_URLS[bucketKey];
   if (!base) throw new Error(`❌ No public URL configured for ${bucketKey}`);
@@ -169,16 +172,18 @@ export async function listKeys(bucketKey, prefix = "") {
 export async function deleteObject(bucketKey, key) {
   const bucket = ensureBucketKey(bucketKey);
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
-  log.info({ bucket, key }, "🗑️ R2 object deleted");
+
+  log.info("r2.delete", { bucket, key });
 }
 
 // ------------------------------------------------------------
-// 🧾 Startup Log
+// 🧾 Startup Log (FIXED — correct signature)
 // ------------------------------------------------------------
-log.info(
-  { endpoint: R2_ENDPOINT, region: R2_REGION, buckets: Object.keys(R2_BUCKETS) },
-  "r2-client.initialized"
-);
+log.info("r2-client.initialized", {
+  endpoint: R2_ENDPOINT,
+  region: R2_REGION,
+  buckets: Object.keys(R2_BUCKETS),
+});
 
 // ------------------------------------------------------------
 // 📦 Default Export
