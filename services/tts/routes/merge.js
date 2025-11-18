@@ -1,3 +1,5 @@
+import logger from "../../service-logger.js";
+const { info, warn, error, debug } = logger;
 // services/merge/routes/merge.js
 // ============================================================
 // 🎧 Merge Route (webhook-free version)
@@ -6,7 +8,6 @@
 
 import express from "express";
 import { mergeChunks } from "../utils/audio.js";
-import { log } from "#logger.js";
 import { uploadBuffer, getObjectAsText } from "../../../shared/utils/r2-client.js";
 
 const router = express.Router();
