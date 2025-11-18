@@ -12,7 +12,8 @@ const router = express.Router();
 export async function composeEpisode({ intro, main, outro, sessionId, tone = "neutral" }) {
   try {
     const fullText = [intro, main, outro].filter(Boolean).join("\n\n");
-    info(`🧠 Composed episode text for ${sessionId}`);
+    info(" 📝 Composed episode")
+    debug(`🧠 Composed episode text for ${sessionId}`);
     return { fullText, sessionId, tone };
   } catch (err) {
     error("💥 Compose episode failed", { sessionId, error: err.message });
