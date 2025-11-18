@@ -8,7 +8,7 @@ const transport = pino.transport({
     colorize: true,
     singleLine: false,
     ignore: "pid,hostname,time,level",
-    messageKey: "message", // pino-pretty prints only this
+    messageKey: "🔎", // pino-pretty prints only this
   },
 });
 
@@ -17,7 +17,7 @@ const instance = pino(
     level: process.env.LOG_LEVEL || "info",
     base: null,
     timestamp: false,
-    messageKey: "message", // actual printed field; no label shown
+    messageKey: "🔎", // actual printed field; no label shown
     formatters: {
       level() {
         return {}; // hide level data entirely
@@ -49,7 +49,7 @@ function write(level, event, data) {
       : {};
 
   // pino will print "message" content directly with no field name
-  instance[level]({ message, ...meta });
+  instance[level]({ 🔎, ...meta });
 }
 
 // ---------------------------------------------------------------------
