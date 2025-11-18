@@ -1,4 +1,4 @@
-import logger from "../../service-logger.js";
+import logger from "../service-logger.js";
 const { info, warn, error, debug } = logger;
 // ============================================================
 // 🎵 Modular Podcast Processor (Optimized for Podcast Output)
