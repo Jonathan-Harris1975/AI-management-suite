@@ -27,8 +27,8 @@ app.get("/health", (_req, res) => {
 });
 
 // Startup logs via minimal root logger
-log.info("🧩 startup.bootstrap.start");
-log.info("✅ startup.env.verified");
+log.info("🟩 startup.bootstrap.start");
+log.info("🟩 startup.env.verified");
 
 app.listen(PORT, () => {
   log.info("👂 server.listening", { port: PORT });
