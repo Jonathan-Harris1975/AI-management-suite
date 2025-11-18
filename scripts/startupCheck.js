@@ -3,7 +3,7 @@ import log from "../utils/root-logger.js";
 try {
   log.info("🟧 Startup check initiated");
   
-  log.info("🗃️ Environment details", {
+  log.debug("🗃️ Environment details", {
     cwd: process.cwd(),
     nodeVersion: process.version,
     moduleType: "ESM",
