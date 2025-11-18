@@ -17,7 +17,7 @@ export async function getWeatherSummary() {
       return "grey skies in London";
     }
 
-    info("weather.fetch.start", { location, apiHost });
+    debug("weather.fetch.start", { location, apiHost });
 
     const url = `https://${apiHost}/current.json?q=${encodeURIComponent(location)}`;
     const res = await fetch(url, {
@@ -35,8 +35,8 @@ export async function getWeatherSummary() {
     const data = await res.json();
     const condition = (data?.current?.condition?.text || "overcast").toLowerCase().trim();
     const summary = `${condition} in ${location}`;
-
-    info("weather.summary", { summary, location });
+    info(" 🌤️ weather.summary fetched"),
+    debug("weather.summary", { summary, location });
     return summary;
   } catch (err) {
     error("weather.fetch.error", { location, err: String(err) });
