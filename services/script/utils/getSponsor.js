@@ -37,7 +37,8 @@ export default function getSponsor() {
     }
 
     const randomBook = books[Math.floor(Math.random() * books.length)];
-    info(`📘 Selected sponsor: ${randomBook.title}`);
+    info("📘 Selected sponsor"),
+    debug(`📘 Selected sponsor: ${randomBook.title}`);
     return randomBook;
   } catch (err) {
     error("❌ getSponsor() failed", { error: err });
