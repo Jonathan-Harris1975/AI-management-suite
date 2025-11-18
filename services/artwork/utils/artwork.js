@@ -1,3 +1,5 @@
+import logger from "../../service-logger.js";
+const { info, warn, error, debug } = logger;
 // ============================================================
 // 🖼️ Podcast Artwork Generator (OpenRouter Image Model)
 // ============================================================
@@ -7,7 +9,6 @@
 // ============================================================
 
 import OpenAI from "openai";
-import { warn, error } from "#logger.js";
 
 // ------------------------------------------------------------
 // 🔍 Required Environment Variables
