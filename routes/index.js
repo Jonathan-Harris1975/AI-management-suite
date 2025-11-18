@@ -13,7 +13,7 @@ const router = Router();
 const SERVICES = ["rss", "script", "tts", "artwork", "podcast"];
 
 // Log route registration
-log.info("🟧 Registering service routes", {
+log.debug("🟧 Registering service routes", {
   services: SERVICES,
   count: SERVICES.length,
 });
@@ -25,7 +25,7 @@ router.use("/tts", ttsRoutes);
 router.use("/artwork", artworkRoutes);
 router.use("/podcast", podcastRoutes);
 
-log.debug("🟩 Service routes mounted successfully");
+log.info("🟩 Service routes mounted successfully");
 
 // Health check / index route
 router.get("/", (_req, res) => {
