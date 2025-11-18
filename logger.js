@@ -1,22 +1,7 @@
-// #logger.js - Human-Friendly Pretty Logger ---------------------------------
+// #logger.js – Final Stable Version
 import pino from "pino";
 
-// Pretty print transformer
-function humanise(data = {}) {
-  const newData = { ...data };
-
-  if (newData.bucketsConfigured && typeof newData.bucketsConfigured === "object") {
-    const buckets = Object.entries(newData.bucketsConfigured)
-      .filter(([_, v]) => v)
-      .map(([k]) => k);
-    newData.buckets = buckets.join(", ");
-    delete newData.bucketsConfigured;
-  }
-
-  return newData;
-}
-
-// Pretty-print transport
+// Pretty-print (same as before)
 const transport = pino.transport({
   target: "pino-pretty",
   options: {
@@ -36,59 +21,46 @@ const instance = pino(
   transport
 );
 
-// ------------------------------------------------------------
-// SAFE WRITE WRAPPER (fixes string spreading)
-// ------------------------------------------------------------
+// ---------------------------------------------------------------------
+// SAFE WRITE WRAPPER
+// Handles ALL signature types without producing "[object Object]"
+// ---------------------------------------------------------------------
 function write(level, event, data) {
   let evt = event;
   let meta = data;
 
-  // Allow: info("message")
+  // Case 1: info("simple.event")
   if (typeof event === "string" && data === undefined) {
     evt = event;
     meta = {};
   }
 
-  // Allow: info({foo:1}) → auto-label as "log"
-  if (typeof event === "object" && data === undefined) {
-    meta = event;
-    evt = "log";
+  // Case 2: info({ key: "value" }) – old root logger behaviour
+  if (typeof event === "object" && event !== null && data === undefined) {
+    evt = event.event || "log";
+    meta = { ...event };
+    delete meta.event;
   }
 
-  // Prevent spreading strings
+  // Case 3: Bad patterns produce strings like [object Object]
   if (typeof evt !== "string") {
     evt = String(evt);
   }
 
-  // Guarantee data is safe object
-  if (typeof meta !== "object" || meta === null || Array.isArray(meta)) {
-    meta = { value: meta };
+  // Ensure meta is safe
+  if (typeof meta !== "object" || meta === null) {
+    meta = { value: String(meta) };
   }
 
-  const cleaned = humanise(meta);
-
-  instance[level](
-    {
-      event: evt,
-      ...cleaned,
-    }
-  );
+  instance[level]({ event: evt, ...meta });
 }
 
-// ------------------------------------------------------------
-// PUBLIC API — fixed signatures
-// ------------------------------------------------------------
+// ---------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------
 export const info = (event, data) => write("info", event, data);
 export const warn = (event, data) => write("warn", event, data);
 export const error = (event, data) => write("error", event, data);
 export const debug = (event, data) => write("debug", event, data);
-
-// Backwards compatible .log namespace
-export const log = {
-  info: (event, data) => write("info", event, data),
-  warn: (event, data) => write("warn", event, data),
-  error: (event, data) => write("error", event, data),
-  debug: (event, data) => write("debug", event, data),
-};
 
 export default instance;
