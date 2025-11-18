@@ -28,7 +28,7 @@ export default async function fetchFeedArticles({
   windowDays = 7,
 } = {}) {
   try {
-    info("rss.fetch.start", { feedUrl, windowDays });
+    debug("rss.fetch.start", { feedUrl, windowDays });
 
     const res = await fetch(feedUrl);
     if (!res.ok) {
@@ -47,12 +47,15 @@ export default async function fetchFeedArticles({
       .map((item) => ({ ...item, score: calculateArticleScore(item) }))
       .sort((a, b) => b.score - a.score);
 
-    info("rss.fetch.summary", {
+    debug("rss.fetch.summary", {
       feedUrl,
       windowDays,
       totalItems: allItems.length,
       recentItems: recent.length,
       usedItems: scoredItems.length,
+    });
+     info("rss.fetch.summary", {
+     usedItems: scoredItems.length,
     });
 
     return { items: scoredItems, feedUrl };
