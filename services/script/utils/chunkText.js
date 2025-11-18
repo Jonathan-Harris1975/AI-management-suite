@@ -39,7 +39,7 @@ export default function chunkText(text, maxChars = Number(process.env.MAX_POLLY_
     return [normalized];
   }
 
-  info(`📝 Splitting text into chunks (${getCharLength(normalized)} characters total)`);
+  debug(`📝 Splitting text into chunks (${getCharLength(normalized)} characters total)`);
 
   // Strategy selection: paragraph-first, then sentence-based
   const hasParagraphs = /\n\s*\n/.test(normalized);
@@ -73,7 +73,7 @@ export default function chunkText(text, maxChars = Number(process.env.MAX_POLLY_
         
         // Emergency: if single sentence exceeds limit, split by words
         if (sentenceSize > maxChars) {
-          info(`⚠️  Found very long sentence (${sentenceSize} chars) - splitting by words`);
+          debug(`⚠️  Found very long sentence (${sentenceSize} chars) - splitting by words`);
           const wordChunks = splitByWords(sentence, maxChars, getCharLength);
           wordChunks.forEach(wc => {
             chunks.push(wc);
@@ -131,7 +131,7 @@ export default function chunkText(text, maxChars = Number(process.env.MAX_POLLY_
   for (const chunk of chunks) {
     if (getCharLength(chunk) > maxChars) {
       // Emergency re-split
-      info(`⚠️  Chunk exceeded limit during validation - re-splitting`);
+      debug(`⚠️  Chunk exceeded limit during validation - re-splitting`);
       const subChunks = splitByWords(chunk, maxChars, getCharLength);
       validatedChunks.push(...subChunks);
     } else {
@@ -140,7 +140,7 @@ export default function chunkText(text, maxChars = Number(process.env.MAX_POLLY_
   }
 
   // Enhanced human-friendly logging
-  info(`\n📊 Created ${validatedChunks.length} chunk${validatedChunks.length > 1 ? 's' : ''} for TTS processing:\n`);
+  debug(`\n📊 Created ${validatedChunks.length} chunk${validatedChunks.length > 1 ? 's' : ''} for TTS processing:\n`);
   
   validatedChunks.forEach((chunk, idx) => {
     const chars = getCharLength(chunk);
@@ -154,8 +154,8 @@ export default function chunkText(text, maxChars = Number(process.env.MAX_POLLY_
     const filledBars = Math.round((chars / maxChars) * barLength);
     const bar = '█'.repeat(filledBars) + '░'.repeat(barLength - filledBars);
     
-    info(`  Chunk ${idx + 1}/${validatedChunks.length}: ${chars} chars [${bar}] ${percentage}% full`);
-    info(`    "${preview}"`);
+    debug(`  Chunk ${idx + 1}/${validatedChunks.length}: ${chars} chars [${bar}] ${percentage}% full`);
+    debug(`    "${preview}"`);
   });
 
   info(`\n✓ All chunks ready for AWS Polly synthesis\n`);
