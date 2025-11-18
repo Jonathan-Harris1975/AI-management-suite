@@ -28,7 +28,7 @@ export async function generateMainLongform(sessionMeta, articles, totalMainSecon
   const buffer = Math.min(180, Math.round(totalMainSeconds * 0.05));
   const perGroupSeconds = Math.max(420, Math.floor((totalMainSeconds - buffer) / groups.length));
 
-  info("script.main.chunking", {
+  debug("script.main.chunking", {
     groups: groups.length,
     perGroupSeconds,
     totalMainSeconds,
