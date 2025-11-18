@@ -1,14 +1,13 @@
-// #logger.js – Final Stable Version
+// #logger.js – Final Stable Version (Time Hidden)
 import pino from "pino";
 
-// Pretty-print (same as before)
+// Pretty-print (no time)
 const transport = pino.transport({
   target: "pino-pretty",
   options: {
     colorize: true,
-    translateTime: "SYS:standard",
     singleLine: false,
-    ignore: "pid,hostname",
+    ignore: "pid,hostname,time", // ensure pretty-printer doesn't show time
   },
 });
 
@@ -16,7 +15,7 @@ const instance = pino(
   {
     level: process.env.LOG_LEVEL || "info",
     base: null,
-    timestamp: pino.stdTimeFunctions.isoTime,
+    timestamp: false, // <— completely disable timestamps
   },
   transport
 );
@@ -29,25 +28,21 @@ function write(level, event, data) {
   let evt = event;
   let meta = data;
 
-  // Case 1: info("simple.event")
   if (typeof event === "string" && data === undefined) {
     evt = event;
     meta = {};
   }
 
-  // Case 2: info({ key: "value" }) – old root logger behaviour
   if (typeof event === "object" && event !== null && data === undefined) {
     evt = event.event || "log";
     meta = { ...event };
     delete meta.event;
   }
 
-  // Case 3: Bad patterns produce strings like [object Object]
   if (typeof evt !== "string") {
     evt = String(evt);
   }
 
-  // Ensure meta is safe
   if (typeof meta !== "object" || meta === null) {
     meta = { value: String(meta) };
   }
