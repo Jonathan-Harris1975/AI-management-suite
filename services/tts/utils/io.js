@@ -1,4 +1,4 @@
-import logger from "../../service-logger.js";
+import logger from "../service-logger.js";
 const { info, warn, error, debug } = logger;
 // services/tts/utils/io.js
 // Unified I/O helpers for TTS audio pipeline – central R2 + logger
