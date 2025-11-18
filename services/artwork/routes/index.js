@@ -1,3 +1,5 @@
+import logger from "../../service-logger.js";
+const { info, warn, error, debug } = logger;
 // services/artwork/routes/index.js
 import express from "express";
 import createArtworkRouter from "./createArtwork.js";
