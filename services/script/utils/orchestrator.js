@@ -12,7 +12,7 @@ import { generateEpisodeMetaLLM } from "../utils/podcastHelper.js";
 export async function orchestrateScript(sessionId) {
   const sid = sessionId || `TT-${Date.now()}`;
   scriptLogger.startProcess(sid);
-  info("script.orchestrate.start", { sessionId: sid });
+  info("📝 script.orchestrate.start", { sessionId: sid });
 
   try {
     // 1) Generate sections
@@ -43,7 +43,7 @@ export async function orchestrateScript(sessionId) {
     const meta = await generateEpisodeMetaLLM(fullText, { sessionId: sid });
 
     // 6) Log success and return structured result
-    info("script.orchestrate.complete", {
+    info("📗 script.orchestrate.complete", {
       sessionId: sid,
       chunks: uploadedChunks.length,
       hasMeta: Boolean(meta),
