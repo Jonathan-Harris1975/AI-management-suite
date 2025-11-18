@@ -179,12 +179,14 @@ export async function deleteObject(bucketKey, key) {
 // ------------------------------------------------------------
 // 🧾 Startup Log (FIXED — correct signature)
 // ------------------------------------------------------------
-log.info("r2-client.initialized", {
+log.info("🟩 r2-client.initialized"),
+  
+
+log.debug("r2-client.initialized", {
   endpoint: R2_ENDPOINT,
   region: R2_REGION,
   buckets: Object.keys(R2_BUCKETS),
 });
-
 // ------------------------------------------------------------
 // 📦 Default Export
 // ------------------------------------------------------------
