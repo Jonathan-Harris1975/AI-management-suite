@@ -1,60 +1,65 @@
-// #logger.js – Final Stable Version (Time Hidden)
+// #logger.js – Minimal Clean Output
 import pino from "pino";
 
-// Pretty-print (no time)
+// Pretty-print with no labels, no level, no timestamps
 const transport = pino.transport({
   target: "pino-pretty",
   options: {
     colorize: true,
     singleLine: false,
-    ignore: "pid,hostname,time", // ensure pretty-printer doesn't show time
+    ignore: "pid,hostname,time,level,event,label", // hide everything
+    messageKey: "msg", // only output this
   },
 });
 
+// Logger base: no meta, no timestamp, no level in output
 const instance = pino(
   {
     level: process.env.LOG_LEVEL || "info",
     base: null,
-    timestamp: false, // <— completely disable timestamps
+    timestamp: false,
+    formatters: {
+      level() {
+        return {}; // removes "level": "info"
+      },
+    },
+    messageKey: "msg",
   },
   transport
 );
 
 // ---------------------------------------------------------------------
-// SAFE WRITE WRAPPER
-// Handles ALL signature types without producing "[object Object]"
+// CLEAN WRITE WRAPPER (no event, no label, clean msg only)
 // ---------------------------------------------------------------------
 function write(level, event, data) {
-  let evt = event;
-  let meta = data;
+  let msg = "";
 
-  if (typeof event === "string" && data === undefined) {
-    evt = event;
-    meta = {};
+  // string only
+  if (typeof event === "string") {
+    msg = event;
   }
 
-  if (typeof event === "object" && event !== null && data === undefined) {
-    evt = event.event || "log";
-    meta = { ...event };
-    delete meta.event;
+  // object only
+  else if (typeof event === "object" && event !== null) {
+    msg = event.msg || "";
   }
 
-  if (typeof evt !== "string") {
-    evt = String(evt);
+  // fallback
+  else {
+    msg = String(event);
   }
 
-  if (typeof meta !== "object" || meta === null) {
-    meta = { value: String(meta) };
-  }
+  // attach meta data but without event/label/etc.
+  const meta = typeof data === "object" && data !== null ? data : {};
 
-  instance[level]({ event: evt, ...meta });
+  instance[level]({ msg, ...meta });
 }
 
 // ---------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------
-export const info = (event, data) => write("info", event, data);
-export const warn = (event, data) => write("warn", event, data);
+export const info  = (event, data) => write("info", event, data);
+export const warn  = (event, data) => write("warn", event, data);
 export const error = (event, data) => write("error", event, data);
 export const debug = (event, data) => write("debug", event, data);
 
