@@ -35,11 +35,12 @@ export class RssLogger {
   endRun(extra={}){
     stopKeepAlive(this.keepAliveLabel);
     const out={
-      
-      📝feedsProcessed:this.metrics.feedsProcessed,
-      📝itemsFetched:this.metrics.itemsFetched,
-      📝itemsRewritten:this.metrics.rewrittenItems,
-      📝itemsUploaded:this.metrics.itemsUploaded,
+      runId:this.currentRunId,
+      durationMs:Date.now()-this.metrics.startTime,
+      feedsProcessed:this.metrics.feedsProcessed,
+      itemsFetched:this.metrics.itemsFetched,
+      itemsRewritten:this.metrics.rewrittenItems,
+      itemsUploaded:this.metrics.itemsUploaded,
       errors:this.metrics.errors,
       ...extra
     };
