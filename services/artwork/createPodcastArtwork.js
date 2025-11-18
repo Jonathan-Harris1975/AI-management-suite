@@ -1,5 +1,6 @@
+import logger from "../service-logger.js";
+const { info, warn, error, debug } = logger;
 // services/artwork/createPodcastArtwork.js
-import { info, error } from "#logger.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 import { generatePodcastArtwork } from "./utils/artwork.js"; // Fixed function name
 
