@@ -1,9 +1,9 @@
+import logger from "../service-logger.js";
+const { info, warn, error, debug } = logger;
 // services/podcast/runPodcastPipeline.js
 // ============================================================
 // 🎙 AI Podcast Pipeline — Unified Orchestrator
 // ============================================================
-
-import { log } from "#logger.js";
 import { orchestrateScript } from "../script/index.js"; // standardized import
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
 import { createPodcastArtwork } from "../artwork/createPodcastArtwork.js";

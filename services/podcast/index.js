@@ -1,7 +1,8 @@
+import logger from "../service-logger.js";
+const { info, warn, error, debug } = logger;
 // services/podcast/index.js
 import express from "express";
 import { runPodcastPipeline } from "./runPodcastPipeline.js";
-import { info } from "#logger.js";
 
 const router = express.Router();
 
