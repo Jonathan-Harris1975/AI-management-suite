@@ -7,7 +7,7 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import fetch from "node-fetch";
-import { info, error, warn } from "#logger.js";
+import { info, error, warn , debug} from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 
@@ -163,7 +163,7 @@ async function modularMerge(sessionId, sources) {
   let current = sources;
 
   while (current.length > 1) {
-    info("Batch merge round", {
+    debug ("Batch merge round", {
       round,
       chunksRemaining: current.length,
     });
@@ -203,8 +203,8 @@ export async function mergeProcessor(sessionId, chunkUrls = []) {
 
   startKeepAlive(label, 25000);
   ensureTmpDir();
-
-  info("Starting merge process", {
+info("🎞️ Starting merge process")
+  debug("Starting merge process", {
     sessionId: sid,
     totalChunks: chunkUrls.length,
   });
@@ -222,7 +222,8 @@ export async function mergeProcessor(sessionId, chunkUrls = []) {
     await uploadBuffer(MERGED_BUCKET, mergedKey, mergedBuf, "audio/mpeg");
 
     // ✅ CLEAN COMPLETION SUMMARY
-    info("🟩 Merge process completed", {
+    info("🟩 Merge process completed")
+    debug("🟩 Merge process completed", {
       sessionId: sid,
       chunksProcessed: chunkUrls.length,
       outputKey: mergedKey,
