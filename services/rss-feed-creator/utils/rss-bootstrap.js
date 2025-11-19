@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
-import { info, error } from "#logger.js";
+import { info, error , debug} from "#logger.js";
 import { getObjectAsText, putText, putJson } from "#shared/r2-client.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -29,7 +29,7 @@ async function readLocalFile(filename) {
       info(`📄 Found local data file: ${candidate}`);
       return txt;
     } catch {
-      info(`⚙️ Checked but not found: ${candidate}`);
+      debug (`⚙️ Checked but not found: ${candidate}`);
     }
   }
 
@@ -46,7 +46,7 @@ export async function ensureR2Sources() {
     process.env.R2_BUCKET_PODCAST ||
     "rss-feeds";
 
-  info(`🪣 Using R2 bucket: ${bucket}`);
+  debug(`🪣 Using R2 bucket: ${bucket}`);
 
   // --- FEEDS ---
   let feedsTxt = await getObjectAsText(bucket, FEEDS_KEY).catch(() => null);
