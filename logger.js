@@ -59,5 +59,6 @@ export const info = (event, data) => write("info", event, data);
 export const warn = (event, data) => write("warn", event, data);
 export const error = (event, data) => write("error", event, data);
 export const debug = (event, data) => write("debug", event, data);
+export const log = (event, data) => write("log", event, data);
 
 export default instance;
