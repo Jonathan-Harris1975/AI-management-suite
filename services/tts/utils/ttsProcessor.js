@@ -1,5 +1,3 @@
-import logger from "../service-logger.js";
-const { info, warn, error, debug } = logger;
 // ============================================================
 // 🎙️ TTS Processor — Production Ready
 // ============================================================
@@ -15,6 +13,7 @@ import {
   PollyClient,
   SynthesizeSpeechCommand,
 } from "@aws-sdk/client-polly";
+import { info, error, warn } from "#logger.js";
 import { putObject } from "#shared/r2-client.js";
 import pLimit from "p-limit";
 

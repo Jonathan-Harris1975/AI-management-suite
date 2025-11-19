@@ -1,5 +1,3 @@
-import logger from "../service-logger.js";
-const { info, warn, error, debug } = logger;
 // ============================================================
 // 🎬 TTS Orchestrator — Full Audio Generation Pipeline (FIXED)
 // ============================================================
@@ -21,6 +19,8 @@ const { info, warn, error, debug } = logger;
 //   - Uploads final MP3 to R2
 //   - Full logging (message-first)
 // ============================================================
+
+import { info, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { listKeys, getObject, putObject } from "#shared/r2-client.js";
 import { ttsProcessor } from "./ttsProcessor.js";
