@@ -1,60 +1,59 @@
-// #logger.js – Ultra-Clean Output with Emoji Message Key
+// ============================================================
+// 🧠 AI Podcast Suite — Ultra-Clean Logger (Pino v8)
+// ============================================================
+
 import pino from "pino";
 
-// Pretty-print with no time, no level, no msg labels - using emoji as message key
-const transport = pino.transport({
-  target: "pino-pretty",
-  options: {
-    colorize: true,
-    singleLine: true,
-    ignore: "pid,hostname,time,level",
-    messageKey: "▫️", // pino-pretty prints only this emoji-keyed content
-  },
-});
+const isProd = process.env.NODE_ENV === "production" || process.env.SHIPER === "true";
 
-const instance = pino(
-  {
-    level: process.env.LOG_LEVEL || "info",
-    base: null,
-    timestamp: false,
-    messageKey: "▫️", // Use emoji as the actual printed field; no label shown
-    formatters: {
-      level() {
-        return {}; // hide level data entirely
+let loggerInstance = globalThis.__AI_PODCAST_LOGGER__;
+
+if (!loggerInstance) {
+  if (isProd) {
+    loggerInstance = pino({
+      level: process.env.LOG_LEVEL || "info",
+      base: null,
+      timestamp: false,
+      formatters: {
+        level: () => ({}),
+        bindings: () => ({}),
+        log: (obj) => {
+          // Production: return only custom fields, exclude msg
+          const { msg, ...rest } = obj;
+          return rest;
+        },
       },
-    },
-  },
-  transport
-);
-
-// ---------------------------------------------------------------------
-// WRITE WRAPPER (emoji message key: 🔎)
-// ---------------------------------------------------------------------
-function write(level, event, data) {
-  let messageContent = "";
-
-  if (typeof event === "string") {
-    messageContent = event;
-  } else if (typeof event === "object" && event !== null) {
-    messageContent = event.message || "";
+    });
   } else {
-    messageContent = String(event);
+    loggerInstance = pino({
+      level: process.env.LOG_LEVEL || "debug",
+      base: { service: "ai-podcast-suite" },
+      timestamp: pino.stdTimeFunctions.isoTime,
+      transport: {
+        target: "pino-pretty",
+        options: {
+          colorize: true,
+          singleLine: false,
+          translateTime: "SYS:standard",
+          ignore: "pid,hostname,msg",
+        },
+      },
+      formatters: {
+        log: (obj) => {
+          // Development: also exclude msg from output
+          const { msg, ...rest } = obj;
+          return rest;
+        },
+      },
+    });
   }
 
-  const meta =
-    typeof data === "object" && data !== null
-      ? data
-      : data !== undefined
-      ? { value: String(data) }
-      : {};
-
-  // pino will print "🔎" content directly with no field name
-  log[level]({ "▫️": messageContent, ...meta });
+  globalThis.__AI_PODCAST_LOGGER__ = loggerInstance;
 }
 
-// ---------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------
+const log = loggerInstance;
+
+// Wrapper functions with proper msg parameter
 export const info = (msg, obj = {}) => log.info(obj, msg);
 export const warn = (msg, obj = {}) => log.warn(obj, msg);
 export const error = (msg, obj = {}) => log.error(obj, msg);
