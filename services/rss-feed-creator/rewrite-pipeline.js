@@ -11,7 +11,7 @@
 // Adds clear preview logging and a one-shot retry on upload.
 // ============================================================
 
-import { info, error } from "#logger.js";
+import { info, error, debug } from "#logger.js";
 import { fetchAndParseFeeds } from "./utils/fetchFeeds.js";
 import { rewriteRssFeedItems } from "./utils/models.js";
 import { generateFeed } from "./utils/feedGenerator.js";
@@ -23,11 +23,11 @@ export async function endToEndRewrite() {
     // 1) Fetch source items
     const feedItems = await fetchAndParseFeeds();
     if (!Array.isArray(feedItems) || feedItems.length === 0) {
-      info("rss-feed-creator.pipeline.noItems", { reason: "no valid items" });
+      debug("rss-feed-creator.pipeline.noItems", { reason: "no valid items" });
       return { totalItems: 0, rewrittenItems: 0 };
     }
 
-    info("rss-feed-creator.pipeline.fetch.complete", {
+    debug("rss-feed-creator.pipeline.fetch.complete", {
       items: feedItems.length,
       sampleTitle: feedItems[0]?.title,
     });
@@ -40,14 +40,14 @@ export async function endToEndRewrite() {
 
     // Preview the first enriched item to confirm correct fields
     const first = rewrittenItems[0] || {};
-    info("rss-feed-creator.pipeline.sample", {
+    debug("rss-feed-creator.pipeline.sample", {
       shortTitle: first.shortTitle,
       shortUrl: first.shortUrl,
       guid: first.shortGuid,
       hasRewritten: !!first.rewritten,
     });
 
-    info("rss-feed-creator.batch.complete", {
+  debug("rss-feed-creator.batch.complete", {
       totalItems: feedItems.length,
       rewrittenItems: rewrittenItems.length,
     });
@@ -55,7 +55,7 @@ export async function endToEndRewrite() {
     // 3) Build + upload RSS using the ENRICHED array (not the originals)
     await safeGenerateFeed("rss", rewrittenItems);
 
-    info("rss-feed-creator.pipeline.done", {
+    debug("rss-feed-creator.pipeline.done", {
       totalItems: feedItems.length,
       rewrittenItems: rewrittenItems.length,
     });
@@ -73,7 +73,7 @@ export async function endToEndRewrite() {
 async function safeGenerateFeed(bucket, items) {
   try {
     if (items?.[0]) {
-      info("🧩 feed preview", {
+      debug("🧩 feed preview", {
         title: items[0]?.shortTitle || items[0]?.title,
         link: items[0]?.shortUrl || items[0]?.link,
         hasRewritten: !!items[0]?.rewritten,
@@ -81,13 +81,13 @@ async function safeGenerateFeed(bucket, items) {
     }
 
     await generateFeed(bucket, items);
-    info("rss-feed-creator.generateFeed.success", { bucket, items: items.length });
+    debug("rss-feed-creator.generateFeed.success", { bucket, items: items.length });
   } catch (err) {
     error("rss-feed-creator.generateFeed.fail", { message: err?.message });
 
     // retry once after 2s
     await new Promise((r) => setTimeout(r, 2000));
     await generateFeed(bucket, items);
-    info("rss-feed-creator.generateFeed.retry.success", { bucket });
+    debug("rss-feed-creator.generateFeed.retry.success", { bucket });
   }
 }
