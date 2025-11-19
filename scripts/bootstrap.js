@@ -19,8 +19,8 @@ async function run(cmd, label) {
 }
 
 (async () => {
-  info('🧩 Starting AI Podcast Suite bootstrap sequence...');
-  info('---------------------------------------------');
+  info('🟩 Starting AI Podcast Suite bootstrap sequence...');
+  
 
   // 1️⃣ Load and validate environment variables
   await run("node ./scripts/envBootstrap.js", "Environment Bootstrap");
@@ -37,6 +37,6 @@ async function run(cmd, label) {
   // 5️⃣ Launch the main web server
   await run("node ./server.js", "Start Server");
 
-  info('---------------------------------------------');
+  
   info( '🏁 Bootstrap complete — container entering idle mode.');
 })();
