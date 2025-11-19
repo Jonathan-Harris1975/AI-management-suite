@@ -17,7 +17,7 @@ import chunkText from "./chunkText.js";
 import { generateMainLongform } from "./mainChunker.js";
 import * as sessionCache from "./sessionCache.js";
 import { generateEpisodeMetaLLM } from "./podcastHelper.js";
-import { info, error, debug } from "#logger.js";
+import { info, error } from "#logger.js";
 
 function toPlainText(s) {
   if (!s) return "";
@@ -75,7 +75,7 @@ export async function generateMain(sessionIdLike) {
     .filter((a) => a.title || a.summary);
 
   const { mainSeconds, targetMins } = calculateDuration("main", sessionMeta, articles.length);
-  debug("Main script generation", { 
+  info("Main script generation", { 
     targetMinutes: targetMins, 
     articles: articles.length 
   });
@@ -116,7 +116,7 @@ export async function generateComposedEpisode(sessionIdLike) {
   let ttsChunks = chunkText(edited, maxBytes);
   
   if (ttsChunks.length <= 1 && byteLen(edited) > maxBytes) {
-    debug("Force splitting large chunk", { reason: "single-chunk-too-large" });
+    info("Force splitting large chunk", { reason: "single-chunk-too-large" });
     const out = [];
     let remaining = edited.trim();
     while (Buffer.byteLength(remaining, "utf8") > maxBytes) {
@@ -147,7 +147,7 @@ export async function generateComposedEpisode(sessionIdLike) {
   const meta = await generateEpisodeMetaLLM(edited, sessionMeta);
   await putJson("meta", `${id}-meta.json`, meta);
 
-  debug("Script orchestration complete", { 
+  info("Script orchestration complete", { 
     sessionId: id, 
     chunks: files.length 
   });

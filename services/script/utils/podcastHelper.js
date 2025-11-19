@@ -4,7 +4,7 @@
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { putJson } from "../../shared/utils/r2-client.js"; // kept for future use if needed
 import * as sessionCache from "./sessionCache.js";
-import { info, error, debug} from "#logger.js";
+import { info, error } from "#logger.js";
 import { extractMainContent } from "./textHelpers.js";
 
 /* -----------------------------------------------------------
@@ -468,8 +468,7 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
   };
 
   // Single comprehensive summary log
-  info ("🔗 meta.generation.complete");
-  debug ("🔗 meta.generation.complete", {
+  info("🔗 meta.generation.complete", {
     sessionId: id,
     episodeNumber,
     mainExtract: opStatus.mainExtract.success ? "success" : "fallback",
