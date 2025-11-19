@@ -2,7 +2,7 @@
 import express from "express";
 import cors from "cors";
 import os from "os";
-import { info } from "#logger.js";
+import { log,info,debug}  from "#logger.js";
 import routes from "./routes/index.js";
 
 const app = express();
@@ -15,6 +15,6 @@ app.use("/", routes);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  info("🧠 AI Podcast Suite started on port " + PORT);
-  info("📡 Endpoints: RSS, Script, TTS, Artwork, Podcast Pipeline");
+  info("🟩 AI Podcast Suite started on port " + PORT);
+  debug("📡 Endpoints: RSS, Script, TTS, Artwork, Podcast Pipeline");
 });
