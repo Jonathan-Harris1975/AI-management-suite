@@ -11,9 +11,7 @@
 // Adds clear preview logging and a one-shot retry on upload.
 // ============================================================
 
-import rssLogger from "./utils/rss-logger.js";
-const info = (...args) => rssLogger.info(...args);
-const error = (...args) => rssLogger.error(...args);
+import { info, error } from "#logger.js";
 import { fetchAndParseFeeds } from "./utils/fetchFeeds.js";
 import { rewriteRssFeedItems } from "./utils/models.js";
 import { generateFeed } from "./utils/feedGenerator.js";
