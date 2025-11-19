@@ -6,7 +6,7 @@
 // ============================================================
 
 import { execSync } from "child_process";
-import { log, info } from "#logger.js";
+import { info } from "#logger.js";
 
 async function run(cmd, label) {
   try {
@@ -52,7 +52,7 @@ async function run(cmd, label) {
     info('🏁 Bootstrap complete — container entering idle mode.');
     
   } catch (error) {
-    log.error(`💥 Bootstrap sequence failed: ${error.message}`);
+    error(`💥 Bootstrap sequence failed: ${error.message}`);
     process.exit(1);
   }
 })();
