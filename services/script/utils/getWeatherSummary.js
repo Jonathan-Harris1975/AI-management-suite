@@ -31,7 +31,7 @@ export async function getWeatherSummary() {
 
     const condition = (data?.current?.condition?.text || "overcast").toLowerCase().trim();
     const summary = `${condition} in London`;
-    info("🌤️ Weather summary fetch successfully');
+    info("🌤️ Weather summary fetch successfully");
     debug("Weather summary: ${summary}");
     return summary;
   } catch (err) {
