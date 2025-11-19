@@ -6,7 +6,7 @@
 // ============================================================
 
 import Parser from "rss-parser";
-import { info, error } from "#logger.js";
+import { info, error,debug} from "#logger.js";
 import { loadRotationState, saveFeedRotation } from "./feedRotationManager.js";
 import { readLocalOrR2File } from "./fileReader.js";
 
@@ -79,7 +79,7 @@ async function fetchAndParseOne(url) {
     const filtered = withinCutoff.length;
     const discarded = cleaned.length - filtered;
 
-    info("rss.fetchFeeds.parsed", {
+    debug ("rss.fetchFeeds.parsed", {
       url,
       count: filtered,
       sourceItems: items.length,
@@ -129,7 +129,7 @@ export async function fetchAndParseFeeds() {
   await saveFeedRotation({ rssIndex: nextRssIndex, urlIndex: nextUrlIndex });
 
   const selected = [...rssBatch, ...urlBatch];
-  info("rss.fetchFeeds.rotation.enabled", {
+  debug("rss.fetchFeeds.rotation.enabled", {
     rssFeeds: rssBatch.length,
     urlFeeds: urlBatch.length,
     selected: selected.length,
@@ -151,7 +151,7 @@ export async function fetchAndParseFeeds() {
     }
   }
 
-  info("rss.fetchFeeds.items.ready", {
+  debug("rss.fetchFeeds.items.ready", {
     parsedTotal: items.length,
     deduped: deduped.length,
     cutoffHours: FEED_CUTOFF_HOURS,
