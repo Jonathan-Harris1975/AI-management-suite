@@ -1,38 +1,48 @@
 // routes/index.js
-import log from "../utils/root-logger.js";
-import { Router } from "express";
+import express from "express";
+import { info, error } from "#logger.js";
 
+// ─────────────────────────────
+//  SERVICE ROUTES
+// ─────────────────────────────
 import rssRoutes from "../services/rss-feed-creator/routes/rewrite.js";
 import scriptRoutes from "../services/script/routes/index.js";
 import ttsRoutes from "../services/tts/routes/tts.js";
 import artworkRoutes from "../services/artwork/index.js";
 import podcastRoutes from "../services/podcast/index.js";
 
-const router = Router();
+const router = express.Router();
 
-const SERVICES = ["rss", "script", "tts", "artwork", "podcast"];
+const routeRegistry = [
+  { path: "/rss", name: "RSS Feed Creator", routes: rssRoutes },
+  { path: "/script", name: "Script Generation", routes: scriptRoutes },
+  { path: "/tts", name: "TTS Service", routes: ttsRoutes },
+  { path: "/artwork", name: "Artwork Creation", routes: artworkRoutes },
+  { path: "/podcast", name: "Podcast Generation", routes: podcastRoutes }
+];
 
-// Log route registration
-log.debug("🟧 Registering service routes", {
-  services: SERVICES,
-  count: SERVICES.length,
-});
+info("📡 Starting route registration...");
 
-// Mount service routes
-router.use("/rss", rssRoutes);
-router.use("/script", scriptRoutes);
-router.use("/tts", ttsRoutes);
-router.use("/artwork", artworkRoutes);
-router.use("/podcast", podcastRoutes);
+try {
+  // Health endpoints
+  router.get("/api/rss/health", (_req, res) => 
+    res.status(200).json({ status: "ok", service: "rss-feed-creator" })
+  );
+  router.get("/api/podcast/health", (_req, res) => 
+    res.status(200).json({ status: "ok", service: "podcast" })
+  );
 
-log.info("🟩 Service routes mounted successfully");
-
-// Health check / index route
-router.get("/", (_req, res) => {
-  res.json({
-    ok: true,
-    services: SERVICES,
+  // Mount all routes
+  routeRegistry.forEach(({ path, name, routes }) => {
+    router.use(path, routes);
   });
-});
+
+  // Summary log
+  info(`🟩 Routes mounted: ${routeRegistry.length} services registered`);
+  
+} catch (err) {
+  error("💥 Route registration failed", { error: err.stack });
+  throw err;
+}
 
 export default router;

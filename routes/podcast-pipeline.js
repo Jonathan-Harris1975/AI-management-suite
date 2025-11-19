@@ -2,8 +2,9 @@
 // 🧵 Podcast Pipeline Route
 // Runs: script/orchestrate -> tts -> artwork/generate
 // ============================================================
-import log from "../utils/root-logger.js";
+
 import express from "express";
+import { info, error } from "#logger.js";
 
 const router = express.Router();
 
@@ -82,4 +83,3 @@ router.post("/podcast/pipeline", async (req, res) => {
 });
 
 export default router;
-      
