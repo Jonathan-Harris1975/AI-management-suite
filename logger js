@@ -14,7 +14,7 @@ import {
   warn as baseWarn,
   error as baseError,
   debug as baseDebug,
-} from "#logger.js";
+} from "./Pino-logger.js";
 
 function emit(levelFn, event, data = {}) {
   // Data first, event last
