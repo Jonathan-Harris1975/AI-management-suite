@@ -1,7 +1,7 @@
 // services/script/utils/fetchFeeds.js
 import Parser from "rss-parser";
 import fetch from "node-fetch";
-import { info, error } from "#logger.js";
+import { info, error, debug} from "#logger.js";
 
 const parser = new Parser();
 
@@ -45,7 +45,7 @@ export default async function fetchFeedArticles(feedUrlArg, windowDays = 7) {
   }
 
   try {
-    info("📡 Fetching RSS feed", { feedUrl });
+    debug("📡 Fetching RSS feed", { feedUrl });
     const res = await fetch(feedUrl);
     if (!res.ok) throw new Error(`Fetch failed: ${res.status} ${res.statusText}`);
     const text = await res.text();
