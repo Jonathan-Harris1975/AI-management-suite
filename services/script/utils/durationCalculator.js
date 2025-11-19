@@ -25,7 +25,7 @@ function hashCode(str) {
 }
 
 function autoSelectTargetMins(sessionIdNormalized) {
-  const seq = [30, 45, 60];
+  const seq = [25, 40, 55];
   const h = hashCode(sessionIdNormalized);
   return seq[h % seq.length];
 }
