@@ -13,7 +13,7 @@ import {
   PollyClient,
   SynthesizeSpeechCommand,
 } from "@aws-sdk/client-polly";
-import { info, error, warn } from "#logger.js";
+import { info, error, warn ,debug} from "#logger.js";
 import { putObject } from "#shared/r2-client.js";
 import pLimit from "p-limit";
 
@@ -103,7 +103,7 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
       ? `✅ Chunk ${chunkNumber} recovered (attempt ${attempt})`
       : `✅ Chunk ${chunkNumber} processed`;
 
-    info(logMessage, {
+    debug(logMessage, {
       sessionId,
       key,
       size: `${(audioBuffer.length / 1024).toFixed(1)}KB`
@@ -132,7 +132,7 @@ async function processChunkWithRetry(sessionId, chunk, chunkNumber, attempt = 1)
     if (attempt < MAX_CHUNK_RETRIES && isRetryable) {
       const delay = RETRY_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attempt - 1);
       
-      info(`Retrying chunk ${chunkNumber} in ${delay}ms`, {
+      debug(`Retrying chunk ${chunkNumber} in ${delay}ms`, {
         sessionId,
         nextAttempt: attempt + 1
       });
