@@ -1,7 +1,7 @@
 // services/artwork/routes/createArtwork.js (patched)
 import express from "express";
 import { putJson } from "#shared/r2-client.js";
-import { info, error } from "#logger.js";
+import { info, error, debug } from "#logger.js";
 
 const router = express.Router();
 
@@ -13,7 +13,7 @@ router.post("/", async (req, res) => {
 
     const key = `artwork/requests/${Date.now()}.json`;
     await putJson(bucket, key, payload);
-    info("artwork.create.stored", { bucket, key });
+    debug("artwork.create.stored", { bucket, key });
 
     res.json({ ok: true, bucket, key });
   } catch (err) {
