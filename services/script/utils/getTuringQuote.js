@@ -7,7 +7,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
-import { info, error } from "#logger.js";
+import { info, error,debug} from "#logger.js";
 
 let quotesCache = null;
 
@@ -22,7 +22,8 @@ export async function getTuringQuote() {
       return quotesCache[Math.floor(Math.random() * quotesCache.length)];
     }
 
-    info("turingQuote.load", { file: QUOTES_PATH });
+    info ("turingQuote.load")
+    debug("turingQuote.load", { file: QUOTES_PATH });
 
     // ✅ Read from local text file
     const fileData = await fs.readFile(QUOTES_PATH, "utf-8");
