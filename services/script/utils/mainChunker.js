@@ -3,7 +3,7 @@ import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { getMainPrompt } from "./promptTemplates.js";
 import { cleanTranscript } from "./textHelpers.js";
 import * as sessionCache from "./sessionCache.js";
-import { info } from "#logger.js";
+import { info ,debug} from "#logger.js";
 
 /**
  * Split array into chunks of size n (last chunk may be smaller)
@@ -28,7 +28,7 @@ export async function generateMainLongform(sessionMeta, articles, totalMainSecon
   const buffer = Math.min(180, Math.round(totalMainSeconds * 0.05));
   const perGroupSeconds = Math.max(420, Math.floor((totalMainSeconds - buffer) / groups.length));
 
-  info("script.main.chunking", {
+  debug("script.main.chunking", {
     groups: groups.length,
     perGroupSeconds,
     totalMainSeconds,
