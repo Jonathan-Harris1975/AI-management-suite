@@ -7,14 +7,14 @@
 import crypto from "crypto";
 import { XMLBuilder } from "fast-xml-parser";
 import { r2Put, r2Get } from "../../shared/utils/r2-client.js";
-import { info, error } from "#logger.js";
+import { info, error ,debug} from "#logger.js";
 
 const FEED_RETENTION_DAYS = Number(process.env.FEED_RETENTION_DAYS) || 7; // default 7 days
 
 export async function generateFeed(bucket, rewrittenItems) {
   try {
     if (!Array.isArray(rewrittenItems) || rewrittenItems.length === 0) {
-      info("rss-feed-creator.generateFeed.skip", { reason: "no items" });
+      debug("rss-feed-creator.generateFeed.skip", { reason: "no items" });
       return;
     }
 
@@ -52,7 +52,7 @@ export async function generateFeed(bucket, rewrittenItems) {
     const discardedCount = totalBeforeRetention - validItems.length;
 
     if (validItems.length === 0) {
-      info("rss-feed-creator.generateFeed.skip", { 
+      debug("rss-feed-creator.generateFeed.skip", { 
         reason: "no items within retention period",
         retentionDays: FEED_RETENTION_DAYS,
         discarded: discardedCount
@@ -103,8 +103,9 @@ export async function generateFeed(bucket, rewrittenItems) {
 
     await r2Put(bucket, "feed.xml", xmlString, "application/rss+xml");
     await r2Put(bucket, "feed.json", jsonString, "application/json");
-
-    info("rss-feed-creator.generateFeed.success", {
+    
+    info("📝 rss-feed-creator.generateFeed.success")
+    debug("📝 rss-feed-creator.generateFeed.success", {
       bucket,
       existingItems: existingItems.length,
       newItems: newItems.length,
