@@ -1,8 +1,8 @@
-import scriptLogger from "../utils/script-logger.js";
-const { info, warn, error, debug } = scriptLogger;
 // services/script/routes/compose.js
 
 import express from "express";
+import { info, error } from "#logger.js";
+
 const router = express.Router();
 
 /**
@@ -12,8 +12,7 @@ const router = express.Router();
 export async function composeEpisode({ intro, main, outro, sessionId, tone = "neutral" }) {
   try {
     const fullText = [intro, main, outro].filter(Boolean).join("\n\n");
-    info(" 📝 Composed episode")
-    debug(`🧠 Composed episode text for ${sessionId}`);
+    info(`🧠 Composed episode text for ${sessionId}`);
     return { fullText, sessionId, tone };
   } catch (err) {
     error("💥 Compose episode failed", { sessionId, error: err.message });
