@@ -10,7 +10,7 @@
 // • Provides a single exported `config` object
 // ============================================================
 
-import { info, warn } from "#logger.js";
+import { info, warn , debug} from "#logger.js";
 
 // Helper: convert numeric envs
 const toNumber = (value) => {
@@ -141,9 +141,9 @@ const ALL_ENV_VARS = [
 // Main bootstrap
 // ============================================================
 export function validateEnvironment() {
-  info("=============================================");
-  info("🧠 Environment Bootstrap");
-  info("=============================================");
+  debug("=============================================");
+  debug ("🧠 Environment Bootstrap");
+  debug ("=============================================");
 
   const missing = [];
 
@@ -154,7 +154,7 @@ export function validateEnvironment() {
     }
   }
 
-  info(`🔎 Env scan complete. Total: ${ALL_ENV_VARS.length}, Missing: ${missing.length}`);
+  info(` Env scan complete. Total: ${ALL_ENV_VARS.length}, Missing: ${missing.length}`);
 
   return true; // warn only — no crash
 }
