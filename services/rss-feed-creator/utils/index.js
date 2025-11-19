@@ -1,8 +1,7 @@
 // /services/rss-feed-creator/index.js
 import { uploadRssDataFiles } from "./bootstrap.js";
 import { runRewritePipeline } from "./rewrite-pipeline.js";
-import rssLogger from "./rss-logger.js";
-const log = (...args) => rssLogger.log(...args);
+import { log } from "#logger.js";
 
 export async function startFeedCreator() {
   log.info("rss.pipeline.start");

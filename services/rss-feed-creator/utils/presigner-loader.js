@@ -1,5 +1,4 @@
-import rssLogger from "./rss-logger.js";
-const warn = (...args) => rssLogger.warn(...args);
+import { warn } from "#logger.js";
 import {s3, R2_BUCKETS, uploadBuffer, listKeys, getObjectAsText} from "../../shared/utils/r2-client.js";
 // Fully isolated — not visible to Shiper build resolver
 export async function getSignedUrl(r2Client, bucket, key, expiresIn) {

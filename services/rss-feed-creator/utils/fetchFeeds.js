@@ -6,9 +6,7 @@
 // ============================================================
 
 import Parser from "rss-parser";
-import rssLogger from "./rss-logger.js";
-const info = (...args) => rssLogger.info(...args);
-const error = (...args) => rssLogger.error(...args);
+import { info, error } from "#logger.js";
 import { loadRotationState, saveFeedRotation } from "./feedRotationManager.js";
 import { readLocalOrR2File } from "./fileReader.js";
 
