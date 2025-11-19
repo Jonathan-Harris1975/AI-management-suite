@@ -15,7 +15,7 @@ async function run(cmd, label) {
     info(`✅ ${label} completed successfully.`);
     return true;
   } catch (err) {
-    log.error(`❌ ${label} failed: ${err.message}`);
+    error(`❌ ${label} failed: ${err.message}`);
     return false;
   }
 }
