@@ -10,7 +10,7 @@
 // ============================================================
 
 import crypto from "crypto";
-import { info, error } from "#logger.js";
+import { info, error,debug } from "#logger.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { RSS_PROMPTS } from "./rss-prompts.js";
 import { shortenUrl } from "./shortio.js";
@@ -57,7 +57,7 @@ export async function generateShortTitle(item = {}) {
       .replace(/^["']|["']$/g, "")
       .trim();
 
-    info("rss-feed-creator.shortTitle.success", {
+    debug("rss-feed-creator.shortTitle.success", {
       route: "rssShortTitle",
       shortTitle,
     });
@@ -112,7 +112,7 @@ export async function rewriteArticle(item = {}) {
     // --- 4️⃣ Generate ai-news GUID ---
     const shortGuid = `ai-news-${crypto.randomBytes(5).toString("hex")}`;
 
-    info("rss-feed-creator.model.success", {
+    debug("rss-feed-creator.model.success", {
       route: "rssRewrite",
       title: shortTitle,
       shortUrl,
