@@ -96,7 +96,7 @@ export async function orchestrateTTS(session) {
     // --------------------------
     // Start global keepalive
     // --------------------------
-    startKeepAlive("ttsProcessor", 120000);
+    startKeepAlive("ttsProcessor", 220000);
 
     // --------------------------
     // 1️⃣ Load text chunks
@@ -117,7 +117,8 @@ export async function orchestrateTTS(session) {
       throw new Error("No TTS chunks were produced.");
     }
 
-    info("🗣️ TTS complete", {
+  info("🗣️ TTS complete")
+  debug ("🗣️ TTS complete", {
       sessionId,
       count: successUrls.length,
       ms: Date.now() - t1,
@@ -133,7 +134,8 @@ export async function orchestrateTTS(session) {
       throw new Error("Merge step failed to produce output.");
     }
 
-    info("🧩 Merge complete", {
+    info("🧩 Merge complete")
+  debug("🧩 Merge complete", {
       sessionId,
       key: merged.key,
       ms: Date.now() - t2,
@@ -149,7 +151,8 @@ export async function orchestrateTTS(session) {
       throw new Error("Editing returned no audio data.");
     }
 
-    info("✂️ Editing complete", {
+  info("✂️ Editing complete")
+    debug ("✂️ Editing complete", {
       sessionId,
       bytes: editedBuffer.length,
       ms: Date.now() - t3,
@@ -165,7 +168,8 @@ export async function orchestrateTTS(session) {
       throw new Error("Mixdown step returned no audio data.");
     }
 
-    info("🎚️ Mixdown complete", {
+    info("🎚️ Mixdown complete")
+    debug ("🎚️ Mixdown complete", {
       sessionId,
       bytes: finalAudio.length,
       ms: Date.now() - t4,
@@ -182,7 +186,8 @@ export async function orchestrateTTS(session) {
       outputFile
     )}`;
 
-    info("💾 Uploaded final MP3 to R2", {
+  info("💾 Uploaded final MP3 to R2")
+    debug ("💾 Uploaded final MP3 to R2", {
       sessionId,
       key: outputFile,
       publicUrl,
