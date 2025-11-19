@@ -4,7 +4,7 @@ import { runRewritePipeline } from "./rewrite-pipeline.js";
 import { log } from "#logger.js";
 
 export async function startFeedCreator() {
-  log.info("rss.pipeline.start");
+  log.debug("rss.pipeline.start");
 
   // 1️⃣ Ensure feeds.txt + urls.txt are present in R2 before anything else
   await uploadRssDataFiles();
