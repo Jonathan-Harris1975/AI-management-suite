@@ -7,7 +7,7 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import fetch from "node-fetch";
-import { info, error, warn,debug} from "#logger.js";
+import { info, error, warn } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 
@@ -163,7 +163,7 @@ async function modularMerge(sessionId, sources) {
   let current = sources;
 
   while (current.length > 1) {
-    debug("Batch merge round", {
+    info("Batch merge round", {
       round,
       chunksRemaining: current.length,
     });

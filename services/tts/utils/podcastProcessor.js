@@ -9,7 +9,7 @@
 import fs from "fs";
 import path from "path";
 import { spawn, spawnSync } from "child_process";
-import { info, warn, error,debug} from "#logger.js";
+import { info, warn, error } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { putObject } from "#shared/r2-client.js";
 
@@ -73,7 +73,7 @@ async function verifyAudioFile(filePath, label, sessionId) {
     }
 
     const stream = probeInfo.streams[0];
-    debug(`✅ Audio file verified: ${label}`, {
+    info(`✅ Audio file verified: ${label}`, {
       sessionId,
       filePath,
       size: stats.size,
@@ -158,7 +158,7 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      debug(`⬇️ Downloading ${label} (attempt ${attempt}/${retries})`, { sessionId, url });
+      info(`⬇️ Downloading ${label} (attempt ${attempt}/${retries})`, { sessionId, url });
 
       const res = await fetch(url, {
         signal: AbortSignal.timeout(60000),
@@ -201,7 +201,7 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
           throw new Error(`File too small: ${bytesWritten} bytes`);
         }
 
-        debug(`✅ Downloaded ${label}`, { 
+        info(`✅ Downloaded ${label}`, { 
           sessionId, 
           bytes: bytesWritten, 
           expected: expectedBytes,
@@ -241,7 +241,7 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
 // STEP 1: Apply fade in/out effects
 // ============================================================
 async function applyFades(sessionId, introPath, outroPath) {
-  info("🎚️ STEP 1: Applying fade in/out effects", { sessionId });
+  info("🔧 STEP 1: Applying fade in/out effects", { sessionId });
 
   const introFadedPath = path.join(TMP_DIR, `${sessionId}_intro_faded.mp3`);
   const outroFadedPath = path.join(TMP_DIR, `${sessionId}_outro_faded.mp3`);
@@ -290,7 +290,7 @@ async function applyFades(sessionId, introPath, outroPath) {
   await verifyAudioFile(introFadedPath, "faded intro", sessionId);
   await verifyAudioFile(outroFadedPath, "faded outro", sessionId);
 
-  info("🎚️ STEP 1 complete: Fades applied", {
+  info("✅ STEP 1 complete: Fades applied", {
     sessionId,
     introFaded: introFadedPath,
     outroFaded: outroFadedPath,
@@ -309,7 +309,7 @@ async function applyAudioEffects(
   outroFadedPath,
   outputPath
 ) {
-  info("🎚️ STEP 2: Applying audio effects (concat + compression + loudnorm)", {
+  info("🔧 STEP 2: Applying audio effects (concat + compression + loudnorm)", {
     sessionId,
   });
 
@@ -348,7 +348,7 @@ async function applyAudioEffects(
   );
 
   await verifyAudioFile(outputPath, "final podcast output", sessionId);
-  info("🎚️ STEP 2 complete: Audio effects applied", { sessionId, outputPath });
+  info("✅ STEP 2 complete: Audio effects applied", { sessionId, outputPath });
 }
 
 // ============================================================

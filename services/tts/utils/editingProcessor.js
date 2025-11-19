@@ -6,7 +6,7 @@
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
-import { log,debug } from "#logger.js";
+import { log } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 
@@ -215,7 +215,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       currentInput,
       stage5Path,
       'pan=stereo|c0=c0|c1=c0',
-      "Stage 5: 🎛️ Mono → Stereo Conversion"
+      "Stage 5: 🎧 Mono → Stereo Conversion"
     );
 
     if (lastSuccessfulStage && fs.existsSync(lastSuccessfulStage)) {
