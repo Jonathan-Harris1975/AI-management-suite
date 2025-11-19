@@ -1,6 +1,6 @@
 // services/script/utils/getWeatherSummary.js
 import fetch from "node-fetch";
-import { info, error } from "#logger.js";
+import { info, error,debug} from "#logger.js";
 
 /**
  * Returns a short, temperature-free weather line such as:
@@ -31,7 +31,7 @@ export async function getWeatherSummary() {
 
     const condition = (data?.current?.condition?.text || "overcast").toLowerCase().trim();
     const summary = `${condition} in London`;
-    info("Weather summary: ${summary}");
+    debug("Weather summary: ${summary}");
     return summary;
   } catch (err) {
     error("Failed to get weather summary");
