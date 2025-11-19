@@ -22,18 +22,12 @@ import { uploadBuffer } from "#shared/r2-client.js";
 const TMP_DIR = "/tmp/tts_editing";
 const VOICE_FADE_SECONDS = 0.3; // Profile A: subtle fade in/out
 
-// ------------------------------------------------------------
-// Ensure tmp dir exists
-// ------------------------------------------------------------
 function ensureTmpDir() {
   if (!fs.existsSync(TMP_DIR)) {
     fs.mkdirSync(TMP_DIR, { recursive: true });
   }
 }
 
-// ------------------------------------------------------------
-// Helper: Run FFmpeg Stage
-// ------------------------------------------------------------
 async function runFFmpegStage(sessionId, inputPath, outputPath, filterStr, description) {
   log.info(`🎚️ Starting stage: ${description}`, { sessionId });
 
@@ -99,9 +93,6 @@ async function runFFmpegStage(sessionId, inputPath, outputPath, filterStr, descr
   });
 }
 
-// ------------------------------------------------------------
-// 🧩 Staged Editing Processor
-// ------------------------------------------------------------
 export async function editingProcessor(sessionId, inputPathObj) {
   const keepAliveId = `editingProcessor:${sessionId}`;
   startKeepAlive(keepAliveId, 25000);
@@ -136,9 +127,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
     size: stats.size,
   });
 
-  // ------------------------------------------------------------
-  // Stage file paths
-  // ------------------------------------------------------------
   const stage1Path = path.join(TMP_DIR, `${sessionId}_stage1_pitch.mp3`);
   const stage2APath = path.join(TMP_DIR, `${sessionId}_stage2A_eq_lowmid.mp3`);
   const stage2BPath = path.join(TMP_DIR, `${sessionId}_stage2B_eq_high.mp3`);
@@ -161,7 +149,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
     finalPath,
   ];
 
-  // Clean up any existing stage files
   for (const stagePath of stagePaths) {
     if (fs.existsSync(stagePath)) {
       try {
@@ -184,9 +171,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
   let lastSuccessfulStage = null;
 
   try {
-    // ------------------------------------------------------------
-    // STAGE 1: Pitch Shift (rubberband)
-    // ------------------------------------------------------------
     currentInput = await runFFmpegStage(
       sessionId,
       currentInput,
@@ -196,9 +180,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
     );
     lastSuccessfulStage = stage1Path;
 
-    // ------------------------------------------------------------
-    // STAGE 2A: EQ — Low-End + Low-Mids
-    // ------------------------------------------------------------
     const eqStage2A = [
       "equalizer=f=80:t=q:w=1.2:g=4",
       "equalizer=f=150:t=q:w=1.1:g=3.5",
@@ -218,9 +199,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
     }
     lastSuccessfulStage = stage2APath;
 
-    // ------------------------------------------------------------
-    // STAGE 2B: EQ — High-End + Presence
-    // ------------------------------------------------------------
     const eqStage2B = [
       "equalizer=f=3000:t=q:w=2.0:g=-2.5",
       "equalizer=f=6000:t=q:w=2.0:g=-3",
@@ -241,9 +219,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
     }
     lastSuccessfulStage = stage2BPath;
 
-    // ------------------------------------------------------------
-    // STAGE 3: De-Esser
-    // ------------------------------------------------------------
     currentInput = await runFFmpegStage(
       sessionId,
       currentInput,
@@ -257,9 +232,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
     }
     lastSuccessfulStage = stage3Path;
 
-    // ------------------------------------------------------------
-    // STAGE 4A: Compressor (Profile B - natural broadcast)
-    // ------------------------------------------------------------
     const compFilter =
       "acompressor=threshold=-20dB:ratio=4:attack=15:release=250:makeup=3";
 
@@ -276,9 +248,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
     }
     lastSuccessfulStage = stage4APath;
 
-    // ------------------------------------------------------------
-    // STAGE 4B: Limiter
-    // ------------------------------------------------------------
     const limitFilter = "alimiter=limit=0.95:attack=5:release=100";
 
     currentInput = await runFFmpegStage(
@@ -294,9 +263,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
     }
     lastSuccessfulStage = stage4BPath;
 
-    // ------------------------------------------------------------
-    // STAGE 5: Mono → Stereo Conversion
-    // ------------------------------------------------------------
     currentInput = await runFFmpegStage(
       sessionId,
       currentInput,
@@ -310,10 +276,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
     }
     lastSuccessfulStage = stage5Path;
 
-    // ------------------------------------------------------------
-    // STAGE 6: Subtle Fade In/Out on Voice
-    // (afade in, reverse, afade in again, reverse back)
-    // ------------------------------------------------------------
     const fadeFilter = `afade=t=in:d=${VOICE_FADE_SECONDS},areverse,afade=t=in:d=${VOICE_FADE_SECONDS},areverse`;
 
     currentInput = await runFFmpegStage(
@@ -329,9 +291,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
     }
     lastSuccessfulStage = stage6Path;
 
-    // ------------------------------------------------------------
-    // FINAL STAGE OUTPUT
-    // ------------------------------------------------------------
     fs.copyFileSync(stage6Path, finalPath);
 
     const buffer = fs.readFileSync(finalPath);
@@ -381,7 +340,6 @@ export async function editingProcessor(sessionId, inputPathObj) {
       throw fallbackErr;
     }
   } finally {
-    // Final cleanup of stage files (keep finalPath only)
     for (const stagePath of stagePaths) {
       if (stagePath !== finalPath && fs.existsSync(stagePath)) {
         try {

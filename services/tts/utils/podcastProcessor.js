@@ -19,9 +19,6 @@ import { info, warn, error, debug } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { putObject } from "#shared/r2-client.js";
 
-// ============================================================
-// Config
-// ============================================================
 const TMP_DIR = "/tmp/podcast_master";
 
 const PODCAST_INTRO_URL = process.env.PODCAST_INTRO_URL || "";
@@ -46,14 +43,11 @@ const PODCAST_FFMPEG_TIMEOUT_MS = Number(
   process.env.PODCAST_FFMPEG_TIMEOUT_MS || 5 * 60 * 1000
 );
 
-// Ensure temp dir exists
 if (!fs.existsSync(TMP_DIR)) {
   fs.mkdirSync(TMP_DIR, { recursive: true });
 }
 
-// ============================================================
-// Metadata Helper — Load, Merge, Save
-// ============================================================
+// Metadata helper
 async function updateMetaFile(sessionId, finalBuffer, finalPath, podcastUrl) {
   const cleanId = sessionId;
 
@@ -62,17 +56,15 @@ async function updateMetaFile(sessionId, finalBuffer, finalPath, podcastUrl) {
 
   let existing = {};
 
-  // Attempt to fetch existing metadata
   try {
     const res = await fetch(metaUrl);
     if (res.ok) {
       existing = await res.json();
     }
   } catch {
-    // Ignore: meta file may not exist yet
+    // meta may not exist yet
   }
 
-  // Get duration using ffprobe
   let duration = null;
   try {
     const probe = spawnSync(
@@ -91,25 +83,32 @@ async function updateMetaFile(sessionId, finalBuffer, finalPath, podcastUrl) {
     if (probe.status === 0) {
       duration = parseFloat(probe.stdout.trim());
     }
-  } catch (_) {}
+  } catch {
+    // leave duration null on error
+  }
 
   const fileSize = finalBuffer.length;
 
-  // Merge metadata
+  const baseDate =
+    existing.pubDate ||
+    existing.session?.date ||
+    existing.createdAt ||
+    new Date().toISOString();
+
+  const pubDate = new Date(baseDate).toUTCString();
+
   const updated = {
     ...existing,
     sessionId: cleanId,
-
     artUrl: `${process.env.R2_PUBLIC_BASE_URL_ART}/${cleanId}.png`,
     transcriptUrl: `${process.env.R2_PUBLIC_BASE_URL_RAW_TEXT}/${cleanId}.txt`,
     podcastUrl,
-
     duration,
     fileSize,
+    pubDate,
     updatedAt: new Date().toISOString(),
   };
 
-  // Store updated JSON
   await putObject(
     "meta",
     metaKey,
@@ -120,9 +119,6 @@ async function updateMetaFile(sessionId, finalBuffer, finalPath, podcastUrl) {
   return { metaKey, metaUrl };
 }
 
-// ============================================================
-// Utility: Verify audio file
-// ============================================================
 async function verifyAudioFile(filePath, label, sessionId) {
   try {
     const stats = await fs.promises.stat(filePath);
@@ -163,9 +159,6 @@ async function verifyAudioFile(filePath, label, sessionId) {
   }
 }
 
-// ============================================================
-// Utility: run FFmpeg with timeout
-// ============================================================
 function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const ff = spawn("ffmpeg", args);
@@ -195,9 +188,6 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
   });
 }
 
-// ============================================================
-// Download intro/outro
-// ============================================================
 async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
   let lastErr = null;
 
@@ -244,9 +234,10 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
         await fs.promises.unlink(targetPath);
       } catch {}
 
-      await new Promise((res) =>
-        setTimeout(res, 2000 * Math.pow(2, attempt - 1))
-      );
+      if (attempt < retries) {
+        const delay = 2000 * Math.pow(2, attempt - 1);
+        await new Promise((res) => setTimeout(res, delay));
+      }
     }
   }
 
@@ -255,9 +246,6 @@ async function downloadToLocal(url, targetPath, label, sessionId, retries = 3) {
   );
 }
 
-// ============================================================
-// STEP 1: Apply intro/outro fades
-// ============================================================
 async function applyFades(sessionId, introPath, outroPath) {
   const introFaded = path.join(TMP_DIR, `${sessionId}_intro_faded.mp3`);
   const outroFaded = path.join(TMP_DIR, `${sessionId}_outro_faded.mp3`);
@@ -265,14 +253,12 @@ async function applyFades(sessionId, introPath, outroPath) {
   await verifyAudioFile(introPath, "intro", sessionId);
   await verifyAudioFile(outroPath, "outro", sessionId);
 
-  // Intro fade-in
   await runFFmpeg(
     ["-y", "-i", introPath, "-af", `afade=t=in:d=${INTRO_FADE_SEC}`, introFaded],
     "fade-intro",
     sessionId
   );
 
-  // Outro fade-out (reverse trick)
   await runFFmpeg(
     [
       "-y",
@@ -289,9 +275,6 @@ async function applyFades(sessionId, introPath, outroPath) {
   return { introFaded, outroFaded };
 }
 
-// ============================================================
-// STEP 2: Concat + compression + loudnorm
-// ============================================================
 async function applyAudioEffects(sessionId, introFaded, mainPath, outroFaded, outputPath) {
   await verifyAudioFile(introFaded, "faded intro", sessionId);
   await verifyAudioFile(mainPath, "main", sessionId);
@@ -326,9 +309,6 @@ async function applyAudioEffects(sessionId, introFaded, mainPath, outroFaded, ou
   await verifyAudioFile(outputPath, "final output", sessionId);
 }
 
-// ============================================================
-// Orchestrator
-// ============================================================
 async function runPodcastPipeline(
   sessionId,
   introPath,
@@ -355,9 +335,6 @@ async function runPodcastPipeline(
   );
 }
 
-// ============================================================
-// Cleanup
-// ============================================================
 async function cleanupTempFiles(sessionId) {
   try {
     const files = await fs.promises.readdir(TMP_DIR);
@@ -376,9 +353,6 @@ async function cleanupTempFiles(sessionId) {
   }
 }
 
-// ============================================================
-// MAIN: podcastProcessor
-// ============================================================
 export async function podcastProcessor(sessionId, editedBuffer) {
   const keepAliveId = `podcastProcessor:${sessionId}`;
 
@@ -455,9 +429,6 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
     await cleanupTempFiles(sessionId);
 
-    // ============================================
-    // 📤 Upload final podcast to R2 (bucket: podcast)
-    // ============================================
     const podcastKey = `${sessionId}_podcast.mp3`;
     const podcastUrl = `${process.env.R2_PUBLIC_BASE_URL_PODCAST}/${podcastKey}`;
 
@@ -480,9 +451,6 @@ export async function podcastProcessor(sessionId, editedBuffer) {
       return finalBuffer;
     }
 
-    // ============================================
-    // 📘 Update metadata file in R2 (bucket: meta)
-    // ============================================
     try {
       const { metaKey, metaUrl } = await updateMetaFile(
         sessionId,
@@ -520,4 +488,4 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
     throw err;
   }
-    }
+}
