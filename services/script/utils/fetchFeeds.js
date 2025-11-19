@@ -79,7 +79,7 @@ export default async function fetchFeedArticles(feedUrlArg, windowDays = 7) {
       .map(item => ({ ...item, score: calculateArticleScore(item) }))
       .sort((a, b) => b.score - a.score);
 
-    info(`✅ Parsed ${scoredItems.length} items from feed (last ${windowDays} days).`, { feedUrl });
+    debug(`✅ Parsed ${scoredItems.length} items from feed (last ${windowDays} days).`, { feedUrl });
     return { items: scoredItems, feedUrl };
   } catch (err) {
     error("❌ Error fetching or parsing RSS feed", { message: err.message, feedUrl });
