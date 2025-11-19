@@ -64,6 +64,14 @@ if (!loggerInstance) {
 const log = loggerInstance;
 
 // Wrapper functions with proper msg parameter
+
+// Route debug logging (hidden unless DEBUG_ROUTES=true)
+const isDebugRoutes = process.env.DEBUG_ROUTES === "true";
+export function safeRouteLog(obj = {}) {
+  if (!isDebugRoutes) return;
+  log.info(obj, "debug.route");
+}
+
 export const info = (msg, obj = {}) => log.info(obj, msg);
 export const warn = (msg, obj = {}) => log.warn(obj, msg);
 export const error = (msg, obj = {}) => log.error(obj, msg);
