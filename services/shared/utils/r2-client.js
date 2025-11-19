@@ -18,7 +18,7 @@ import {
   DeleteObjectCommand,
   HeadObjectCommand,
 } from "@aws-sdk/client-s3";
-import {info } from "#logger.js";
+import {info ,warn,debug} from "#logger.js";
 
 // ------------------------------------------------------------
 // 🔧 Environment Variables
@@ -190,7 +190,7 @@ async function verifyUploadedObject(bucket, bucketKey, key, expectedSize, expect
     const actualType = head.ContentType || "unknown";
 
     if (actualSize !== expectedSize) {
-      log.warn("r2.verify.size-mismatch", {
+      warn("r2.verify.size-mismatch", {
         bucket,
         bucketKey,
         key,
@@ -200,7 +200,7 @@ async function verifyUploadedObject(bucket, bucketKey, key, expectedSize, expect
     }
 
     if (expectedContentType && actualType !== expectedContentType) {
-      log.warn("r2.verify.content-type-mismatch", {
+      warn("r2.verify.content-type-mismatch", {
         bucket,
         bucketKey,
         key,
@@ -210,7 +210,7 @@ async function verifyUploadedObject(bucket, bucketKey, key, expectedSize, expect
     }
 
     if (DEBUG_MODE) {
-      log.info("r2.verify.success", {
+      debug ("r2.verify.success", {
         bucket,
         bucketKey,
         key,
@@ -219,7 +219,7 @@ async function verifyUploadedObject(bucket, bucketKey, key, expectedSize, expect
       });
     }
   } catch (err) {
-    log.warn("r2.verify.failed", {
+    warn("r2.verify.failed", {
       bucket,
       bucketKey,
       key,
