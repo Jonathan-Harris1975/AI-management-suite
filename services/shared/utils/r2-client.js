@@ -18,7 +18,7 @@ import {
   DeleteObjectCommand,
   HeadObjectCommand,
 } from "@aws-sdk/client-s3";
-import { log } from "#logger.js";
+import {info } from "#logger.js";
 
 // ------------------------------------------------------------
 // 🔧 Environment Variables
