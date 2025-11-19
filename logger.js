@@ -23,6 +23,12 @@ if (!loggerInstance) {
           return rest;
         },
       },
+      serializers: {
+        // Custom serializer to replace "msg": with ▫️
+        msg: (value) => value,
+      },
+      // Custom message key
+      messageKey: "▫️",
     });
   } else {
     loggerInstance = pino({
@@ -35,16 +41,21 @@ if (!loggerInstance) {
           colorize: true,
           singleLine: false,
           translateTime: "SYS:standard",
-          ignore: "pid,hostname,msg",
+          ignore: "pid,hostname",
+          messageKey: "▫️",
         },
       },
       formatters: {
         log: (obj) => {
-          // Development: also exclude msg from output
+          // Development: keep the message but with custom key
           const { msg, ...rest } = obj;
+          if (msg !== undefined) {
+            return { "▫️": msg, ...rest };
+          }
           return rest;
         },
       },
+      messageKey: "▫️",
     });
   }
 
