@@ -1,4 +1,4 @@
-import { info, error } from "#logger.js";
+import { info, error, debug } from "#logger.js";
 import { generateIntro, generateMain, generateOutro } from "../utils/models.js";
 import { composeEpisode } from "../routes/composeScript.js";
 import { uploadText } from "#shared/r2-client.js";
@@ -10,7 +10,7 @@ import { generateEpisodeMetaLLM } from "../utils/podcastHelper.js";
 // ------------------------------------------------------------
 export async function orchestrateScript(sessionId) {
   const sid = sessionId || `TT-${Date.now()}`;
-  info("🧠 Orchestrate Script: start", { sessionId: sid });
+  debug("🧠 Orchestrate Script: start", { sessionId: sid });
 
   try {
     // Step 1: Generate intro, main content, and outro
@@ -43,7 +43,8 @@ export async function orchestrateScript(sessionId) {
     }
 
     // Step 6: Log success and return structured result
-    info("✅ Script orchestration complete", { sessionId: sid });
+    info("✅ Script orchestration complete")
+    debug("✅ Script orchestration complete", { sessionId: sid });
     return { ...composed, fullText, chunks: uploadedChunks, metadata: meta || {} };
   } catch (err) {
     error("💥 Script orchestration failed", { sessionId: sid, error: err?.message, stack: err?.stack });
