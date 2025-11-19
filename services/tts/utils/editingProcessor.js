@@ -215,7 +215,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       currentInput,
       stage5Path,
       'pan=stereo|c0=c0|c1=c0',
-      "Stage 5: 🎧 Mono → Stereo Conversion"
+      "Stage 5:🔊  Mono → Stereo Conversion"
     );
 
     if (lastSuccessfulStage && fs.existsSync(lastSuccessfulStage)) {
@@ -233,7 +233,8 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
     await uploadBuffer("editedAudio", key, buffer, "audio/mpeg");
 
-    log.info("💾 Uploaded edited MP3 to R2 (Podcast-Ready)", { 
+    log.info("💾 Uploaded edited MP3 to R2 ")
+    log.debug("💾 Uploaded edited MP3 to R2 ", { 
       sessionId, 
       key, 
       size: buffer.length 
