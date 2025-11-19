@@ -1,49 +1,54 @@
 /**
  * rewrite.js
  * Handles POST /rss/rewrite — fetches, rewrites, and regenerates the RSS feed.
- * Returns 200 with a short JSON payload; detailed progress is logged centrally.
  */
 
 import express from "express";
 import { endToEndRewrite } from "../rewrite-pipeline.js";
-import rssLogger from "../utils/rss-logger.js";
+import { getObjectAsText } from "../../shared/utils/r2-client.js";
+import { info, error } from "#logger.js";
 
 const router = express.Router();
 
 router.post("/rewrite", async (req, res) => {
-  const runIdFromBody = req.body?.runId;
-  const runId = rssLogger.startRun(runIdFromBody);
-
-  rssLogger.info(`RSS rewrite route triggered (runId: ${runId}).`);
-  rssLogger.stageStart("pipeline", "Running RSS end-to-end rewrite pipeline.");
-
   try {
-    const result = await endToEndRewrite();
-    rssLogger.stageEnd("pipeline", "RSS rewrite pipeline finished.");
+    info("rewrite.route.start");
 
-    const extra = {};
-    if (result && typeof result === "object") {
-      if ("totalItems" in result) extra.totalItems = result.totalItems;
-      if ("rewrittenItems" in result) extra.rewrittenItems = result.rewrittenItems;
+    const bucket = process.env.R2_BUCKET_RSS_FEEDS || "rss-feeds";
+    const key = "data/rss-feeds.txt";
+
+    // Load RSS feed list from R2 if cache is empty
+    if (!globalThis.__latestFetchedItems || !globalThis.__latestFetchedItems.length) {
+      info("rewrite.route.loading.feeds", { bucket, key });
+      const feedText = await getObjectAsText(bucket, key);
+      if (!feedText) throw new Error("rss-feeds.txt missing in R2");
+      const urls = feedText
+        .split("\n")
+        .map((u) => u.trim())
+        .filter((u) => u.length);
+      globalThis.__latestFetchedItems = urls.map((u) => ({
+        title: `Placeholder from ${u}`,
+        link: u,
+        guid: u,
+        pubDate: new Date().toUTCString(),
+        summary: "Fetched placeholder awaiting rewrite",
+      }));
+      info("rewrite.route.loaded.urls", { count: urls.length });
     }
-    rssLogger.endRun(extra);
 
-    res.status(200).json({
+    // Execute rewrite pipeline
+    const result = await endToEndRewrite();
+
+    info("rewrite.route.complete", { result });
+
+    res.json({
       status: "ok",
-      route: "rss/rewrite",
-      runId,
-      message: "RSS rewrite process completed. Logs will show the full pipeline progress.",
-      result,
+      message: "RSS rewrite process triggered successfully",
+      itemsProcessed: result?.rewrittenItems?.length || 0,
     });
   } catch (err) {
-    rssLogger.runError(err);
-    res.status(500).json({
-      status: "error",
-      route: "rss/rewrite",
-      runId,
-      message: "RSS rewrite process failed. Check logs for details.",
-      error: err?.message || String(err),
-    });
+    error("rewrite.route.error", err);
+    res.status(500).json({ error: err.message || "Rewrite route failed" });
   }
 });
 
