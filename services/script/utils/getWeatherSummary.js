@@ -1,6 +1,6 @@
 // services/script/utils/getWeatherSummary.js
 import fetch from "node-fetch";
-import { info, error } from "#logger.js";
+import { info, error , debug} from "#logger.js";
 
 /**
  * Returns a short, temperature-free weather line such as:
@@ -16,7 +16,7 @@ export async function getWeatherSummary() {
     if (!apiKey) throw new Error("Missing RAPIDAPI_KEY");
 
     const url = `https://${apiHost}/current.json?q=${encodeURIComponent(location)}`;
-    info("Fetching weather data");
+    debug("Fetching weather data");
 
     const res = await fetch(url, {
       method: "GET",
@@ -31,7 +31,8 @@ export async function getWeatherSummary() {
 
     const condition = (data?.current?.condition?.text || "overcast").toLowerCase().trim();
     const summary = `${condition} in London`;
-    info("Weather summary: ${summary}");
+    info("🌤️ Weather summary fetch successfully');
+    debug("Weather summary: ${summary}");
     return summary;
   } catch (err) {
     error("Failed to get weather summary");
