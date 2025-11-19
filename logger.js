@@ -18,16 +18,16 @@ if (!loggerInstance) {
         level: () => ({}),
         bindings: () => ({}),
         log: (obj) => {
-          // Production: return only custom fields, exclude msg
-          const { msg, ...rest } = obj;
+          // Production: keep message with custom key
+          const { "▫️": msg, ...rest } = obj;
+          if (msg !== undefined) {
+            return { "▫️": msg, ...rest };
+          }
           return rest;
         },
       },
-      serializers: {
-        // Custom serializer to replace "msg": with ▫️
-        msg: (value) => value,
-      },
-    
+      // Custom message key
+      messageKey: "▫️",
     });
   } else {
     loggerInstance = pino({
@@ -41,7 +41,7 @@ if (!loggerInstance) {
           singleLine: false,
           translateTime: "SYS:standard",
           ignore: "pid,hostname",
-          
+          messageKey: "▫️",
         },
       },
       formatters: {
@@ -54,7 +54,7 @@ if (!loggerInstance) {
           return rest;
         },
       },
-      
+      messageKey: "▫️",
     });
   }
 
