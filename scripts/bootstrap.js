@@ -1,36 +1,42 @@
+// ============================================================
+// 🧠 AI Podcast Suite — Bootstrap Sequence
+// ============================================================
+// Ensures all RSS feed data and R2 text assets are initialized
+// before the web server starts.
+// ============================================================
+
 import { execSync } from "child_process";
-import log from "../utils/root-logger.js";
+import { log,info} from "#logger.js";
 
 async function run(cmd, label) {
   try {
-    log.info(`Starting: ${label}`);
+    info(`🚀 Running ${label}...`);
     execSync(cmd, { stdio: "inherit" });
-    log.info(`Completed: ${label}`);
+    info(`✅ ${label} completed successfully.`);
   } catch (err) {
-    log.error(`Failed: ${label}`, { 
-      command: cmd,
-      error: err.message 
-    });
-    throw err; // Re-throw to stop bootstrap on failure
+    log.error(`❌ ${label} failed: ${err.message}`);
   }
 }
 
 (async () => {
-  const startTime = Date.now();
-  log.info("🟧 Bootstrap sequence initiated");
-  log.debug("🟧 Bootstrap sequence initiated");
-  try {
-    await run("node ./scripts/envBootstrap.js", "Environment Bootstrap");
-    await run("node ./services/rss-feed-creator/startup/rss-init.js", "RSS Initialization");
-    await run("node ./scripts/startupCheck.js", "Startup Health Check");
-    await run("node ./scripts/tempStorage.js", "R2 Storage Check");
-    await run("node ./server.js", "Server Start");
+  info('🧩 Starting AI Podcast Suite bootstrap sequence...');
+  info('---------------------------------------------');
 
-    const duration = Date.now() - startTime;
-    log.debug("🟩 Bootstrap sequence completed", { durationMs: duration });
-    log.info("🟩 Bootstrap completed");
-  } catch (err) {
-    log.error("🔴 Bootstrap sequence failed", { error: err.message });
-    process.exit(1);
-  }
+  // 1️⃣ Load and validate environment variables
+  await run("node ./scripts/envBootstrap.js", "Environment Bootstrap");
+
+  // 2️⃣ Initialize RSS feed data into R2 (critical)
+  await run("node ./services/rss-feed-creator/startup/rss-init.js", "RSS Init");
+
+  // 3️⃣ Perform runtime sanity checks
+  await run("node ./scripts/startupCheck.js", "Startup Check");
+
+  // 4️⃣ Validate temp storage + Cloudflare R2 connectivity
+  await run("node ./scripts/tempStorage.js", "R2 Check");
+
+  // 5️⃣ Launch the main web server
+  await run("node ./server.js", "Start Server");
+
+  info('---------------------------------------------');
+  info( '🏁 Bootstrap complete — container entering idle mode.');
 })();
