@@ -272,7 +272,7 @@ export async function uploadBuffer(
 
       const durationMs = Date.now() - startedAt;
 
-      log.info("r2.upload.success", {
+      info("r2.upload.success", {
         bucket,
         bucketKey,
         key,
@@ -292,7 +292,7 @@ export async function uploadBuffer(
 
       const durationMs = Date.now() - startedAt;
 
-      log.warn("r2.upload.retry", {
+      warn("r2.upload.retry", {
         bucket,
         bucketKey,
         key,
@@ -325,7 +325,7 @@ export async function uploadBuffer(
     }
   }
 
-  log.error("r2.upload.failed", {
+  error("r2.upload.failed", {
     bucket,
     bucketKey,
     key,
@@ -400,7 +400,7 @@ export async function deleteObject(bucketKey, key) {
 // ------------------------------------------------------------
 // 🧾 Startup Log
 // ------------------------------------------------------------
-log.info("r2-client.initialized", {
+info("r2-client.initialized", {
   endpoint: R2_ENDPOINT,
   region: R2_REGION || "auto",
   debug: DEBUG_MODE,
