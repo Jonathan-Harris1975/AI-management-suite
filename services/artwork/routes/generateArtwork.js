@@ -1,5 +1,3 @@
-import logger from "../service-logger.js";
-const { info, warn, error, debug } = logger;
 // ============================================================
 // 🎨 Artwork Generator — Express Route + Function Export
 // ============================================================
@@ -7,6 +5,7 @@ const { info, warn, error, debug } = logger;
 import express from "express";
 import fetch from "node-fetch";
 import { putObject } from "#shared/r2-client.js";
+import { info, error } from "#logger.js";
 
 const router = express.Router();
 
