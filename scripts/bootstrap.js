@@ -42,7 +42,7 @@ async function run(cmd, label) {
     // 4️⃣ Validate temp storage + Cloudflare R2 connectivity
     const storageSuccess = await run("node ./scripts/tempStorage.js", "R2 Check");
     if (!storageSuccess) {
-      log.error("⚠️  Storage check failed, but continuing...");
+      error("⚠️  Storage check failed, but continuing...");
     }
 
     // 5️⃣ Launch the main web server
