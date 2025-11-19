@@ -26,7 +26,7 @@ export function loadList(file) {
       }
     }
 
-    log.info(
+    log.debug(
       { file, count: urls.length },
       `📖 Loaded ${urls.length} valid entries from ${file}`
     );
