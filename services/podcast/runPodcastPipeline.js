@@ -10,7 +10,7 @@ import { createPodcastArtwork } from "../artwork/createPodcastArtwork.js";
 import { uploadText } from "#shared/r2-client.js";
 
 export async function runPodcastPipeline(sessionId) {
-  log.info("🎧 Starting AI Podcast Pipeline...", { sessionId });
+  log.debug("🎧 Starting AI Podcast Pipeline...", { sessionId });
 
   try {
     // 1️⃣ Script
