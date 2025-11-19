@@ -1,5 +1,3 @@
-import scriptLogger from "./script-logger.js";
-const { info, warn, error, debug } = scriptLogger;
 // ============================================================
 // ⏱️ Duration Calculator (Automatic Episode Length Rotation)
 // ============================================================

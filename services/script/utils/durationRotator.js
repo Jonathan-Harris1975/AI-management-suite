@@ -1,5 +1,5 @@
-import scriptLogger from "./script-logger.js";
-const { info, warn, error, debug } = scriptLogger;
+import { info } from "#logger.js";
+
 // ============================================================
 // 🔄 Duration Rotator (Auto-Normalizing per Episode)
 // ============================================================

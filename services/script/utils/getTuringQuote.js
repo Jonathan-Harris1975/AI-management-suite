@@ -1,5 +1,3 @@
-import scriptLogger from "./script-logger.js";
-const { info, warn, error, debug } = scriptLogger;
 // services/script/utils/getTuringQuote.js
 /**
  * Retrieves a random Alan Turing quote from the local data file.
@@ -9,6 +7,8 @@ const { info, warn, error, debug } = scriptLogger;
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
+import { info, error } from "#logger.js";
+
 let quotesCache = null;
 
 // Resolve the file location regardless of where it's imported from
@@ -22,8 +22,8 @@ export async function getTuringQuote() {
       return quotesCache[Math.floor(Math.random() * quotesCache.length)];
     }
 
-    debug ("turingQuote.load", { file: QUOTES_PATH });
-    info("📃 turingQuote.load")
+    info("turingQuote.load", { file: QUOTES_PATH });
+
     // ✅ Read from local text file
     const fileData = await fs.readFile(QUOTES_PATH, "utf-8");
 

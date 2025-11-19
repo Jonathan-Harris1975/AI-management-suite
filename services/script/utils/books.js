@@ -1,5 +1,3 @@
-import scriptLogger from "./script-logger.js";
-const { info, warn, error, debug } = scriptLogger;
 import { createRequire } from 'module';
 import { warn, error } from '#logger.js';
 import path from 'path';

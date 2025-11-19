@@ -1,5 +1,4 @@
-import scriptLogger from "./script-logger.js";
-const { info, warn, error, debug } = scriptLogger;
+import { warn, info, error } from "#logger.js";
 // services/script/utils/getSponsor.js
 import fs from "fs";
 import path from "path";
@@ -37,8 +36,7 @@ export default function getSponsor() {
     }
 
     const randomBook = books[Math.floor(Math.random() * books.length)];
-    info("📘 Selected sponsor"),
-    debug(`📘 Selected sponsor: ${randomBook.title}`);
+    info(`📘 Selected sponsor: ${randomBook.title}`);
     return randomBook;
   } catch (err) {
     error("❌ getSponsor() failed", { error: err });

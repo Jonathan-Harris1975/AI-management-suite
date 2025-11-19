@@ -1,11 +1,10 @@
-import scriptLogger from "./script-logger.js";
-const { info, warn, error, debug } = scriptLogger;
 // services/script/utils/podcastHelper.js  
 // LLM-driven metadata generation for the podcast: title, description, SEO keywords, and artwork prompt (cached only).
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { putJson } from "../../shared/utils/r2-client.js"; // kept for future use if needed
 import * as sessionCache from "./sessionCache.js";
+import { info, error } from "#logger.js";
 import { extractMainContent } from "./textHelpers.js";
 
 /* -----------------------------------------------------------
@@ -467,9 +466,9 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
     episodeNumber,
     createdAt: new Date().toISOString(),
   };
-info("🔗 meta.generation.complete")
+
   // Single comprehensive summary log
-  debug("🔗 meta.generation.complete", {
+  info("🔗 meta.generation.complete", {
     sessionId: id,
     episodeNumber,
     mainExtract: opStatus.mainExtract.success ? "success" : "fallback",

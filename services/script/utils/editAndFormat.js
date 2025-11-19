@@ -1,5 +1,3 @@
-import scriptLogger from "./script-logger.js";
-const { info, warn, error, debug } = scriptLogger;
 
 // A small helper to add subtle random bias in word choice / punctuation
 function humanizeText(text) {
