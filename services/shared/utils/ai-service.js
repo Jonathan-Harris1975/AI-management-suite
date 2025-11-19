@@ -218,7 +218,7 @@ export async function resilientRequest(
 
     // per-call log
     try {
-      debug"ai.route.model", {
+      info"ai.route.model", {
         routeName,
         routeKey,
         provider: providerId,
