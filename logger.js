@@ -8,7 +8,7 @@ const transport = pino.transport({
     colorize: true,
     singleLine: true,
     ignore: "pid,hostname,time,level",
-    messageKey: "🔎", // pino-pretty prints only this emoji-keyed content
+    messageKey: "▫️", // pino-pretty prints only this emoji-keyed content
   },
 });
 
@@ -17,7 +17,7 @@ const instance = pino(
     level: process.env.LOG_LEVEL || "info",
     base: null,
     timestamp: false,
-    messageKey: "🔎", // Use emoji as the actual printed field; no label shown
+    messageKey: "▫️", // Use emoji as the actual printed field; no label shown
     formatters: {
       level() {
         return {}; // hide level data entirely
@@ -49,15 +49,16 @@ function write(level, event, data) {
       : {};
 
   // pino will print "🔎" content directly with no field name
-  instance[level]({ "🔎": messageContent, ...meta });
+  log[level]({ "▫️": messageContent, ...meta });
 }
 
 // ---------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------
-export const info = (event, data) => write("info", event, data);
-export const warn = (event, data) => write("warn", event, data);
-export const error = (event, data) => write("error", event, data);
-export const debug = (event, data) => write("debug", event, data);
-
-export default instance;
+export const info = (msg, obj = {}) => log.info(obj, msg);
+export const warn = (msg, obj = {}) => log.warn(obj, msg);
+export const error = (msg, obj = {}) => log.error(obj, msg);
+export const debug = (msg, obj = {}) => log.debug(obj, msg);
+export const success = (msg, obj = {}) => log.success(obj, msg);
+export { log };
+export default log;
