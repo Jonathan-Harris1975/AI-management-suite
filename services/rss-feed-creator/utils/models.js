@@ -172,7 +172,7 @@ export async function rewriteRssFeedItems(feedItems = []) {
     }
   }
 
-  info("rss-feed-creator.model.batch.complete", {
+  debug("rss-feed-creator.model.batch.complete", {
     totalItems: feedItems.length,
     rewrittenItems: results.length,
   });
