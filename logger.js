@@ -8,7 +8,7 @@ const transport = pino.transport({
     colorize: true,
     singleLine: false,
     ignore: "pid,hostname,time,level",
-    messageKey: "message", // pino-pretty prints only this
+    messageKey: "msg", // Changed from "message" to "msg" (pino's default)
   },
 });
 
@@ -17,7 +17,7 @@ const instance = pino(
     level: process.env.LOG_LEVEL || "info",
     base: null,
     timestamp: false,
-    messageKey: "message", // actual printed field; no label shown
+    messageKey: "msg", // Changed from "message" to "msg" (pino's default)
     formatters: {
       level() {
         return {}; // hide level data entirely
@@ -48,8 +48,8 @@ function write(level, event, data) {
       ? { value: String(data) }
       : {};
 
-  // pino will print "message" content directly with no field name
-  instance[level]({ message: messageContent, ...meta });
+  // Use "msg" instead of "message" to match pino's conventions
+  instance[level]({ msg: messageContent, ...meta });
 }
 
 // ---------------------------------------------------------------------
@@ -59,6 +59,6 @@ export const info = (event, data) => write("info", event, data);
 export const warn = (event, data) => write("warn", event, data);
 export const error = (event, data) => write("error", event, data);
 export const debug = (event, data) => write("debug", event, data);
-export const log = (event, data) => write("log", event, data);
+// Removed the log export as pino doesn't have a "log" level method
 
 export default instance;
