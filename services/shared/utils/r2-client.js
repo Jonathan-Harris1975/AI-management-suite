@@ -1,6 +1,14 @@
-// r2-client.js — fixed logging, correct signature usage, minimal + consistent
+// ============================================================
+// ☁️ Cloudflare R2 Client — Unified + Updated With New Buckets
+// ============================================================
+//
+// Now includes:
+//   • R2_BUCKET_EDITED_AUDIO
+//   • R2_PUBLIC_BASE_URL_EDITED_AUDIO
+//   • Correct dual RSS bucket handling (newsletter feed vs podcast feed)
+//   • Backwards-compatible aliases for all services
+// ============================================================
 
-import log from "../../../utils/root-logger.js";
 import {
   S3Client,
   PutObjectCommand,
@@ -8,11 +16,13 @@ import {
   ListObjectsV2Command,
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
+import { log } from "#logger.js";
 
 // ------------------------------------------------------------
 // 🔧 Environment Variables
 // ------------------------------------------------------------
 const {
+  // Core creds
   R2_ACCESS_KEY_ID,
   R2_SECRET_ACCESS_KEY,
   R2_ENDPOINT,
@@ -20,19 +30,20 @@ const {
 
   // Buckets
   R2_BUCKET_PODCAST,
-  R2_BUCKET_RAW,
   R2_BUCKET_RAW_TEXT,
   R2_BUCKET_META,
   R2_BUCKET_MERGED,
   R2_BUCKET_ART,
-  R2_BUCKET_RSS_FEEDS,
-  R2_BUCKET_PODCAST_RSS_FEEDS,
+  R2_BUCKET_RSS_FEEDS,            // newsletter feed
+  R2_BUCKET_PODCAST_RSS_FEEDS,    // podcast-specific RSS feed
   R2_BUCKET_TRANSCRIPTS,
   R2_BUCKET_CHUNKS,
 
+  // Newly added
+  R2_BUCKET_EDITED_AUDIO,
+
   // Public URLs
   R2_PUBLIC_BASE_URL_PODCAST,
-  R2_PUBLIC_BASE_URL_RAW,
   R2_PUBLIC_BASE_URL_RAW_TEXT,
   R2_PUBLIC_BASE_URL_META,
   R2_PUBLIC_BASE_URL_MERGE,
@@ -40,6 +51,10 @@ const {
   R2_PUBLIC_BASE_URL_RSS,
   R2_PUBLIC_BASE_URL_TRANSCRIPT,
   R2_PUBLIC_BASE_URL_CHUNKS,
+
+  // Newly added
+  R2_PUBLIC_BASE_URL_EDITED_AUDIO,
+
 } = process.env;
 
 // ------------------------------------------------------------
@@ -55,49 +70,58 @@ export const s3 = new S3Client({
 });
 
 // ------------------------------------------------------------
-// 🪣 Bucket Aliases
+// 🪣 Bucket Aliases (all services unify on these keys)
 // ------------------------------------------------------------
 export const R2_BUCKETS = {
-  podcast: R2_BUCKET_PODCAST,
-  raw: R2_BUCKET_RAW,
-  rawtext: R2_BUCKET_RAW_TEXT,
-  rawText: R2_BUCKET_RAW_TEXT,
-  "raw-text": R2_BUCKET_RAW_TEXT,
-  meta: R2_BUCKET_META,
-  merged: R2_BUCKET_MERGED,
-  art: R2_BUCKET_ART,
+  podcast:         R2_BUCKET_PODCAST,
+  rawtext:         R2_BUCKET_RAW_TEXT,
+  rawText:         R2_BUCKET_RAW_TEXT,
+  "raw-text":      R2_BUCKET_RAW_TEXT,
+  meta:            R2_BUCKET_META,
+  merged:          R2_BUCKET_MERGED,
+  art:             R2_BUCKET_ART,
 
-  // Chunks
-  chunks: R2_BUCKET_CHUNKS || "podcast-chunks",
-  "podcast-chunks": R2_BUCKET_CHUNKS || "podcast-chunks",
+  chunks:          R2_BUCKET_CHUNKS,
+  "podcast-chunks":R2_BUCKET_CHUNKS,
 
-  // RSS
-  rss: R2_BUCKET_RSS_FEEDS || R2_BUCKET_PODCAST_RSS_FEEDS || "rss-feeds",
-  "rss-feeds": R2_BUCKET_RSS_FEEDS || "rss-feeds",
-  podcastRss: R2_BUCKET_PODCAST_RSS_FEEDS || R2_BUCKET_RSS_FEEDS || "rss-feeds",
-  rssfeeds: R2_BUCKET_RSS_FEEDS || "rss-feeds",
+  // Newsletter RSS feed
+  rss:             R2_BUCKET_RSS_FEEDS,
+  "rss-feeds":     R2_BUCKET_RSS_FEEDS,
+  rssfeeds:        R2_BUCKET_RSS_FEEDS,
+
+  // Podcast-specific RSS feed
+  podcastRss:      R2_BUCKET_PODCAST_RSS_FEEDS,
 
   // Transcripts
-  transcripts: R2_BUCKET_TRANSCRIPTS,
-  transcript: R2_BUCKET_TRANSCRIPTS,
+  transcripts:     R2_BUCKET_TRANSCRIPTS,
+  transcript:      R2_BUCKET_TRANSCRIPTS,
+
+  // NEW — final edited mastered audio
+  edited:          R2_BUCKET_EDITED_AUDIO,
+  editedAudio:     R2_BUCKET_EDITED_AUDIO,
+  "edited-audio":  R2_BUCKET_EDITED_AUDIO,
 };
 
 // ------------------------------------------------------------
 // 🌍 Public URL Aliases
 // ------------------------------------------------------------
 export const R2_PUBLIC_URLS = {
-  podcast: R2_PUBLIC_BASE_URL_PODCAST,
-  raw: R2_PUBLIC_BASE_URL_RAW,
-  rawtext: R2_PUBLIC_BASE_URL_RAW_TEXT,
-  rawText: R2_PUBLIC_BASE_URL_RAW_TEXT,
-  "raw-text": R2_PUBLIC_BASE_URL_RAW_TEXT,
-  meta: R2_PUBLIC_BASE_URL_META,
-  merged: R2_PUBLIC_BASE_URL_MERGE,
-  art: R2_PUBLIC_BASE_URL_ART,
-  rss: R2_PUBLIC_BASE_URL_RSS,
-  transcript: R2_PUBLIC_BASE_URL_TRANSCRIPT,
-  chunks: R2_PUBLIC_BASE_URL_CHUNKS,
-  "podcast-chunks": R2_PUBLIC_BASE_URL_CHUNKS,
+  podcast:         R2_PUBLIC_BASE_URL_PODCAST,
+  rawtext:         R2_PUBLIC_BASE_URL_RAW_TEXT,
+  rawText:         R2_PUBLIC_BASE_URL_RAW_TEXT,
+  "raw-text":      R2_PUBLIC_BASE_URL_RAW_TEXT,
+  meta:            R2_PUBLIC_BASE_URL_META,
+  merged:          R2_PUBLIC_BASE_URL_MERGE,
+  art:             R2_PUBLIC_BASE_URL_ART,
+  rss:             R2_PUBLIC_BASE_URL_RSS,
+  transcript:      R2_PUBLIC_BASE_URL_TRANSCRIPT,
+  chunks:          R2_PUBLIC_BASE_URL_CHUNKS,
+  "podcast-chunks":R2_PUBLIC_BASE_URL_CHUNKS,
+
+  // NEW — edited/mastered audio
+  edited:          R2_PUBLIC_BASE_URL_EDITED_AUDIO,
+  editedAudio:     R2_PUBLIC_BASE_URL_EDITED_AUDIO,
+  "edited-audio":  R2_PUBLIC_BASE_URL_EDITED_AUDIO,
 };
 
 // ------------------------------------------------------------
@@ -113,10 +137,11 @@ export function ensureBucketKey(bucketKey) {
 }
 
 // ------------------------------------------------------------
-// ⚙️ Core Upload / Download
+// ⚙️ Upload / Download
 // ------------------------------------------------------------
 export async function uploadBuffer(bucketKey, key, buffer, contentType = "application/octet-stream") {
   const bucket = ensureBucketKey(bucketKey);
+
   await s3.send(
     new PutObjectCommand({
       Bucket: bucket,
@@ -126,7 +151,12 @@ export async function uploadBuffer(bucketKey, key, buffer, contentType = "applic
     })
   );
 
-  return `${R2_PUBLIC_URLS[bucketKey]}/${encodeURIComponent(key)}`;
+  const base = R2_PUBLIC_URLS[bucketKey];
+  if (!base) {
+    throw new Error(`❌ No public URL configured for R2 bucket alias '${bucketKey}'`);
+  }
+
+  return `${base}/${encodeURIComponent(key)}`;
 }
 
 export async function uploadText(bucketKey, key, text, contentType = "text/plain") {
@@ -153,7 +183,7 @@ export const r2Get = getObjectAsText;
 export const putJson = async (bucketKey, key, obj) =>
   uploadText(bucketKey, key, JSON.stringify(obj, null, 2), "application/json");
 
-// URL builder
+// URL builder (legacy use)
 export function buildPublicUrl(bucketKey, key) {
   const base = R2_PUBLIC_URLS[bucketKey];
   if (!base) throw new Error(`❌ No public URL configured for ${bucketKey}`);
@@ -172,21 +202,18 @@ export async function listKeys(bucketKey, prefix = "") {
 export async function deleteObject(bucketKey, key) {
   const bucket = ensureBucketKey(bucketKey);
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
-
-  log.info("r2.delete", { bucket, key });
+  log.info("🗑️ R2 object deleted", { bucket, key });
 }
 
 // ------------------------------------------------------------
-// 🧾 Startup Log (FIXED — correct signature)
+// 🧾 Startup Log
 // ------------------------------------------------------------
-log.info("🟩 r2-client.initialized"),
-  
-
-log.debug("r2-client.initialized", {
+log.info("r2-client.initialized", {
   endpoint: R2_ENDPOINT,
   region: R2_REGION,
   buckets: Object.keys(R2_BUCKETS),
 });
+
 // ------------------------------------------------------------
 // 📦 Default Export
 // ------------------------------------------------------------
