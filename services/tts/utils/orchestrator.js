@@ -20,7 +20,7 @@
 //   - Full logging (message-first)
 // ============================================================
 
-import { info, error } from "#logger.js";
+import { info, error, debug } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { listKeys, getObject, putObject } from "#shared/r2-client.js";
 import { ttsProcessor } from "./ttsProcessor.js";
@@ -42,7 +42,7 @@ const PUBLIC_BASE_URL_PODCAST =
 // 📥 Load all text chunks from R2
 // ------------------------------------------------------------
 async function loadTextChunksFromR2(sessionId) {
-  info("🔍 Listing text chunks from R2...", { sessionId });
+  debug ("🔍 Listing text chunks from R2...", { sessionId });
 
   const chunkKeys = await listKeys(RAW_TEXT_BUCKET, `${sessionId}/chunk-`);
 
@@ -52,7 +52,9 @@ async function loadTextChunksFromR2(sessionId) {
 
   const txtKeys = chunkKeys.filter((key) => key.endsWith(".txt")).sort();
 
-  info("🧩 Text chunks collected", {
+ 
+  info("🧩 Text chunks collected ")
+debug ("🧩 Text chunks collected", {
     sessionId,
     count: txtKeys.length,
   });
