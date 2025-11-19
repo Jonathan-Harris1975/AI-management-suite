@@ -38,8 +38,6 @@ const {
   R2_BUCKET_PODCAST_RSS_FEEDS,    // podcast-specific RSS feed
   R2_BUCKET_TRANSCRIPTS,
   R2_BUCKET_CHUNKS,
-
-  // Newly added
   R2_BUCKET_EDITED_AUDIO,
 
   // Public URLs
@@ -51,8 +49,7 @@ const {
   R2_PUBLIC_BASE_URL_RSS,
   R2_PUBLIC_BASE_URL_TRANSCRIPT,
   R2_PUBLIC_BASE_URL_CHUNKS,
-
-  // Newly added
+  R2_PUBLIC_BASE_URL_RSS_FEEDS,
   R2_PUBLIC_BASE_URL_EDITED_AUDIO,
 
 } = process.env;
@@ -114,7 +111,8 @@ export const R2_PUBLIC_URLS = {
   merged:          R2_PUBLIC_BASE_URL_MERGE,
   art:             R2_PUBLIC_BASE_URL_ART,
   rss:             R2_PUBLIC_BASE_URL_RSS,
-  transcript:      R2_PUBLIC_BASE_URL_TRANSCRIPT,
+"rss-feeds":       R2_PUBLIC_BASE_URL_RSS_FEEDS,
+ transcript:      R2_PUBLIC_BASE_URL_TRANSCRIPT,
   chunks:          R2_PUBLIC_BASE_URL_CHUNKS,
   "podcast-chunks":R2_PUBLIC_BASE_URL_CHUNKS,
 
