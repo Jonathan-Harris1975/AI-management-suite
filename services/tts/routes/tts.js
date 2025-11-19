@@ -1,5 +1,3 @@
-import logger from "../service-logger.js";
-const { info, warn, error, debug } = logger;
 // ============================================================
 // 🎙 TTS Router — Handles TTS orchestration API endpoints
 //  - Returns immediately to avoid request timeouts
@@ -7,6 +5,7 @@ const { info, warn, error, debug } = logger;
 // ============================================================
 
 import express from "express";
+import { info, error } from "#logger.js";
 import { orchestrateTTS } from "../index.js";
 
 const router = express.Router();
