@@ -6,7 +6,7 @@
 import express from "express";
 import { endToEndRewrite } from "../rewrite-pipeline.js";
 import { getObjectAsText } from "../../shared/utils/r2-client.js";
-import { info, error } from "#logger.js";
+import { info, error, debug } from "#logger.js";
 
 const router = express.Router();
 
@@ -19,7 +19,7 @@ router.post("/rewrite", async (req, res) => {
 
     // Load RSS feed list from R2 if cache is empty
     if (!globalThis.__latestFetchedItems || !globalThis.__latestFetchedItems.length) {
-      info("rewrite.route.loading.feeds", { bucket, key });
+      debug("rewrite.route.loading.feeds", { bucket, key });
       const feedText = await getObjectAsText(bucket, key);
       if (!feedText) throw new Error("rss-feeds.txt missing in R2");
       const urls = feedText
@@ -33,7 +33,7 @@ router.post("/rewrite", async (req, res) => {
         pubDate: new Date().toUTCString(),
         summary: "Fetched placeholder awaiting rewrite",
       }));
-      info("rewrite.route.loaded.urls", { count: urls.length });
+      debug("rewrite.route.loaded.urls", { count: urls.length });
     }
 
     // Execute rewrite pipeline
