@@ -159,7 +159,7 @@ export default function chunkText(text, maxChars = Number(process.env.MAX_POLLY_
     debug(`    "${preview}"`);
   });
 
-  info(`\n✓ All chunks ready for AWS Polly synthesis\n`);
+  debug(`\n✓ All chunks ready for AWS Polly synthesis\n`);
 
   return validatedChunks;
 }
