@@ -17,6 +17,7 @@
 // ============================================================
 
 import aiConfig from "./ai-config.js";
+import { safeRouteLog } from "#logger.js";
 import { info, error as logError } from "#logger.js";
 import fetch from "node-fetch";
 
@@ -218,7 +219,7 @@ export async function resilientRequest(
 
     // per-call log
     try {
-      info("ai.route.model", {
+      safeRouteLog({
         routeName,
         routeKey,
         provider: providerId,
