@@ -1,4 +1,3 @@
-import scriptLogger from "./utils/script-logger.js";
 // services/script/index.js
 
 import orchestrateScriptDefault from "./utils/orchestrator.js";
