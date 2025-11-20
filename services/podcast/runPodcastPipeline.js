@@ -4,38 +4,54 @@
 // ============================================================
 
 import { log } from "#logger.js";
-import { orchestrateScript } from "../script/index.js"; // standardized import
+import { orchestrateScript } from "../script/index.js";
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
 import { createPodcastArtwork } from "../artwork/createPodcastArtwork.js";
-import { uploadText } from "#shared/r2-client.js";
+import runRssFeedCreator from "../rss-feed-podcast/index.js";
 
 export async function runPodcastPipeline(sessionId) {
   log.debug("🎧 Starting AI Podcast Pipeline...", { sessionId });
 
   try {
-    // 1️⃣ Script
+    // 1️⃣ Script generation (intro / main / outro / meta upstream)
     const script = await orchestrateScript(sessionId);
-    log.info(" 📝 Script ready", { sessionId, chunks: script?.chunks?.length });
+    log.info("🧾 Script generation complete", { sessionId });
 
-    // 2️⃣ Artwork
-    const artwork = await createPodcastArtwork({
-      sessionId,
-      prompt: `Podcast cover for ${script?.metadata?.title || "AI Weekly"}`,
-    });
-    log.info("🎨 Artwork ready", { sessionId });
+    // 2️⃣ Artwork generation (cover art for this episode)
+    const artwork = await createPodcastArtwork(sessionId);
+    log.info("🎨 Artwork generation complete", { sessionId });
 
-    // 3️⃣ TTS
-    const tts = await orchestrateTTS({ sessionId, chunkKeys: script.chunks });
-    log.info( "🗣️🎙️ TTS complete", { sessionId });
+    // 3️⃣ TTS end-to-end
+    //    TTS service is responsible for:
+    //    - generating audio
+    //    - running editing/merge pipeline
+    //    - uploading final MP3 to R2 (podcast bucket)
+    //    - updating the meta JSON with URLs, duration, fileSize, etc.
+    const tts = await orchestrateTTS(sessionId);
+    log.info("🗣️ TTS pipeline complete", { sessionId });
 
+    // 4️⃣ RSS feed regeneration (non-fatal if it fails)
+    try {
+      log.info("📡 Updating podcast RSS feed...", { sessionId });
+      await runRssFeedCreator();
+      log.info("📡 Podcast RSS feed updated successfully", { sessionId });
+    } catch (rssErr) {
+      log.error("❌ RSS feed update failed (non-fatal)", {
+        sessionId,
+        error: rssErr?.message,
+      });
+    }
+
+    // 5️⃣ Final summary returned to caller (Make.com, route, etc.)
     const summary = { sessionId, script, artwork, tts };
-    await uploadText("podcast-meta", `${sessionId}.json`, JSON.stringify(summary), "application/json");
-    log.info("💾 Metadata saved", { sessionId });
 
     log.info("🏁 Podcast pipeline complete", { sessionId });
     return summary;
   } catch (err) {
-    log.error("💥 Podcast pipeline failed", { sessionId, error: err?.message });
+    log.error("💥 Podcast pipeline failed", {
+      sessionId,
+      error: err?.message,
+    });
     throw err;
   }
 }
