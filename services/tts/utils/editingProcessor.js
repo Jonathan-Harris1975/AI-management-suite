@@ -29,7 +29,7 @@ function ensureTmpDir() {
 }
 
 async function runFFmpegStage(sessionId, inputPath, outputPath, filterStr, description) {
-  log.info(`🎚️ Starting stage: ${description}`, { sessionId });
+  log.info(`🎚️ Starting: ${description}`, { sessionId });
 
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", [
@@ -83,7 +83,7 @@ async function runFFmpegStage(sessionId, inputPath, outputPath, filterStr, descr
         return;
       }
 
-      log.info(`✅ Completed stage: ${description}`, {
+      log.info(`✅ Completed : ${description}`, {
         sessionId,
         size: stats.size,
         outputPath,
@@ -121,7 +121,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
     throw new Error(`Input file is empty: ${inputPath}`);
   }
 
-  log.info("🎚️ Starting staged editingProcessor (Optimised)", {
+  log.info("🎚️ Starting  editingProcessor work flow "), {
     sessionId,
     inputPath,
     size: stats.size,
