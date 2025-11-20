@@ -1,10 +1,10 @@
-
+// services/rss-feed-podcast/generateFeed.js
 // ============================================================
 // 🧩 RSS Feed XML Generator (from meta JSON)
 // ============================================================
 
 import { buildRssXml } from "./xmlBuilder.js";
-import { info, warn, error } from "#logger.js";
+import { info, warn } from "#logger.js";
 
 export function generateFeedXML(episodesMeta) {
   if (!Array.isArray(episodesMeta) || episodesMeta.length === 0) {
@@ -21,7 +21,9 @@ export function generateFeedXML(episodesMeta) {
   info(`📝 Building RSS feed with ${sorted.length} episodes`);
 
   // Map show-level env vars
-  const rawLang = (process.env.PODCAST_LANGUAGE || "en-gb").trim().toLowerCase();
+  const rawLang = (process.env.PODCAST_LANGUAGE || "en-gb")
+    .trim()
+    .toLowerCase();
   const language = rawLang === "en-uk" ? "en-gb" : rawLang;
 
   const channel = {
@@ -49,9 +51,7 @@ export function generateFeedXML(episodesMeta) {
       "",
   };
 
-  const items = sorted
-    .map((meta) => mapMetaToEpisode(meta))
-    .filter(Boolean);
+  const items = sorted.map(mapMetaToEpisode).filter(Boolean);
 
   if (items.length === 0) {
     warn("No valid items generated for RSS feed");
@@ -112,5 +112,4 @@ function mapMetaToEpisode(meta) {
 function stripQuotes(str) {
   // In case env accidentally has quotes like PODCAST_LINK="\"https://example.com\""
   return String(str).replace(/^"+|"+$/g, "").trim();
-}
-
+    }
