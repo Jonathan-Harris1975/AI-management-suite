@@ -121,7 +121,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
     throw new Error(`Input file is empty: ${inputPath}`);
   }
 
-  log.info("🎚️ Starting  editingProcessor work flow "), {
+  log.info("🎚️ Starting  editingProcessor work flow ", {
     sessionId,
     inputPath,
     size: stats.size,
