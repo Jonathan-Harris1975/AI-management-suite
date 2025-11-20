@@ -3,7 +3,7 @@
 // ============================================================
 
 const baseDurations = {
-  introSeconds: 70,
+  introSeconds: 75,
   outroSeconds: 70,
 };
 
