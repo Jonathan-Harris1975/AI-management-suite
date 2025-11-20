@@ -12,7 +12,7 @@
 import { listKeys, getObjectAsText, putObject } from "#shared/r2-client.js";
 import { info, warn, error } from "#logger.js";
 import { generateFeedXML } from "./generateFeed.js";
-import { notifyHubByUrl } from "#shared/utils/podcastIndexClient.js";
+import { notifyHubByUrl } from "#shared/podcastIndexClient.js";
 
 const META_BUCKET_ALIAS = "meta";
 const META_PREFIX = "podcast-meta/";
