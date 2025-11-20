@@ -1,3 +1,4 @@
+// services/rss-feed-podcast/index.js
 // ============================================================
 // 📡 Podcast RSS Feed Creator - Orchestrator
 // ============================================================
@@ -7,7 +8,7 @@
 // - Uploads to R2 bucket alias "podcastRss"
 // ============================================================
 
-import { listObjects, getObject, putObject } from "#shared/r2-client.js";
+import { listKeys, getObjectAsText, putObject } from "#shared/r2-client.js";
 import { info, warn, error } from "#logger.js";
 import { generateFeedXML } from "./generateFeed.js";
 
@@ -19,37 +20,37 @@ const RSS_KEY = "turing-torch.xml";
 export async function runRssFeedCreator() {
   info("🚀 Starting RSS feed generation");
 
-  let objectList;
+  let keys;
   try {
-    objectList = await listObjects(META_BUCKET_ALIAS, META_PREFIX);
+    // listKeys returns an array of object keys (strings)
+    keys = await listKeys(META_BUCKET_ALIAS, META_PREFIX);
   } catch (err) {
     error("Failed to list meta objects", { error: err.message });
     throw err;
   }
 
-  if (!Array.isArray(objectList) || objectList.length === 0) {
+  if (!Array.isArray(keys) || keys.length === 0) {
     warn("No metadata files found in meta bucket");
     return;
   }
 
-  const metaFiles = objectList.filter((obj) =>
-    obj.key ? obj.key.endsWith(".json") : false
+  const metaKeys = keys.filter((key) =>
+    typeof key === "string" ? key.endsWith(".json") : false
   );
 
-  if (metaFiles.length === 0) {
+  if (metaKeys.length === 0) {
     warn("No .json metadata files found with podcast-meta/ prefix");
     return;
   }
 
-  info("Found metadata files", { count: metaFiles.length });
+  info("Found metadata files", { count: metaKeys.length });
 
   const episodes = [];
 
-  for (const obj of metaFiles) {
-    const key = obj.key;
+  for (const key of metaKeys) {
     try {
-      const buf = await getObject(META_BUCKET_ALIAS, key);
-      const json = JSON.parse(buf.toString("utf-8"));
+      const text = await getObjectAsText(META_BUCKET_ALIAS, key);
+      const json = JSON.parse(text);
       episodes.push(json);
     } catch (err) {
       warn("Failed to parse meta file", { key, error: err.message });
@@ -70,9 +71,12 @@ export async function runRssFeedCreator() {
   }
 
   try {
-    await putObject(RSS_BUCKET_ALIAS, RSS_KEY, Buffer.from(xml, "utf-8"), {
-      contentType: "application/rss+xml",
-    });
+    await putObject(
+      RSS_BUCKET_ALIAS,
+      RSS_KEY,
+      Buffer.from(xml, "utf-8"),
+      "application/rss+xml"
+    );
 
     info("RSS feed uploaded successfully", {
       bucketAlias: RSS_BUCKET_ALIAS,
@@ -85,4 +89,3 @@ export async function runRssFeedCreator() {
 }
 
 export default runRssFeedCreator;
-
