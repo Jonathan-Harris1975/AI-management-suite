@@ -195,6 +195,45 @@ async function modularMerge(sessionId, sources) {
 }
 
 // ------------------------------------------------------------
+// 🧹 MEMORY CLEANUP - Remove temporary files
+// ------------------------------------------------------------
+function scheduleCleanup(finalPath, sessionId, delayMs = 120000) {
+  setTimeout(() => {
+    try {
+      // Clean up the final merged file
+      if (fs.existsSync(finalPath)) {
+        fs.unlinkSync(finalPath);
+        debug("🧹 Cleaned up final merged file", { path: finalPath });
+      }
+
+      // Clean up any intermediate batch files
+      const files = fs.readdirSync(TMP_DIR);
+      const sessionFiles = files.filter(file => file.startsWith(sessionId));
+      
+      sessionFiles.forEach(file => {
+        const filePath = path.join(TMP_DIR, file);
+        try {
+          fs.unlinkSync(filePath);
+          debug("🧹 Cleaned up intermediate file", { file });
+        } catch (err) {
+          warn("Failed to clean up intermediate file", { file, error: err.message });
+        }
+      });
+
+      info("🧹 Memory cleanup completed", { 
+        sessionId, 
+        filesRemoved: sessionFiles.length + (fs.existsSync(finalPath) ? 1 : 0)
+      });
+    } catch (err) {
+      error("Memory cleanup failed", { 
+        sessionId, 
+        error: err.message 
+      });
+    }
+  }, delayMs);
+}
+
+// ------------------------------------------------------------
 // 🚀 MAIN PROCESSOR
 // ------------------------------------------------------------
 export async function mergeProcessor(sessionId, chunkUrls = []) {
@@ -203,7 +242,7 @@ export async function mergeProcessor(sessionId, chunkUrls = []) {
 
   startKeepAlive(label, 25000);
   ensureTmpDir();
-info("🎞️ Starting merge process")
+  info("🎞️ Starting merge process")
   debug("Starting merge process", {
     sessionId: sid,
     totalChunks: chunkUrls.length,
@@ -228,6 +267,13 @@ info("🎞️ Starting merge process")
       chunksProcessed: chunkUrls.length,
       outputKey: mergedKey,
       status: "success"
+    });
+
+    // 🧹 SCHEDULE MEMORY CLEANUP WITH SILENT DELAY
+    scheduleCleanup(finalPath, sid, 120000); // 2 minutes delay
+    info("🧹 Memory cleanup scheduled", { 
+      sessionId: sid, 
+      cleanupIn: "2 minutes" 
     });
 
     stopKeepAlive(label);
