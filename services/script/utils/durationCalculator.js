@@ -4,7 +4,7 @@
 
 const baseDurations = {
   introSeconds: 75,
-  outroSeconds: 70,
+  outroSeconds: 85,
 };
 
 function normalizeSessionId(input) {
@@ -25,7 +25,7 @@ function hashCode(str) {
 }
 
 function autoSelectTargetMins(sessionIdNormalized) {
-  const seq = [25, 40, 55];
+  const seq = [30, 45, 60];
   const h = hashCode(sessionIdNormalized);
   return seq[h % seq.length];
 }
