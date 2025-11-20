@@ -1,3 +1,4 @@
+// services/rss-feed-podcast/xmlBuilder.js
 // ============================================================
 // 🏗 XML Builder for Podcast RSS
 // ============================================================
@@ -42,7 +43,6 @@ export function buildRssXml(channel, items) {
   const now = new Date().toUTCString();
   const parts = [];
 
-  // Header
   parts.push(`<?xml version="1.0" encoding="UTF-8"?>`);
   parts.push(
     `<rss version="2.0"
@@ -52,14 +52,14 @@ export function buildRssXml(channel, items) {
   );
   parts.push(`<channel>`);
 
-  // Channel fields
+  // Core channel info
   if (title) parts.push(tag("title", title));
   if (link) parts.push(tag("link", link));
   if (description) parts.push(tag("description", description));
   if (language) parts.push(tag("language", language));
   if (copyright) parts.push(tag("copyright", copyright));
 
-  // Self-link
+  // Atom self-link (optional)
   if (rssSelfLink) {
     parts.push(
       `<atom:link href="${escapeXml(
@@ -68,9 +68,10 @@ export function buildRssXml(channel, items) {
     );
   }
 
+  // Dates
   parts.push(tag("lastBuildDate", now));
 
-  // iTunes show-level tags
+  // iTunes show-level
   if (itunesAuthor) parts.push(tag("itunes:author", itunesAuthor));
   if (itunesExplicit) parts.push(tag("itunes:explicit", itunesExplicit));
   if (itunesType) parts.push(tag("itunes:type", itunesType));
@@ -83,25 +84,26 @@ export function buildRssXml(channel, items) {
     parts.push("</itunes:owner>");
   }
 
-  // Artwork
   if (imageUrl) {
     parts.push(`<itunes:image href="${escapeXml(imageUrl)}" />`);
   }
 
   // Categories
-  categories.filter(Boolean).forEach((cat) => {
-    parts.push(
-      `<itunes:category text="${escapeXml(cat)}"></itunes:category>`
-    );
-  });
+  categories
+    .filter(Boolean)
+    .forEach((cat) => {
+      parts.push(
+        `<itunes:category text="${escapeXml(cat)}"></itunes:category>`
+      );
+    });
 
-  // Podcasting 2.0 Funding Tag
+  // Funding (Podcasting 2.0)
   if (fundingUrl) {
-    const txt = fundingText || "";
+    const text = fundingText || "";
     parts.push(
       `<podcast:funding url="${escapeXml(
         fundingUrl
-      )}">${escapeXml(txt)}</podcast:funding>`
+      )}">${escapeXml(text)}</podcast:funding>`
     );
   }
 
@@ -180,6 +182,5 @@ function formatDuration(totalSeconds) {
       s.toString().padStart(2, "0"),
     ].join(":");
   }
-
   return `${m}:${s.toString().padStart(2, "0")}`;
-}
+        }
