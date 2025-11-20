@@ -53,7 +53,7 @@ async function loadTextChunksFromR2(sessionId) {
   const txtKeys = chunkKeys.filter((key) => key.endsWith(".txt")).sort();
 
  
-  info("🧩 Text chunks collected ")
+  info("🟩 Text chunks collected ")
 debug ("🧩 Text chunks collected", {
     sessionId,
     count: txtKeys.length,
@@ -117,7 +117,7 @@ export async function orchestrateTTS(session) {
       throw new Error("No TTS chunks were produced.");
     }
 
-  info("🗣️ TTS complete")
+  info("🗣️ TTS saved to R2")
   debug ("🗣️ TTS complete", {
       sessionId,
       count: successUrls.length,
@@ -134,7 +134,7 @@ export async function orchestrateTTS(session) {
       throw new Error("Merge step failed to produce output.");
     }
 
-    info("🧩 Merge complete")
+    info("🟩 Merge saved to R2")
   debug("🧩 Merge complete", {
       sessionId,
       key: merged.key,
@@ -151,7 +151,7 @@ export async function orchestrateTTS(session) {
       throw new Error("Editing returned no audio data.");
     }
 
-  info("✂️ Editing complete")
+  info("🟩 Editing saved to R2")
     debug ("✂️ Editing complete", {
       sessionId,
       bytes: editedBuffer.length,
@@ -160,7 +160,7 @@ export async function orchestrateTTS(session) {
 
     // --------------------------
     // 5️⃣ Podcast Mixdown + Mastering
-    // --------------------------
+    // --------------------------o
     const t4 = Date.now();
     const finalAudio = await podcastProcessor(sessionId, editedBuffer);
 
@@ -168,7 +168,7 @@ export async function orchestrateTTS(session) {
       throw new Error("Mixdown step returned no audio data.");
     }
 
-    info("🎚️ Mixdown complete")
+    info("🎚️ final podcast audio ready")
     debug ("🎚️ Mixdown complete", {
       sessionId,
       bytes: finalAudio.length,
