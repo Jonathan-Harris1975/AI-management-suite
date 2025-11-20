@@ -181,7 +181,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
     lastSuccessfulStage = stage1Path;
 
     const eqStage2A = [
-      "paragraphiceq=gains='4 3.5 2.5':frequencies='80 150 250':bandwidths='1.2 1.1 1.0'",
+      "equalizer=f=100:t=q:w=1.1:g=3.5",
     ].join(",");
 
     currentInput = await runFFmpegStage(
