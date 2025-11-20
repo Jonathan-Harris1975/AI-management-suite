@@ -93,6 +93,39 @@ async function runFFmpegStage(sessionId, inputPath, outputPath, filterStr, descr
   });
 }
 
+function safeFileCleanup(sessionId, filePath, description) {
+  if (filePath && fs.existsSync(filePath)) {
+    try {
+      fs.unlinkSync(filePath);
+      log.info("🧹 Cleaned up previous stage file", {
+        sessionId,
+        path: filePath,
+        description
+      });
+    } catch (cleanupErr) {
+      log.warn("⚠️ Could not clean up previous stage file", {
+        sessionId,
+        path: filePath,
+        error: cleanupErr.message,
+        description
+      });
+    }
+  }
+}
+
+function verifyFileReady(filePath, description) {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`${description}: File not found at ${filePath}`);
+  }
+  
+  const stats = fs.statSync(filePath);
+  if (!stats.size) {
+    throw new Error(`${description}: File is empty at ${filePath}`);
+  }
+  
+  return stats;
+}
+
 export async function editingProcessor(sessionId, inputPathObj) {
   const keepAliveId = `editingProcessor:${sessionId}`;
   startKeepAlive(keepAliveId, 25000);
@@ -115,13 +148,8 @@ export async function editingProcessor(sessionId, inputPathObj) {
     throw new Error(`Input file does not exist: ${inputPath}`);
   }
 
-  const stats = fs.statSync(inputPath);
-  if (!stats.size) {
-    stopKeepAlive(keepAliveId);
-    throw new Error(`Input file is empty: ${inputPath}`);
-  }
-
-  log.info("🎚️ Starting  editingProcessor work flow ", {
+  const stats = verifyFileReady(inputPath, "Input file");
+  log.info("🎚️ Starting editingProcessor workflow", {
     sessionId,
     inputPath,
     size: stats.size,
@@ -137,6 +165,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
   const stage6Path = path.join(TMP_DIR, `${sessionId}_stage6_fades.mp3`);
   const finalPath = path.join(TMP_DIR, `${sessionId}_edited.mp3`);
 
+  // Clean up any existing files from previous runs
   const stagePaths = [
     stage1Path,
     stage2APath,
@@ -150,27 +179,14 @@ export async function editingProcessor(sessionId, inputPathObj) {
   ];
 
   for (const stagePath of stagePaths) {
-    if (fs.existsSync(stagePath)) {
-      try {
-        fs.unlinkSync(stagePath);
-        log.info("🧹 Cleaned up existing stage file before run", {
-          sessionId,
-          path: stagePath,
-        });
-      } catch (cleanupErr) {
-        log.warn("⚠️ Could not clean up existing stage file", {
-          sessionId,
-          path: stagePath,
-          error: cleanupErr.message,
-        });
-      }
-    }
+    safeFileCleanup(sessionId, stagePath, "pre-run cleanup");
   }
 
   let currentInput = inputPath;
-  let lastSuccessfulStage = null;
+  let previousStagePath = null; // Track the stage before current for cleanup
 
   try {
+    // Stage 1: Pitch Shift
     currentInput = await runFFmpegStage(
       sessionId,
       currentInput,
@@ -178,8 +194,12 @@ export async function editingProcessor(sessionId, inputPathObj) {
       "rubberband=pitch=0.92:tempo=1.0",
       "Stage 1: 🗣️ Pitch Shift"
     );
-    lastSuccessfulStage = stage1Path;
+    verifyFileReady(stage1Path, "Stage 1 output");
+    // Clean up original input file (now we have stage1)
+    safeFileCleanup(sessionId, inputPath, "original input after stage 1");
+    previousStagePath = stage1Path;
 
+    // Stage 2A: EQ Low-End + Low-Mids
     const eqStage2A = [
       "equalizer=f=100:t=q:w=1.1:g=3.5",
     ].join(",");
@@ -191,16 +211,16 @@ export async function editingProcessor(sessionId, inputPathObj) {
       eqStage2A,
       "Stage 2A: 🎛️ EQ Low-End + Low-Mids"
     );
+    verifyFileReady(stage2APath, "Stage 2A output");
+    // Clean up previous stage (stage1)
+    safeFileCleanup(sessionId, previousStagePath, "stage 1 after stage 2A");
+    previousStagePath = stage2APath;
 
-    if (lastSuccessfulStage && fs.existsSync(lastSuccessfulStage)) {
-      fs.unlinkSync(lastSuccessfulStage);
-    }
-    lastSuccessfulStage = stage2APath;
-
+    // Stage 2B: EQ High-End + Presence
     const eqStage2B = [
-"equalizer=f=2200:t=q:w=1.5:g=1.5",
-"equalizer=f=4500:t=q:w=2.0:g=-2.8",
-"equalizer=f=8500:t=h:g=-2",
+      "equalizer=f=2200:t=q:w=1.5:g=1.5",
+      "equalizer=f=4500:t=q:w=2.0:g=-2.8",
+      "equalizer=f=8500:t=h:g=-2",
     ].join(",");
 
     currentInput = await runFFmpegStage(
@@ -210,12 +230,12 @@ export async function editingProcessor(sessionId, inputPathObj) {
       eqStage2B,
       "Stage 2B: 🎛️ EQ High-End + Presence"
     );
+    verifyFileReady(stage2BPath, "Stage 2B output");
+    // Clean up previous stage (stage2A)
+    safeFileCleanup(sessionId, previousStagePath, "stage 2A after stage 2B");
+    previousStagePath = stage2BPath;
 
-    if (lastSuccessfulStage && fs.existsSync(lastSuccessfulStage)) {
-      fs.unlinkSync(lastSuccessfulStage);
-    }
-    lastSuccessfulStage = stage2BPath;
-
+    // Stage 3: De-Esser
     currentInput = await runFFmpegStage(
       sessionId,
       currentInput,
@@ -223,12 +243,12 @@ export async function editingProcessor(sessionId, inputPathObj) {
       "deesser=i=0.4:m=0.75:f=0.5",
       "Stage 3: 🎛️ De-Esser"
     );
+    verifyFileReady(stage3Path, "Stage 3 output");
+    // Clean up previous stage (stage2B)
+    safeFileCleanup(sessionId, previousStagePath, "stage 2B after stage 3");
+    previousStagePath = stage3Path;
 
-    if (lastSuccessfulStage && fs.existsSync(lastSuccessfulStage)) {
-      fs.unlinkSync(lastSuccessfulStage);
-    }
-    lastSuccessfulStage = stage3Path;
-
+    // Stage 4A: Compressor
     const compFilter =
       "acompressor=threshold=-20dB:ratio=4:attack=15:release=250:makeup=3";
 
@@ -239,12 +259,12 @@ export async function editingProcessor(sessionId, inputPathObj) {
       compFilter,
       "Stage 4A: 🎛️ Compressor"
     );
+    verifyFileReady(stage4APath, "Stage 4A output");
+    // Clean up previous stage (stage3)
+    safeFileCleanup(sessionId, previousStagePath, "stage 3 after stage 4A");
+    previousStagePath = stage4APath;
 
-    if (lastSuccessfulStage && fs.existsSync(lastSuccessfulStage)) {
-      fs.unlinkSync(lastSuccessfulStage);
-    }
-    lastSuccessfulStage = stage4APath;
-
+    // Stage 4B: Limiter
     const limitFilter = "alimiter=limit=0.95:attack=5:release=100";
 
     currentInput = await runFFmpegStage(
@@ -254,12 +274,12 @@ export async function editingProcessor(sessionId, inputPathObj) {
       limitFilter,
       "Stage 4B: 🎛️ Limiter"
     );
+    verifyFileReady(stage4BPath, "Stage 4B output");
+    // Clean up previous stage (stage4A)
+    safeFileCleanup(sessionId, previousStagePath, "stage 4A after stage 4B");
+    previousStagePath = stage4BPath;
 
-    if (lastSuccessfulStage && fs.existsSync(lastSuccessfulStage)) {
-      fs.unlinkSync(lastSuccessfulStage);
-    }
-    lastSuccessfulStage = stage4BPath;
-
+    // Stage 5: Mono → Stereo
     currentInput = await runFFmpegStage(
       sessionId,
       currentInput,
@@ -267,12 +287,12 @@ export async function editingProcessor(sessionId, inputPathObj) {
       "pan=stereo|c0=c0|c1=c0",
       "Stage 5: 🔊 Mono → Stereo Conversion"
     );
+    verifyFileReady(stage5Path, "Stage 5 output");
+    // Clean up previous stage (stage4B)
+    safeFileCleanup(sessionId, previousStagePath, "stage 4B after stage 5");
+    previousStagePath = stage5Path;
 
-    if (lastSuccessfulStage && fs.existsSync(lastSuccessfulStage)) {
-      fs.unlinkSync(lastSuccessfulStage);
-    }
-    lastSuccessfulStage = stage5Path;
-
+    // Stage 6: Fade In/Out
     const fadeFilter = `afade=t=in:d=${VOICE_FADE_SECONDS},areverse,afade=t=in:d=${VOICE_FADE_SECONDS},areverse`;
 
     currentInput = await runFFmpegStage(
@@ -282,14 +302,17 @@ export async function editingProcessor(sessionId, inputPathObj) {
       fadeFilter,
       "Stage 6: 🎚️ Subtle Fade In/Out"
     );
-
-    if (lastSuccessfulStage && fs.existsSync(lastSuccessfulStage)) {
-      fs.unlinkSync(lastSuccessfulStage);
-    }
-    lastSuccessfulStage = stage6Path;
-
+    verifyFileReady(stage6Path, "Stage 6 output");
+    
+    // Copy to final BEFORE cleaning up stage5
     fs.copyFileSync(stage6Path, finalPath);
+    verifyFileReady(finalPath, "Final file after copy");
+    
+    // Now clean up stage5 (previous stage)
+    safeFileCleanup(sessionId, previousStagePath, "stage 5 after final copy");
+    previousStagePath = stage6Path;
 
+    // Upload final file
     const buffer = fs.readFileSync(finalPath);
     const key = `${sessionId}_edited.mp3`;
 
@@ -303,57 +326,57 @@ export async function editingProcessor(sessionId, inputPathObj) {
 
     stopKeepAlive(keepAliveId);
     return finalPath;
+
   } catch (err) {
     log.error("💥 editingProcessor stage failed", {
       sessionId,
       error: err.message,
-      lastSuccessfulStage: lastSuccessfulStage || "none",
+      currentStage: currentInput,
+      previousStage: previousStagePath || "none",
     });
 
+    // Fallback logic - use the last successful stage
     try {
-      const fallbackPath = lastSuccessfulStage || inputPath;
-      const fallbackBuffer = fs.readFileSync(fallbackPath);
-      const key = `${sessionId}_edited.mp3`;
+      const fallbackPath = previousStagePath || inputPath;
+      if (fs.existsSync(fallbackPath)) {
+        const fallbackBuffer = fs.readFileSync(fallbackPath);
+        const key = `${sessionId}_edited.mp3`;
 
-      await uploadBuffer("editedAudio", key, fallbackBuffer, "audio/mpeg");
+        await uploadBuffer("editedAudio", key, fallbackBuffer, "audio/mpeg");
 
-      if (fallbackPath !== finalPath) {
-        fs.copyFileSync(fallbackPath, finalPath);
+        if (fallbackPath !== finalPath) {
+          fs.copyFileSync(fallbackPath, finalPath);
+        }
+
+        log.warn("⚠️ Used fallback audio for edited upload", {
+          sessionId,
+          fallbackPath,
+          fallbackSize: fallbackBuffer.length,
+        });
+
+        stopKeepAlive(keepAliveId);
+        return finalPath;
+      } else {
+        throw new Error(`No fallback file available at ${fallbackPath}`);
       }
-
-      log.warn("⚠️ Used fallback audio for edited upload", {
-        sessionId,
-        fallbackPath,
-      });
-
-      stopKeepAlive(keepAliveId);
-      return finalPath;
     } catch (fallbackErr) {
       log.error("💥 editingProcessor fallback also failed", {
         sessionId,
         error: fallbackErr.message,
+        fallbackPath: previousStagePath || "none",
       });
       stopKeepAlive(keepAliveId);
       throw fallbackErr;
     }
   } finally {
-    for (const stagePath of stagePaths) {
-      if (stagePath !== finalPath && fs.existsSync(stagePath)) {
-        try {
-          fs.unlinkSync(stagePath);
-          log.info("🧹 Final cleanup of stage file", {
-            sessionId,
-            path: stagePath,
-          });
-        } catch (cleanupErr) {
-          log.warn("⚠️ Could not clean up stage file in finally", {
-            sessionId,
-            path: stagePath,
-            error: cleanupErr.message,
-          });
-        }
+    // Final cleanup - remove all intermediate files except final
+    for (const stagePath of [stage1Path, stage2APath, stage2BPath, stage3Path, 
+                            stage4APath, stage4BPath, stage5Path, stage6Path]) {
+      if (stagePath !== finalPath) {
+        safeFileCleanup(sessionId, stagePath, "final cleanup");
       }
     }
+    stopKeepAlive(keepAliveId);
   }
 }
 
