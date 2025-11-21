@@ -26,7 +26,7 @@ async function readLocalFile(filename) {
   for (const candidate of candidates) {
     try {
       const txt = await fs.readFile(candidate, "utf8");
-      info(`📄 Found local data file: ${candidate}`);
+      info(`🟩 Found local data file: ${candidate}`);
       return txt;
     } catch {
       debug (`⚙️ Checked but not found: ${candidate}`);
@@ -57,7 +57,7 @@ export async function ensureR2Sources() {
     feedsTxt = localFeeds;
     info("📥 Uploaded real feeds.txt → R2 ✅");
   } else {
-    info("☁️ rss-feeds.txt already exists in R2 — skipping upload.");
+    info("🗃️  rss-feeds.txt already exists in R2 — skipping upload.");
   }
 
   // --- URLS ---
@@ -69,7 +69,7 @@ export async function ensureR2Sources() {
     urlsTxt = localUrls;
     info("📥 Uploaded real urls.txt → R2 ✅");
   } else {
-    info("☁️ url-feeds.txt already exists in R2 — skipping upload.");
+    info("🗃️ url-feeds.txt already exists in R2 — skipping upload.");
   }
 
   // --- ROTATION ---
