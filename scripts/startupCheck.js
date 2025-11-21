@@ -2,7 +2,7 @@
 import { info, error ,debug} from "#logger.js";
 
 try {
-  info("🚀 startupCheck.js reached — container runtime confirmed!");
+  info("🟩 startupCheck.js reached — container runtime confirmed!");
   debug("---------------------------------------------");
   debug(`📂 Working directory: ${process.cwd()}`);
   debug (`📦 Node version: ${process.version}`);
