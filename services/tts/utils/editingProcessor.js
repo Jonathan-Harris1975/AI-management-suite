@@ -14,7 +14,7 @@
 
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { log } from "#logger.js";
 import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { uploadBuffer } from "#shared/r2-client.js";
@@ -124,6 +124,29 @@ function verifyFileReady(filePath, description) {
   }
   
   return stats;
+}
+
+function getAudioDuration(filePath) {
+  try {
+    const probe = spawnSync('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      filePath
+    ], { encoding: 'utf8' });
+    
+    if (probe.status === 0) {
+      const duration = parseFloat(probe.stdout.trim());
+      return isNaN(duration) ? null : duration;
+    }
+    return null;
+  } catch (error) {
+    log.warn("⚠️ Could not determine audio duration", {
+      filePath,
+      error: error.message
+    });
+    return null;
+  }
 }
 
 export async function editingProcessor(sessionId, inputPathObj) {
@@ -292,7 +315,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
     safeFileCleanup(sessionId, previousStagePath, "stage 4B after stage 5");
     previousStagePath = stage5Path;
 
-    // Stage 6: Fade In/Out - SIMPLE AND RELIABLE VERSION
+    // Stage 6: Fade In/Out - CORRECTED VERSION
     log.info("🔍 DEBUG: Before Stage 6", {
       sessionId,
       currentInput,
@@ -304,21 +327,42 @@ export async function editingProcessor(sessionId, inputPathObj) {
     });
 
     try {
-      // Option 2: Simple fade in and out (most reliable)
-      const fadeFilter = `afade=t=in:st=0:d=${VOICE_FADE_SECONDS},afade=t=out:st=0:d=${VOICE_FADE_SECONDS}`;
-
-      log.info("🎚️ Starting Stage 6 with simple fade in/out", {
-        sessionId,
-        fadeFilter,
-        fadeSeconds: VOICE_FADE_SECONDS
-      });
+      // Get audio duration to calculate proper fade out position
+      const audioDuration = getAudioDuration(currentInput);
+      
+      let fadeFilter;
+      if (audioDuration && audioDuration > VOICE_FADE_SECONDS * 2) {
+        // Calculate fade out start time (duration - fade length)
+        const fadeOutStart = Math.max(0, audioDuration - VOICE_FADE_SECONDS);
+        
+        // CORRECTED: Fade in at start, fade out at end
+        fadeFilter = `afade=t=in:st=0:d=${VOICE_FADE_SECONDS},afade=t=out:st=${fadeOutStart}:d=${VOICE_FADE_SECONDS}`;
+        
+        log.info("🎚️ Starting Stage 6 with duration-based fade in/out", {
+          sessionId,
+          fadeFilter,
+          audioDuration,
+          fadeIn: `0-${VOICE_FADE_SECONDS}s`,
+          fadeOut: `${fadeOutStart}-${audioDuration}s`
+        });
+      } else {
+        // Fallback: Let FFmpeg automatically handle fade out at the end
+        fadeFilter = `afade=t=in:d=${VOICE_FADE_SECONDS},afade=t=out:d=${VOICE_FADE_SECONDS}`;
+        
+        log.info("🎚️ Starting Stage 6 with automatic fade in/out", {
+          sessionId,
+          fadeFilter,
+          audioDuration: audioDuration || 'unknown',
+          reason: audioDuration ? 'audio too short for precise fades' : 'could not detect duration'
+        });
+      }
 
       currentInput = await runFFmpegStage(
         sessionId,
         currentInput,
         stage6Path,
         fadeFilter,
-        "Stage 6: 🎚️ Simple Fade In/Out (3s)"
+        "Stage 6: 🎚️ Corrected Fade In/Out (3s)"
       );
       
       verifyFileReady(stage6Path, "Stage 6 output");
