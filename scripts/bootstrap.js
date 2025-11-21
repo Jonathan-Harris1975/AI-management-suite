@@ -10,9 +10,9 @@ import { log,info,debug} from "#logger.js";
 
 async function run(cmd, label) {
   try {
-    info(`🚀 Running ${label}...`);
+    info(`🔎 Running ${label}...`);
     execSync(cmd, { stdio: "inherit" });
-    info(`✅ ${label} completed successfully.`);
+    info(`🟩 ${label} completed successfully.`);
   } catch (err) {
     log.error(`❌ ${label} failed: ${err.message}`);
   }
