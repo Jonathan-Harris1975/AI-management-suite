@@ -86,7 +86,7 @@ export async function ensureR2Sources() {
   const feeds = feedsTxt.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   const urls = urlsTxt.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
-  info(`✅ Feeds loaded: ${feeds.length}, URLs: ${urls.length}`);
+  info(`🟩 Feeds loaded: ${feeds.length}, URLs: ${urls.length}`);
   return { bucket, feeds, urls, rotation };
 }
 
