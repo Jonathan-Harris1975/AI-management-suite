@@ -1,17 +1,3 @@
-// ============================================================
-// 🎵 Modular Podcast Processor — Final Production Version
-// ============================================================
-// Pipeline:
-//   1. Download intro/outro
-//   2. Fade intro (in) with simple fade
-//   3. Fade outro (out) with simple fade
-//   4. Concat intro + main + outro
-//   5. Apply compression + loudnorm
-//   6. Save final MP3
-//   7. Upload final MP3 to R2 ("podcast")
-//   8. Update metadata file in R2 ("meta")
-//   9. Schedule delayed cleanup (2 minutes)
-// ============================================================
 
 import fs from "fs";
 import path from "path";
