@@ -12,3 +12,16 @@ https://thegradient.pub/rss
 https://mltechniques.com/feed
 https://intelligence.org/blog/feed
 https://aibusiness.com/rss.xml
+https://www.deeplearning.ai/the-batch/feed/
+https://news.mit.edu/topic/artificial-intelligence2-rss.xml
+https://syncedreview.com/feed/
+https://ai.meta.com/blog/rss/
+https://www.amazon.science/index.rss
+https://openai.com/blog/rss/
+https://huggingface.co/blog/feed.xml
+https://ai.stanford.edu/blog/feed.xml
+https://blog.ai.cs.cmu.edu/feed.xml
+https://aiweirdness.com/feed
+https://www.alignmentforum.org/feed.xml
+https://www.pyimagesearch.com/feed/
+
