@@ -8,7 +8,7 @@
 //   4A: Compressor
 //   4B: Limiter
 //   5: Mono → Stereo
-//   6: Subtle Fade In/Out (0.3s)
+//   6: Subtle Fade In/Out (3.0s)
 //   7: Final copy + upload to R2 ("editedAudio")
 // ============================================================
 
@@ -20,7 +20,7 @@ import { startKeepAlive, stopKeepAlive } from "#shared/keepalive.js";
 import { uploadBuffer } from "#shared/r2-client.js";
 
 const TMP_DIR = "/tmp/tts_editing";
-const VOICE_FADE_SECONDS = 0.3; // Profile A: subtle fade in/out
+const VOICE_FADE_SECONDS = 3.0; // 3-second fades
 
 function ensureTmpDir() {
   if (!fs.existsSync(TMP_DIR)) {
@@ -292,27 +292,60 @@ export async function editingProcessor(sessionId, inputPathObj) {
     safeFileCleanup(sessionId, previousStagePath, "stage 4B after stage 5");
     previousStagePath = stage5Path;
 
-    // Stage 6: Fade In/Out
-    const fadeFilter = `afade=t=in:d=${VOICE_FADE_SECONDS},areverse,afade=t=in:d=${VOICE_FADE_SECONDS},areverse`;
-
-    currentInput = await runFFmpegStage(
+    // Stage 6: Fade In/Out - SIMPLE AND RELIABLE VERSION
+    log.info("🔍 DEBUG: Before Stage 6", {
       sessionId,
       currentInput,
-      stage6Path,
-      fadeFilter,
-      "Stage 6: 🎚️ Subtle Fade In/Out"
-    );
-    verifyFileReady(stage6Path, "Stage 6 output");
-    
-    // Copy to final BEFORE cleaning up stage5
-    fs.copyFileSync(stage6Path, finalPath);
-    verifyFileReady(finalPath, "Final file after copy");
-    
-    // Now clean up stage5 (previous stage)
-    safeFileCleanup(sessionId, previousStagePath, "stage 5 after final copy");
-    previousStagePath = stage6Path;
+      exists: fs.existsSync(currentInput),
+      size: fs.existsSync(currentInput) ? fs.statSync(currentInput).size : 0,
+      previousStagePath,
+      previousExists: fs.existsSync(previousStagePath),
+      previousSize: fs.existsSync(previousStagePath) ? fs.statSync(previousStagePath).size : 0
+    });
+
+    try {
+      // Option 2: Simple fade in and out (most reliable)
+      const fadeFilter = `afade=t=in:st=0:d=${VOICE_FADE_SECONDS},afade=t=out:st=0:d=${VOICE_FADE_SECONDS}`;
+
+      log.info("🎚️ Starting Stage 6 with simple fade in/out", {
+        sessionId,
+        fadeFilter,
+        fadeSeconds: VOICE_FADE_SECONDS
+      });
+
+      currentInput = await runFFmpegStage(
+        sessionId,
+        currentInput,
+        stage6Path,
+        fadeFilter,
+        "Stage 6: 🎚️ Simple Fade In/Out (3s)"
+      );
+      
+      verifyFileReady(stage6Path, "Stage 6 output");
+      
+      // Copy to final BEFORE cleaning up stage5
+      fs.copyFileSync(stage6Path, finalPath);
+      verifyFileReady(finalPath, "Final file after copy");
+      
+      // Now clean up stage5 (previous stage)
+      safeFileCleanup(sessionId, previousStagePath, "stage 5 after final copy");
+      previousStagePath = stage6Path;
+
+    } catch (stage6Err) {
+      log.error("💥 Stage 6 fade failed, skipping fade and using stage5", {
+        sessionId,
+        error: stage6Err.message,
+        previousStagePath
+      });
+      
+      // Skip the fade stage and use stage5 directly
+      fs.copyFileSync(previousStagePath, finalPath);
+      verifyFileReady(finalPath, "Final file after skipping fade");
+      currentInput = finalPath;
+    }
 
     // Upload final file
+    const finalStats = verifyFileReady(finalPath, "Final file before upload");
     const buffer = fs.readFileSync(finalPath);
     const key = `${sessionId}_edited.mp3`;
 
@@ -322,6 +355,8 @@ export async function editingProcessor(sessionId, inputPathObj) {
       sessionId,
       key,
       size: buffer.length,
+      finalPath,
+      fadeApplied: currentInput === stage6Path
     });
 
     stopKeepAlive(keepAliveId);
