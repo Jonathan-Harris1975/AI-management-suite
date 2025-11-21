@@ -716,4 +716,8 @@ export async function podcastProcessor(sessionId, editedBuffer) {
       stack: err.stack,
     });
 
+    throw err;
+  }
+}
+
     
