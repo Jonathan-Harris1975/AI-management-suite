@@ -731,4 +731,70 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     }
 
     // --- 6. Cleanup intermediates ---
-    await immediateCleanup
+    
+    await immediateCleanupTempFiles(sessionId);
+
+    // --- 7. Upload final podcast to R2 ---
+    const podcastKey = `${sessionId}_podcast.mp3`;
+    const podcastUrl = `${process.env.R2_PUBLIC_BASE_URL_PODCAST}/${podcastKey}`;
+
+    try {
+      await putObject("podcast", podcastKey, finalBuffer, {
+        contentType: "audio/mpeg",
+      });
+
+      info("📡 Uploaded final podcast", {
+        sessionId,
+        podcastKey,
+        size: finalBuffer.length,
+      });
+    } catch (uploadErr) {
+      error("❌ Podcast upload failed", {
+        sessionId,
+        error: uploadErr.message,
+      });
+      throw uploadErr;
+    }
+
+    // --- 8. Update metadata (best effort) ---
+    try {
+      const { metaKey, metaUrl } = await updateMetaFile(
+        sessionId,
+        finalBuffer,
+        finalPath,
+        podcastUrl
+      );
+
+      info("📘 Metadata updated", {
+        sessionId,
+        metaKey,
+        metaUrl,
+      });
+    } catch (metaErr) {
+      error("❌ Failed to update metadata", {
+        sessionId,
+        error: metaErr.message,
+      });
+    }
+
+    // --- 9. Schedule delayed full cleanup ---
+    scheduleDelayedCleanup(sessionId);
+
+    return {
+      buffer: finalBuffer,
+      key: podcastKey,
+      url: podcastUrl,
+    };
+  } catch (err) {
+    stopKeepAlive(keepAliveId);
+    await immediateCleanupTempFiles(sessionId);
+
+    error("❌ podcastProcessor failed", {
+      sessionId,
+      error: err.message,
+      stack: err.stack,
+    });
+
+    throw err;
+  }
+}
