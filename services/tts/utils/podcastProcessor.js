@@ -566,10 +566,10 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
   try {
     // --- 1. Always fetch edited audio from R2 (source of truth) ---
-    const editedUrl = `${process.env.R2_PUBLIC_BASE_URL_EDITED}/${sessionId}_edited.mp3`;
+    const editedUrl = `${process.env.R2_PUBLIC_BASE_URL_EDITED_AUDIO}/${sessionId}_edited.mp3`;
 
-    if (!process.env.R2_PUBLIC_BASE_URL_EDITED) {
-      throw new Error("R2_PUBLIC_BASE_URL_EDITED is not configured");
+    if (!process.env.R2_PUBLIC_BASE_URL_EDITED_AUDIO) {
+      throw new Error("R2_PUBLIC_BASE_URL_EDITED_AUDIO is not configured");
     }
 
     let editedBufferFromR2 = null;
