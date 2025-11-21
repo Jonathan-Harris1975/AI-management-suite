@@ -3,13 +3,14 @@
 // ============================================================
 // Pipeline:
 //   1. Download intro/outro
-//   2. Fade intro (in)
-//   3. Fade outro (out)
+//   2. Fade intro (in) with simple fade
+//   3. Fade outro (out) with simple fade
 //   4. Concat intro + main + outro
 //   5. Apply compression + loudnorm
 //   6. Save final MP3
 //   7. Upload final MP3 to R2 ("podcast")
 //   8. Update metadata file in R2 ("meta")
+//   9. Schedule delayed cleanup (2 minutes)
 // ============================================================
 
 import fs from "fs";
@@ -28,6 +29,7 @@ const MIN_OUTRO_DURATION = Number(process.env.MIN_OUTRO_DURATION || 3);
 
 const INTRO_FADE_SEC = Math.max(0.1, MIN_INTRO_DURATION);
 const OUTRO_FADE_SEC = Math.max(0.1, MIN_OUTRO_DURATION);
+const CLEANUP_DELAY_MS = 2 * 60 * 1000; // 2-minute delay for cleanup
 
 const MAX_PODCAST_RETRIES = Number(
   process.env.MAX_PODCAST_RETRIES || process.env.MAX_CHUNK_RETRIES || 3
@@ -45,6 +47,39 @@ const PODCAST_FFMPEG_TIMEOUT_MS = Number(
 
 if (!fs.existsSync(TMP_DIR)) {
   fs.mkdirSync(TMP_DIR, { recursive: true });
+}
+
+// Delayed cleanup function
+function scheduleDelayedCleanup(sessionId) {
+  setTimeout(async () => {
+    try {
+      const files = await fs.promises.readdir(TMP_DIR);
+      const sessionFiles = files.filter((f) => f.includes(sessionId));
+      
+      if (sessionFiles.length > 0) {
+        await Promise.allSettled(
+          sessionFiles.map((f) => fs.promises.unlink(path.join(TMP_DIR, f)))
+        );
+        
+        info("🧹 Delayed cleanup completed", {
+          sessionId,
+          files: sessionFiles.length,
+          delay: "2 minutes"
+        });
+      }
+    } catch (cleanupErr) {
+      warn("⚠️ Delayed cleanup error", {
+        sessionId,
+        error: cleanupErr.message
+      });
+    }
+  }, CLEANUP_DELAY_MS);
+  
+  info("⏰ Scheduled delayed cleanup", {
+    sessionId,
+    delayMs: CLEANUP_DELAY_MS,
+    scheduledAt: new Date().toISOString()
+  });
 }
 
 // Metadata helper
@@ -253,24 +288,36 @@ async function applyFades(sessionId, introPath, outroPath) {
   await verifyAudioFile(introPath, "intro", sessionId);
   await verifyAudioFile(outroPath, "outro", sessionId);
 
+  // SIMPLE FADE VERSION: Intro fade in
+  const introFadeFilter = `afade=t=in:st=0:d=${INTRO_FADE_SEC}`;
+  
   await runFFmpeg(
-    ["-y", "-i", introPath, "-af", `afade=t=in:d=${INTRO_FADE_SEC}`, introFaded],
+    ["-y", "-i", introPath, "-af", introFadeFilter, introFaded],
     "fade-intro",
     sessionId
   );
 
+  // SIMPLE FADE VERSION: Outro fade out
+  const outroFadeFilter = `afade=t=out:st=0:d=${OUTRO_FADE_SEC}`;
+  
   await runFFmpeg(
     [
       "-y",
       "-i",
       outroPath,
       "-af",
-      `areverse,afade=t=in:d=${OUTRO_FADE_SEC},areverse`,
+      outroFadeFilter,
       outroFaded,
     ],
     "fade-outro",
     sessionId
   );
+
+  info("🎚️ Applied simple fades", {
+    sessionId,
+    introFadeDuration: INTRO_FADE_SEC,
+    outroFadeDuration: OUTRO_FADE_SEC
+  });
 
   return { introFaded, outroFaded };
 }
@@ -335,21 +382,24 @@ async function runPodcastPipeline(
   );
 }
 
-async function cleanupTempFiles(sessionId) {
+async function immediateCleanupTempFiles(sessionId) {
   try {
     const files = await fs.promises.readdir(TMP_DIR);
     const sessionFiles = files.filter((f) => f.includes(sessionId));
 
+    // Keep final file for now, clean up intermediates
+    const intermediateFiles = sessionFiles.filter(f => !f.includes('_final.mp3'));
+    
     await Promise.allSettled(
-      sessionFiles.map((f) => fs.promises.unlink(path.join(TMP_DIR, f)))
+      intermediateFiles.map((f) => fs.promises.unlink(path.join(TMP_DIR, f)))
     );
 
-    info("🧹 Cleaned session temp files", {
+    info("🧹 Immediate cleanup completed", {
       sessionId,
-      files: sessionFiles.length,
+      files: intermediateFiles.length,
     });
   } catch (e) {
-    warn("⚠️ Cleanup error", { sessionId, error: e.message });
+    warn("⚠️ Immediate cleanup error", { sessionId, error: e.message });
   }
 }
 
@@ -427,7 +477,8 @@ export async function podcastProcessor(sessionId, editedBuffer) {
         `Pipeline failed after ${MAX_PODCAST_RETRIES} attempts: ${lastError?.message}`
       );
 
-    await cleanupTempFiles(sessionId);
+    // Do immediate cleanup of intermediate files
+    await immediateCleanupTempFiles(sessionId);
 
     const podcastKey = `${sessionId}_podcast.mp3`;
     const podcastUrl = `${process.env.R2_PUBLIC_BASE_URL_PODCAST}/${podcastKey}`;
@@ -471,6 +522,9 @@ export async function podcastProcessor(sessionId, editedBuffer) {
       });
     }
 
+    // Schedule delayed cleanup for final file
+    scheduleDelayedCleanup(sessionId);
+
     return {
       buffer: finalBuffer,
       key: podcastKey,
@@ -478,7 +532,7 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     };
   } catch (err) {
     stopKeepAlive(keepAliveId);
-    await cleanupTempFiles(sessionId);
+    await immediateCleanupTempFiles(sessionId);
 
     error("❌ podcastProcessor failed", {
       sessionId,
@@ -488,4 +542,4 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
     throw err;
   }
-}
+      }
