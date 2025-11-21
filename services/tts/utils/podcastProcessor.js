@@ -511,14 +511,51 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     return editedBuffer;
   }
 
+  // CRITICAL FIX: Add comprehensive buffer debugging
+  info("🔍 podcastProcessor called", {
+    sessionId,
+    bufferType: typeof editedBuffer,
+    isBuffer: Buffer.isBuffer(editedBuffer),
+    bufferLength: editedBuffer?.length || 0,
+    bufferPreview: editedBuffer?.slice(0, 100)?.toString('hex') || 'empty'
+  });
+
   if (!editedBuffer || editedBuffer.length === 0) {
-    warn("⚠️ Empty editedBuffer", { sessionId });
-    return editedBuffer;
+    error("❌ Empty editedBuffer provided to podcastProcessor", {
+      sessionId,
+      bufferType: typeof editedBuffer
+    });
+    throw new Error("Empty editedBuffer provided - possible pipeline issue");
   }
 
-  // More lenient buffer size validation
-  if (editedBuffer.length < MIN_FILE_SIZE) {
-    throw new Error(`Edited buffer too small: ${editedBuffer.length} bytes (min: ${MIN_FILE_SIZE})`);
+  // EXTREMELY LENIENT: Only fail if buffer is completely unusable
+  if (editedBuffer.length < 100) {
+    error("❌ Edited buffer appears corrupted", {
+      sessionId,
+      bufferLength: editedBuffer.length,
+      bufferPreview: editedBuffer.slice(0, 50).toString('hex')
+    });
+    
+    // Try to recover by checking if we can get the file from R2
+    warn("🔄 Attempting recovery by fetching from R2", { sessionId });
+    
+    try {
+      const editedUrl = `${process.env.R2_PUBLIC_BASE_URL_EDITED}/${sessionId}_edited.mp3`;
+      const response = await fetch(editedUrl);
+      
+      if (response.ok) {
+        const recoveredBuffer = await response.arrayBuffer();
+        editedBuffer = Buffer.from(recoveredBuffer);
+        info("✅ Successfully recovered audio from R2", {
+          sessionId,
+          recoveredSize: editedBuffer.length
+        });
+      } else {
+        throw new Error(`Could not recover from R2: ${response.status}`);
+      }
+    } catch (recoveryErr) {
+      throw new Error(`Edited buffer too small: ${editedBuffer.length} bytes and recovery failed: ${recoveryErr.message}`);
+    }
   }
 
   const introPath = path.join(TMP_DIR, `${sessionId}_intro.mp3`);
@@ -527,16 +564,40 @@ export async function podcastProcessor(sessionId, editedBuffer) {
   const finalPath = path.join(TMP_DIR, `${sessionId}_final.mp3`);
 
   try {
+    info("💾 Writing main audio file", {
+      sessionId,
+      bufferSize: editedBuffer.length,
+      targetPath: mainPath
+    });
+
     await fs.promises.writeFile(mainPath, editedBuffer);
 
     // Verify the file was written correctly
     const writtenStats = await fs.promises.stat(mainPath);
+    info("📊 File write verification", {
+      sessionId,
+      expectedSize: editedBuffer.length,
+      actualSize: writtenStats.size,
+      match: writtenStats.size === editedBuffer.length
+    });
+
     if (writtenStats.size !== editedBuffer.length) {
       warn(`⚠️ File write size mismatch, but continuing`, {
         sessionId,
         expected: editedBuffer.length,
-        actual: writtenStats.size
+        actual: writtenStats.size,
+        difference: editedBuffer.length - writtenStats.size
       });
+    }
+
+    // If the written file is too small but original buffer was fine, this indicates a write issue
+    if (writtenStats.size < MIN_FILE_SIZE && editedBuffer.length >= MIN_FILE_SIZE) {
+      error("❌ File write corruption detected", {
+        sessionId,
+        originalBuffer: editedBuffer.length,
+        writtenFile: writtenStats.size
+      });
+      throw new Error(`File write failed: wrote ${writtenStats.size} bytes but expected ${editedBuffer.length}`);
     }
 
     startKeepAlive(keepAliveId, 15000);
@@ -655,6 +716,4 @@ export async function podcastProcessor(sessionId, editedBuffer) {
       stack: err.stack,
     });
 
-    throw err;
-  }
-        }
+    
