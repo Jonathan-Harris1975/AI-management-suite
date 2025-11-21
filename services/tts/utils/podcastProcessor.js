@@ -133,7 +133,7 @@ async function updateMetaFile(sessionId, finalBuffer, finalPath, podcastUrl) {
     ...existing,
     sessionId: cleanId,
     artUrl: `${process.env.R2_PUBLIC_BASE_URL_ART}/${cleanId}.png`,
-    transcriptUrl: `${process.env.R2_PUBLIC_BASE_URL_RAW_TEXT}/${cleanId}.txt`,
+    transcriptUrl: `${process.env.R2_PUBLIC_BASE_URL_TRANSCRIPT}/${cleanId}.txt`,
     podcastUrl,
     duration,
     fileSize,
