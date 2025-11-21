@@ -13,4 +13,5 @@ if (!fs.existsSync(TEMP_DIR)) {
   log.debug("temp.dir.created", { TEMP_DIR });
 }
 
-log.info("temp.dir.verified", { TEMP_DIR });
+log.info("💽 temp.dir.verified");
+log.debug("temp.dir.verified", { TEMP_DIR });
