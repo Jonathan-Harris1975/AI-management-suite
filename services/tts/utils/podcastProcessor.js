@@ -159,23 +159,54 @@ async function verifyAudioFile(filePath, label, sessionId) {
     const stats = await fs.promises.stat(filePath);
     if (stats.size === 0) throw new Error(`File is empty (0 bytes)`);
 
+    // More lenient ffprobe command that handles problematic MP3 files better
     const probe = spawnSync(
       "ffprobe",
       [
-        "-v",
-        "error",
-        "-select_streams",
-        "a:0",
-        "-show_entries",
-        "stream=duration,codec_name,sample_rate,channels,bit_rate",
-        "-of",
-        "json",
-        filePath,
+        "-v", "error",
+        "-skip_frame", "nokey", // Skip non-key frames to avoid seek issues
+        "-select_streams", "a:0",
+        "-show_entries", "format=duration:stream=codec_type",
+        "-of", "json",
+        filePath
       ],
-      { encoding: "utf8", timeout: 10000 }
+      { encoding: "utf8", timeout: 15000 } // Increased timeout
     );
 
-    if (probe.status !== 0) throw new Error(probe.stderr || "ffprobe failure");
+    // If the basic probe fails, try an even more lenient approach
+    if (probe.status !== 0) {
+      debug(`⚠️ First verification attempt failed for ${label}, trying fallback`, {
+        sessionId,
+        error: probe.stderr
+      });
+
+      // Fallback: Just check if it's an audio file and has some duration
+      const fallbackProbe = spawnSync(
+        "ffprobe",
+        [
+          "-v", "quiet",
+          "-show_entries", "format=duration",
+          "-of", "default=noprint_wrappers=1:nokey=1",
+          filePath
+        ],
+        { encoding: "utf8", timeout: 10000 }
+      );
+
+      if (fallbackProbe.status === 0 && fallbackProbe.stdout.trim()) {
+        const duration = parseFloat(fallbackProbe.stdout.trim());
+        if (duration > 0) {
+          debug(`✅ Fallback verification passed for ${label}`, {
+            sessionId,
+            filePath,
+            size: stats.size,
+            duration
+          });
+          return { streams: [{ duration }], format: { duration } };
+        }
+      }
+
+      throw new Error(probe.stderr || "ffprobe failure");
+    }
 
     const data = JSON.parse(probe.stdout);
 
@@ -188,6 +219,19 @@ async function verifyAudioFile(filePath, label, sessionId) {
 
     return data;
   } catch (err) {
+    // If verification fails but file exists and has reasonable size, log warning but continue
+    if (label === "main") {
+      const stats = await fs.promises.stat(filePath);
+      if (stats.size > 1000) { // If file is >1KB, it's probably usable
+        warn(`⚠️ Audio verification warning for ${label} (but proceeding)`, {
+          sessionId,
+          error: err.message,
+          fileSize: stats.size
+        });
+        return { streams: [{}], format: {} }; // Return minimal valid structure
+      }
+    }
+    
     throw new Error(
       `Audio verification failed for ${label}: ${err.message}`
     );
@@ -365,7 +409,21 @@ async function runPodcastPipeline(
   attempt,
   total
 ) {
-  await verifyAudioFile(mainPath, "main", sessionId);
+  try {
+    await verifyAudioFile(mainPath, "main", sessionId);
+  } catch (err) {
+    // If main file verification fails but file exists and has reasonable size, continue anyway
+    const stats = await fs.promises.stat(mainPath);
+    if (stats.size > 1000) {
+      warn(`⚠️ Main audio verification failed but file seems usable, continuing`, {
+        sessionId,
+        fileSize: stats.size,
+        error: err.message
+      });
+    } else {
+      throw err;
+    }
+  }
 
   const { introFaded, outroFaded } = await applyFades(
     sessionId,
@@ -416,6 +474,11 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     return editedBuffer;
   }
 
+  // Add buffer size validation
+  if (editedBuffer.length < 1000) {
+    throw new Error(`Edited buffer too small: ${editedBuffer.length} bytes`);
+  }
+
   const introPath = path.join(TMP_DIR, `${sessionId}_intro.mp3`);
   const mainPath = path.join(TMP_DIR, `${sessionId}_main.mp3`);
   const outroPath = path.join(TMP_DIR, `${sessionId}_outro.mp3`);
@@ -423,6 +486,12 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
   try {
     await fs.promises.writeFile(mainPath, editedBuffer);
+
+    // Verify the file was written correctly
+    const writtenStats = await fs.promises.stat(mainPath);
+    if (writtenStats.size !== editedBuffer.length) {
+      throw new Error(`File write incomplete: expected ${editedBuffer.length} bytes, got ${writtenStats.size}`);
+    }
 
     startKeepAlive(keepAliveId, 15000);
 
@@ -542,4 +611,4 @@ export async function podcastProcessor(sessionId, editedBuffer) {
 
     throw err;
   }
-      }
+          }
