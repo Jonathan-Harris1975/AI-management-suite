@@ -224,8 +224,7 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
       if (chunk.includes("frame=")) {
         debug(`📊 FFmpeg progress: ${label}`, {
           sessionId,
-          lastLines: chunk.split("
-").slice(-2).join(" "),
+          lastLines: chunk.split("").slice(-2).join(" "),
         });
       }
     });
