@@ -1,4 +1,4 @@
-import fs from "fs";
+i8import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import { info, warn, error, debug } from "#logger.js";
@@ -24,17 +24,31 @@ const PODCAST_RETRY_BACKOFF = Number(
   process.env.RETRY_BACKOFF_MULTIPLIER || 2
 );
 
-const PODCAST_FFMPEG_TIMEOUT_MS = Number(
-  process.env.PODCAST_FFMPEG_TIMEOUT_MS || 5 * 60 * 1000
+// CRITICAL FIX: Scale timeout based on file sizes and operation
+const BASE_FFMPEG_TIMEOUT_MS = Number(
+  process.env.PODCAST_FFMPEG_TIMEOUT_MS || 10 * 60 * 1000 // 10 minutes default
 );
 
 const MIN_FILE_SIZE = 100 * 1024; // 100KB minimum file size
+
+// Process management
+const activeProcesses = new Map();
 
 if (!fs.existsSync(TMP_DIR)) {
   fs.mkdirSync(TMP_DIR, { recursive: true });
 }
 
 // ---------- Helpers ----------
+
+/**
+ * Calculate dynamic timeout based on file sizes
+ * Estimates ~20MB per minute of audio processing
+ */
+function calculateFFmpegTimeout(fileSizes = []) {
+  const totalMB = fileSizes.reduce((sum, size) => sum + (size / (1024 * 1024)), 0);
+  const estimatedMs = Math.max(BASE_FFMPEG_TIMEOUT_MS, totalMB * 3000); // 3s per MB minimum
+  return Math.min(estimatedMs, 30 * 60 * 1000); // Cap at 30 minutes
+}
 
 function scheduleDelayedCleanup(sessionId) {
   setTimeout(async () => {
@@ -47,7 +61,7 @@ function scheduleDelayedCleanup(sessionId) {
           sessionFiles.map((f) => fs.promises.unlink(path.join(TMP_DIR, f)))
         );
 
-        info("🧹 Delayed cleanup completed", {
+        debug("🧹 Delayed cleanup completed", {
           sessionId,
           files: sessionFiles.length,
           delay: "2 minutes",
@@ -61,7 +75,7 @@ function scheduleDelayedCleanup(sessionId) {
     }
   }, CLEANUP_DELAY_MS);
 
-  info("⏰ Scheduled delayed cleanup", {
+  debug("⏰ Scheduled delayed cleanup", {
     sessionId,
     delayMs: CLEANUP_DELAY_MS,
     scheduledAt: new Date().toISOString(),
@@ -74,8 +88,7 @@ async function updateMetaFile(sessionId, finalBuffer, finalPath, podcastUrl) {
 
   const metaBaseUrl = process.env.R2_PUBLIC_BASE_URL_META || "";
   const artBaseUrl = process.env.R2_PUBLIC_BASE_URL_ART || "";
-  const transcriptBaseUrl =
-    process.env.R2_PUBLIC_BASE_URL_TRANSCRIPT || "";
+  const transcriptBaseUrl = process.env.R2_PUBLIC_BASE_URL_TRANSCRIPT || "";
 
   const metaUrl = metaBaseUrl ? `${metaBaseUrl}/${metaKey}` : "";
 
@@ -173,32 +186,74 @@ async function verifyFileSize(filePath, label, sessionId) {
   return stats.size;
 }
 
-function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS) {
+/**
+ * Enhanced FFmpeg runner with better process management and progress tracking
+ */
+function runFFmpeg(args, label, sessionId, fileSizes = [], maxTimeoutMs = null) {
   return new Promise((resolve, reject) => {
-    const ff = spawn("ffmpeg", args);
+    const timeoutMs = maxTimeoutMs || calculateFFmpegTimeout(fileSizes);
+    const processKey = `${sessionId}-${label}`;
+    
+    const ff = spawn("ffmpeg", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false,
+    });
+
     let stderr = "";
     let isResolved = false;
 
+    // Track active process
+    activeProcesses.set(processKey, { process: ff, startTime: Date.now() });
+
     const timeoutId = setTimeout(() => {
       if (isResolved) return;
-      warn(`⚠️ FFmpeg timeout: ${label}`, { sessionId });
-      try {
-        ff.kill("SIGKILL");
-      } catch (killErr) {
-        debug("Error killing ffmpeg process", { error: killErr.message });
-      }
+      
+      warn(`⚠️ FFmpeg timeout: ${label}`, {
+        sessionId,
+        timeoutMs,
+        elapsed: Date.now() - activeProcesses.get(processKey)?.startTime,
+      });
+      
       isResolved = true;
-      reject(new Error(`FFmpeg timed out after ${timeoutMs}ms`));
+      activeProcesses.delete(processKey);
+
+      // Graceful kill sequence: SIGTERM → SIGKILL
+      try {
+        ff.kill("SIGTERM");
+        const hardKillTimeout = setTimeout(() => {
+          try {
+            ff.kill("SIGKILL");
+          } catch (err) {
+            debug("Error force-killing ffmpeg", { error: err.message });
+          }
+        }, 5000);
+
+        ff.once("exit", () => clearTimeout(hardKillTimeout));
+      } catch (killErr) {
+        debug("Error terminating ffmpeg process", { error: killErr.message });
+      }
+
+      reject(new Error(`FFmpeg timed out after ${timeoutMs}ms for ${label}`));
     }, timeoutMs);
 
     ff.stderr.on("data", (d) => {
-      stderr += d.toString();
+      const chunk = d.toString();
+      stderr += chunk;
+      
+      // Log progress for long operations
+      if (chunk.includes("frame=")) {
+        debug(`📊 FFmpeg progress: ${label}`, {
+          sessionId,
+          progress: chunk.split("\n").slice(-2).join(" "),
+        });
+      }
     });
 
     ff.on("error", (err) => {
       if (isResolved) return;
       clearTimeout(timeoutId);
       isResolved = true;
+      activeProcesses.delete(processKey);
       reject(err);
     });
 
@@ -206,8 +261,21 @@ function runFFmpeg(args, label, sessionId, timeoutMs = PODCAST_FFMPEG_TIMEOUT_MS
       if (isResolved) return;
       clearTimeout(timeoutId);
       isResolved = true;
+      activeProcesses.delete(processKey);
+
       if (code === 0) return resolve();
-      reject(new Error(`FFmpeg failed (${label}): ${stderr.slice(-500)}`));
+
+      // Extract meaningful error from ffmpeg stderr
+      const errorLines = stderr
+        .split("\n")
+        .filter((line) => line.toLowerCase().includes("error") || line.toLowerCase().includes("invalid"))
+        .slice(-3);
+
+      reject(
+        new Error(
+          `FFmpeg failed (${label}, code ${code}): ${errorLines.join(" | ") || stderr.slice(-500)}`
+        )
+      );
     });
   });
 }
@@ -287,7 +355,6 @@ async function fetchEditedAudioFromR2(sessionId) {
     throw new Error("R2_PUBLIC_BASE_URL_EDITED_AUDIO is not configured");
   }
 
-  // User confirmed: key is just the sessionId, no suffix.
   const editedUrl = `${base}/${sessionId}_edited.mp3`;
 
   let editedBufferFromR2 = null;
@@ -319,8 +386,8 @@ async function fetchEditedAudioFromR2(sessionId) {
           `Edited audio from R2 too small: ${editedBufferFromR2.length} bytes`
         );
       }
-
-      info("✅ Retrieved edited audio from R2", {
+      info("🟩 Retrieved edited audio from R2" );
+      debug("✅ Retrieved edited audio from R2", {
         sessionId,
         size: editedBufferFromR2.length,
       });
@@ -351,7 +418,7 @@ async function fetchEditedAudioFromR2(sessionId) {
 }
 
 async function writeMainToDisk(sessionId, mainPath, buffer) {
-  info("💾 Writing main audio file from R2 buffer", {
+  debug("💾 Writing main audio file from R2 buffer", {
     sessionId,
     bufferSize: buffer.length,
     targetPath: mainPath,
@@ -366,14 +433,10 @@ async function immediateCleanupTempFiles(sessionId) {
     const files = await fs.promises.readdir(TMP_DIR);
     const sessionFiles = files.filter((f) => f.includes(sessionId));
 
-    const intermediateFiles = sessionFiles.filter(
-      (f) => !f.includes(".mp3")
-    );
+    const intermediateFiles = sessionFiles.filter((f) => !f.includes(".mp3"));
 
     await Promise.allSettled(
-      intermediateFiles.map((f) =>
-        fs.promises.unlink(path.join(TMP_DIR, f))
-      )
+      intermediateFiles.map((f) => fs.promises.unlink(path.join(TMP_DIR, f)))
     );
 
     info("🧹 Immediate cleanup completed", {
@@ -387,7 +450,13 @@ async function immediateCleanupTempFiles(sessionId) {
 
 // ---------- Core FFmpeg concat (demuxer) ----------
 
-async function buildConcatListFile(sessionId, introPath, mainPath, outroPath, listPath) {
+async function buildConcatListFile(
+  sessionId,
+  introPath,
+  mainPath,
+  outroPath,
+  listPath
+) {
   const lines = [
     `file '${introPath.replace(/'/g, "'\''")}'`,
     `file '${mainPath.replace(/'/g, "'\''")}'`,
@@ -403,12 +472,18 @@ async function buildConcatListFile(sessionId, introPath, mainPath, outroPath, li
   });
 }
 
-async function concatWithDemuxer(sessionId, introPath, mainPath, outroPath, finalPath) {
+async function concatWithDemuxer(
+  sessionId,
+  introPath,
+  mainPath,
+  outroPath,
+  finalPath
+) {
   const listPath = path.join(TMP_DIR, `${sessionId}_concat_list.txt`);
 
-  await verifyFileSize(introPath, "intro", sessionId);
-  await verifyFileSize(mainPath, "main", sessionId);
-  await verifyFileSize(outroPath, "outro", sessionId);
+  const introSize = await verifyFileSize(introPath, "intro", sessionId);
+  const mainSize = await verifyFileSize(mainPath, "main", sessionId);
+  const outroSize = await verifyFileSize(outroPath, "outro", sessionId);
 
   await buildConcatListFile(sessionId, introPath, mainPath, outroPath, listPath);
 
@@ -425,7 +500,12 @@ async function concatWithDemuxer(sessionId, introPath, mainPath, outroPath, fina
     finalPath,
   ];
 
-  await runFFmpeg(args, "concat-demuxer", sessionId);
+  // Pass file sizes for dynamic timeout calculation
+  await runFFmpeg(args, "concat-demuxer", sessionId, [
+    introSize,
+    mainSize,
+    outroSize,
+  ]);
 
   await verifyFileSize(finalPath, "final podcast", sessionId);
 }
@@ -467,8 +547,8 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     warn("⚠️ Missing intro/outro URL", { sessionId });
     return editedBuffer;
   }
-
-  info("🔍 podcastProcessor called", {
+  info("🎛️ podcastProcessor started ");
+  debug ("🔍 podcastProcessor called", {
     sessionId,
     incomingBufferType: typeof editedBuffer,
     incomingIsBuffer: Buffer.isBuffer(editedBuffer),
@@ -556,8 +636,8 @@ export async function podcastProcessor(sessionId, editedBuffer) {
       await putObject("podcast", podcastKey, finalBuffer, {
         contentType: "audio/mpeg",
       });
-
-      info("📡 Uploaded final podcast", {
+      info("📡 Uploaded final podcast");
+      debug("📡 Uploaded final podcast", {
         sessionId,
         podcastKey,
         size: finalBuffer.length,
@@ -578,8 +658,8 @@ export async function podcastProcessor(sessionId, editedBuffer) {
         finalPath,
         podcastUrl
       );
-
-      info("📘 Metadata updated", {
+      info("📘 Metadata updated");
+      debug("📘 Metadata updated", {
         sessionId,
         metaKey,
         metaUrl,
