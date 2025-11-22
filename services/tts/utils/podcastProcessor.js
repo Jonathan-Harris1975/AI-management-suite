@@ -75,9 +75,7 @@ async function updateMetaFile(sessionId, finalBuffer, finalPath, podcastUrl) {
   const metaBaseUrl = process.env.R2_PUBLIC_BASE_URL_META || "";
   const artBaseUrl = process.env.R2_PUBLIC_BASE_URL_ART || "";
   const transcriptBaseUrl =
-    process.env.R2_PUBLIC_BASE_URL_TRANSCRIPT ||
-    process.env.R2_PUBLIC_BASE_URL_RAW_TEXT ||
-    "";
+    process.env.R2_PUBLIC_BASE_URL_TRANSCRIPT || "";
 
   const metaUrl = metaBaseUrl ? `${metaBaseUrl}/${metaKey}` : "";
 
@@ -290,7 +288,7 @@ async function fetchEditedAudioFromR2(sessionId) {
   }
 
   // User confirmed: key is just the sessionId, no suffix.
-  const editedUrl = `${base}/${sessionId}.mp3`;
+  const editedUrl = `${base}/${sessionId}_edited.mp3`;
 
   let editedBufferFromR2 = null;
   let lastErr = null;
@@ -369,7 +367,7 @@ async function immediateCleanupTempFiles(sessionId) {
     const sessionFiles = files.filter((f) => f.includes(sessionId));
 
     const intermediateFiles = sessionFiles.filter(
-      (f) => !f.includes("_final.mp3")
+      (f) => !f.includes(".mp3")
     );
 
     await Promise.allSettled(
