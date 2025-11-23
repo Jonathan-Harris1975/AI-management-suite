@@ -10,7 +10,7 @@ const TMP_DIR = "/tmp/podcast_master";
 const PODCAST_INTRO_URL = process.env.PODCAST_INTRO_URL || "";
 const PODCAST_OUTRO_URL = process.env.PODCAST_OUTRO_URL || "";
 
-const CLEANUP_DELAY_MS = 2 * 60 * 1000; // 2-minute delay for cleanup
+const CLEANUP_DELAY_MS = 1* 60 * 1000; // 2-minute delay for cleanup
 
 const MAX_PODCAST_RETRIES = Number(
   process.env.MAX_PODCAST_RETRIES || process.env.MAX_CHUNK_RETRIES || 3
@@ -752,4 +752,44 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     }
 
     // 8. Update metadata (best effort)
-    
+    try {
+      const { metaKey, metaUrl } = await updateMetaFile(
+        sessionId,
+        finalBuffer,
+        finalPath,
+        podcastUrl
+      );
+      info("📘 Metadata updated");
+      debug("📘 Metadata updated", {
+        sessionId,
+        metaKey,
+        metaUrl,
+      });
+    } catch (metaErr) {
+      error("❌ Failed to update metadata", {
+        sessionId,
+        error: metaErr.message,
+      });
+    }
+
+    // 9. Schedule delayed full cleanup
+    scheduleDelayedCleanup(sessionId);
+
+    return {
+      buffer: finalBuffer,
+      key: podcastKey,
+      url: podcastUrl,
+    };
+  } catch (err) {
+    stopKeepAlive(keepAliveId);
+    await immediateCleanupTempFiles(sessionId);
+
+    error("❌ podcastProcessor failed", {
+      sessionId,
+      error: err.message,
+      stack: err.stack,
+    });
+
+    throw err;
+  }
+}
