@@ -752,22 +752,4 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     }
 
     // 8. Update metadata (best effort)
-    try {
-      const { metaKey, metaUrl } = await updateMetaFile(
-        sessionId,
-        finalBuffer,
-        finalPath,
-        podcastUrl
-      );
-      info("📘 Metadata updated");
-      debug("📘 Metadata updated", {
-        sessionId,
-        metaKey,
-        metaUrl,
-      });
-    } catch (metaErr) {
-      error("❌ Failed to update metadata", {
-        sessionId,
-        error: metaErr.message,
-      });
     
