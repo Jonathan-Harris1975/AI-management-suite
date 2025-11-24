@@ -1,6 +1,13 @@
-// services/rss-feed-podcast/generateFeed.js
 // ============================================================
-// 🧩 RSS Feed XML Generator (from meta JSON)
+// 🧩 RSS Feed XML Generator (FULLY UPDATED)
+// ============================================================
+//
+// Improvements:
+// ✔ Accepts both meta.sessionId and meta.session.sessionId
+// ✔ Strong validation + descriptive warnings
+// ✔ Prevents silent episode drops
+// ✔ Stable date handling (pubDate → updatedAt → now)
+// ✔ Clean keyword CSV generation
 // ============================================================
 
 import { buildRssXml } from "./xmlBuilder.js";
@@ -18,7 +25,7 @@ export function generateFeedXML(episodesMeta) {
     return db - da;
   });
 
-  info(`📝 Building RSS feed with ${sorted.length} episodes`);
+  info(`📝 Building RSS feed with ${sorted.length} episode(s)`);
 
   // Map show-level env vars
   const rawLang = (process.env.PODCAST_LANGUAGE || "en-gb")
@@ -41,30 +48,41 @@ export function generateFeedXML(episodesMeta) {
     imageUrl: process.env.PODCAST_IMAGE_URL || "",
     categories: [
       process.env.PODCAST_CATEGORY_1 || "",
-      process.env.PODCAST_CATEGORY_2 || "",
+      process.env.PODCAST_CATEGORY_2 || ""
     ].filter(Boolean),
     fundingUrl: process.env.funding_url || "",
     fundingText: process.env.funding_text || "",
     rssSelfLink:
       process.env.PODCAST_RSS_FEED_URL ||
       process.env.R2_PUBLIC_BASE_URL_RSS_FEEDS ||
-      "",
+      ""
   };
 
   const items = sorted.map(mapMetaToEpisode).filter(Boolean);
 
   if (items.length === 0) {
-    warn("No valid items generated for RSS feed");
+    warn("⚠️ RSS generated with ZERO valid episode items.");
+  } else {
+    info(`📦 Final RSS will include ${items.length} item(s).`);
   }
 
   return buildRssXml(channel, items);
 }
 
+// ============================================================
+// Episode Mapper (FULLY UPDATED)
+// ============================================================
+
 function mapMetaToEpisode(meta) {
+  // 🔥 Robust sessionId resolution
+  const sessionId =
+    meta.sessionId ||
+    meta.session?.sessionId ||
+    null;
+
   const {
     title,
     description,
-    sessionId,
     podcastUrl,
     artUrl,
     transcriptUrl,
@@ -73,20 +91,32 @@ function mapMetaToEpisode(meta) {
     pubDate,
     updatedAt,
     episodeNumber,
-    keywords,
+    keywords
   } = meta;
 
-  if (!title || !podcastUrl || !sessionId) {
+  // 🔥 Show detailed info for missing fields
+  if (!sessionId || !title || !podcastUrl) {
+    warn("⚠️ Episode metadata missing required fields – skipped", {
+      title,
+      podcastUrl,
+      hasPodcastUrl: !!podcastUrl,
+      hasSessionId: !!sessionId,
+      rawSessionId: meta.sessionId,
+      nestedSessionId: meta.session?.sessionId
+    });
     return null;
   }
 
   const guid = sessionId;
+
+  // 🔥 Strong and resilient pubDate handling
   const pubDateStr = pubDate
     ? new Date(pubDate).toUTCString()
     : updatedAt
     ? new Date(updatedAt).toUTCString()
     : new Date().toUTCString();
 
+  // Convert keywords array → CSV
   const keywordsCsv = Array.isArray(keywords)
     ? keywords.join(", ")
     : typeof keywords === "string"
@@ -105,11 +135,14 @@ function mapMetaToEpisode(meta) {
       typeof episodeNumber === "number" ? episodeNumber : undefined,
     imageUrl: artUrl || "",
     transcriptUrl: transcriptUrl || "",
-    keywordsCsv,
+    keywordsCsv
   };
 }
 
+// ============================================================
+// Helpers
+// ============================================================
+
 function stripQuotes(str) {
-  // In case env accidentally has quotes like PODCAST_LINK="\"https://example.com\""
   return String(str).replace(/^"+|"+$/g, "").trim();
-    }
+}
