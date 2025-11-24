@@ -75,17 +75,42 @@ function scheduleDelayedCleanup(sessionId) {
  *  - normalises/sanitises contentType
  *  - retries once without contentType if Node throws ERR_INVALID_CHAR
  */
-async function safePutObject(bucketAlias, key, body, options) {
-  let cleanOptions = options;
+async function safePutObject(bucketAlias, key, body, contentType) {
+  let ct = contentType;
 
-  if (options && typeof options.contentType !== "undefined") {
-    const ct = String(options.contentType)
+  if (typeof ct !== "undefined") {
+    ct = String(ct)
       // strip any control chars that break HTTP headers
-      .replace(/[\r\n\t]+/g, " ")
+      .replace(/[
+	]+/g, " ")
       .trim();
-
-    cleanOptions = { ...options, contentType: ct };
   }
+
+  try {
+    if (ct) {
+      return await putObject(bucketAlias, key, body, ct);
+    }
+    return await putObject(bucketAlias, key, body);
+  } catch (err) {
+    const msg = String(err?.message || "");
+    const isHeaderError =
+      err?.code === "ERR_INVALID_CHAR" ||
+      msg.includes('Invalid character in header content ["content-type"]');
+
+    if (!isHeaderError) {
+      throw err;
+    }
+
+    // Retry without any contentType hint
+    warn("⚠️ Retrying putObject without contentType due to invalid header", {
+      bucketAlias,
+      key,
+      error: err.message,
+    });
+
+    return await putObject(bucketAlias, key, body);
+  }
+}
 
   try {
     if (cleanOptions) {
@@ -114,8 +139,7 @@ async function safePutObject(bucketAlias, key, body, options) {
 }
 
 async function updateMetaFile(sessionId, finalBuffer, finalPath, podcastUrl) {
-  const cleanId = sessionId;
-  const metaKey = `${cleanId}.json`;
+  const metaKey = `${sessionId}.json`;
 
   const metaBaseUrl = process.env.R2_PUBLIC_BASE_URL_META || "";
   const artBaseUrl = process.env.R2_PUBLIC_BASE_URL_ART || "";
@@ -128,9 +152,10 @@ async function updateMetaFile(sessionId, finalBuffer, finalPath, podcastUrl) {
 
   let existing = {};
 
+  // Load if exists
   if (metaUrl) {
     try {
-      const res = await fetch(metaUrl, { signal: AbortSignal.timeout(10000) });
+      const res = await fetch(metaUrl, { signal: AbortSignal.timeout(8000) });
       if (
         res.ok &&
         res.headers.get("content-type")?.includes("application/json")
@@ -144,6 +169,11 @@ async function updateMetaFile(sessionId, finalBuffer, finalPath, podcastUrl) {
       });
     }
   }
+
+  const sessionDate =
+    existing?.session?.date ||
+    existing?.createdAt ||
+    new Date().toISOString();
 
   // Duration via ffprobe (best effort; failure is non-fatal)
   let duration = null;
@@ -177,33 +207,37 @@ async function updateMetaFile(sessionId, finalBuffer, finalPath, podcastUrl) {
   }
 
   const fileSize = finalBuffer.length;
-  const baseDate =
-    existing.pubDate ||
-    existing.session?.date ||
-    existing.createdAt ||
-    new Date().toISOString();
-
-  const pubDate = new Date(baseDate).toUTCString();
 
   const updated = {
-    ...existing,
-    sessionId: cleanId,
-    artUrl: artBaseUrl ? `${artBaseUrl}/${cleanId}.png` : existing.artUrl,
+    session: {
+      sessionId,
+      date: sessionDate,
+    },
+    title: existing.title || "Untitled Episode",
+    description: existing.description || "",
+    keywords: existing.keywords || [],
+    artworkPrompt: existing.artworkPrompt || "",
+    episodeNumber: existing.episodeNumber || 1,
+
+    createdAt: existing.createdAt || sessionDate,
+    updatedAt: new Date().toISOString(),
+
+    artUrl: artBaseUrl ? `${artBaseUrl}/${sessionId}.png` : existing.artUrl,
     transcriptUrl: transcriptBaseUrl
-      ? `${transcriptBaseUrl}/${cleanId}.txt`
+      ? `${transcriptBaseUrl}/${sessionId}.txt`
       : existing.transcriptUrl,
     podcastUrl,
+
     duration,
     fileSize,
-    pubDate,
-    updatedAt: new Date().toISOString(),
+    pubDate: new Date(sessionDate).toUTCString(),
   };
 
   await safePutObject(
     "meta",
     metaKey,
     Buffer.from(JSON.stringify(updated, null, 2)),
-    { contentType: "application/json" }
+    "application/json"
   );
 
   return { metaKey, metaUrl };
@@ -734,9 +768,7 @@ export async function podcastProcessor(sessionId, editedBuffer) {
     const podcastUrl = `${process.env.R2_PUBLIC_BASE_URL_PODCAST}/${podcastKey}`;
 
     try {
-      await safePutObject("podcast", podcastKey, finalBuffer, {
-        contentType: "audio/mpeg",
-      });
+      await safePutObject("podcast", podcastKey, finalBuffer, "audio/mpeg");
       info("📡 Uploaded final podcast");
       debug("📡 Uploaded final podcast", {
         sessionId,
