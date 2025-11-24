@@ -80,8 +80,7 @@ async function safePutObject(bucketAlias, key, body, contentType) {
 
   if (typeof ct !== "undefined") {
     ct = String(ct)
-      .replace(/[
-	]+/g, " ")
+      .replace(/[ ]+/g, " ")
       .trim();
   }
 
