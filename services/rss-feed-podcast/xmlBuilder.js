@@ -1,6 +1,5 @@
-// services/rss-feed-podcast/xmlBuilder.js
 // ============================================================
-// 🏗 XML Builder for Podcast RSS
+// 🏗 XML Builder for Podcast RSS (PSP-1 / Podcasting 2.0)
 // ============================================================
 //
 // Expects:
@@ -10,7 +9,11 @@
 //     ownerName, ownerEmail, imageUrl,
 //     categories: [string],
 //     fundingUrl, fundingText,
-//     rssSelfLink (optional)
+//     rssSelfLink (optional - feed URL),
+//     podcastGuid (optional but recommended),
+//     podcastLocked ("yes" | "no"),
+//     podcastLockedOwner (email for podcast:locked owner attr),
+//     generator (optional)
 //   }
 //
 //   items: [{
@@ -38,6 +41,10 @@ export function buildRssXml(channel, items) {
     fundingUrl,
     fundingText,
     rssSelfLink,
+    podcastGuid,
+    podcastLocked,
+    podcastLockedOwner,
+    generator
   } = channel;
 
   const now = new Date().toUTCString();
@@ -52,14 +59,14 @@ export function buildRssXml(channel, items) {
   );
   parts.push(`<channel>`);
 
-  // Core channel info
+  // Core channel info (required by PSP-1: title, description, link, language)
   if (title) parts.push(tag("title", title));
   if (link) parts.push(tag("link", link));
   if (description) parts.push(tag("description", description));
   if (language) parts.push(tag("language", language));
   if (copyright) parts.push(tag("copyright", copyright));
 
-  // Atom self-link (optional)
+  // Atom self-link (required by PSP-1 for compliant feeds)
   if (rssSelfLink) {
     parts.push(
       `<atom:link href="${escapeXml(
@@ -71,7 +78,12 @@ export function buildRssXml(channel, items) {
   // Dates
   parts.push(tag("lastBuildDate", now));
 
-  // iTunes show-level
+  // Generator – recommended by PSP to identify feed producer
+  if (generator) {
+    parts.push(tag("generator", generator));
+  }
+
+  // iTunes show-level (required: itunes:category, itunes:explicit; we also add others)
   if (itunesAuthor) parts.push(tag("itunes:author", itunesAuthor));
   if (itunesExplicit) parts.push(tag("itunes:explicit", itunesExplicit));
   if (itunesType) parts.push(tag("itunes:type", itunesType));
@@ -88,7 +100,7 @@ export function buildRssXml(channel, items) {
     parts.push(`<itunes:image href="${escapeXml(imageUrl)}" />`);
   }
 
-  // Categories
+  // Categories (required: at least one itunes:category per PSP-1)
   categories
     .filter(Boolean)
     .forEach((cat) => {
@@ -107,10 +119,30 @@ export function buildRssXml(channel, items) {
     );
   }
 
-  // Episodes
+  // Podcasting 2.0 / PSP-1 recommended:
+  // podcast:guid – unique show identifier
+  if (podcastGuid) {
+    parts.push(tag("podcast:guid", podcastGuid));
+  }
+
+  // podcast:locked – signal that this feed should not be imported
+  if (podcastLocked) {
+    const ownerAttr = podcastLockedOwner || ownerEmail || "";
+    const ownerPart = ownerAttr
+      ? ` owner="${escapeXml(ownerAttr)}"`
+      : "";
+    parts.push(
+      `<podcast:locked${ownerPart}>${escapeXml(
+        podcastLocked
+      )}</podcast:locked>`
+    );
+  }
+
+  // Episodes (items)
   items.forEach((ep) => {
     parts.push("<item>");
 
+    // PSP-1 required per item: title, enclosure, guid
     if (ep.title) parts.push(tag("title", ep.title));
     if (ep.description) parts.push(tag("description", ep.description));
     if (ep.guid) parts.push(tag("guid", ep.guid));
@@ -124,6 +156,7 @@ export function buildRssXml(channel, items) {
       );
     }
 
+    // Recommended item-level tags
     if (typeof ep.durationSeconds === "number") {
       parts.push(tag("itunes:duration", formatDuration(ep.durationSeconds)));
     }
@@ -179,8 +212,8 @@ function formatDuration(totalSeconds) {
     return [
       h,
       m.toString().padStart(2, "0"),
-      s.toString().padStart(2, "0"),
+      s.toString().padStart(2, "0")
     ].join(":");
   }
   return `${m}:${s.toString().padStart(2, "0")}`;
-        }
+                   }
