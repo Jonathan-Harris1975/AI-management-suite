@@ -193,5 +193,5 @@ return {
   key: finalKey,
   url: finalUrl
 };
-
+  }
 export default orchestrateTTS;
