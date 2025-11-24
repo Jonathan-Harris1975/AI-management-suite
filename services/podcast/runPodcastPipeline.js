@@ -7,6 +7,7 @@ import { log } from "#logger.js";
 import { orchestrateScript } from "../script/index.js";
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
 import { createPodcastArtwork } from "../artwork/createPodcastArtwork.js";
+import cleanupSession from "../shared/utils/cleanupSession.js";
 import runRssFeedCreator from "../rss-feed-podcast/index.js";
 
 export async function runPodcastPipeline(sessionId) {
@@ -18,7 +19,7 @@ export async function runPodcastPipeline(sessionId) {
     log.info("🧾 Script generation complete", { sessionId });
 
     // 2️⃣ Artwork generation (cover art for this episode)
-    const artwork = await createPodcastArtwork({ sessionId });
+    const artwork = await createPodcastArtwork(sessionId);
     log.info("🎨 Artwork generation complete", { sessionId });
 
     // 3️⃣ TTS end-to-end
@@ -42,7 +43,20 @@ export async function runPodcastPipeline(sessionId) {
       });
     }
 
-    // 5️⃣ Final summary returned to caller (Make.com, route, etc.)
+    // 5️⃣ Session cleanup (non-fatal; runs after RSS update)
+    try {
+      log.info("🧹 Cleaning up session artefacts from R2...", { sessionId });
+      await cleanupSession(sessionId);
+      log.info("🧹 Session cleanup complete", { sessionId });
+    } catch (cleanupErr) {
+      log.error("⚠️ Session cleanup failed (non-fatal)", {
+        sessionId,
+        error: cleanupErr?.message,
+      });
+    }
+
+    // 6️⃣ Final summary returned to caller (Make.com, route, etc.)
+
     const summary = { sessionId, script, artwork, tts };
 
     log.info("🏁 Podcast pipeline complete", { sessionId });
