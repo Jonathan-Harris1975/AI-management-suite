@@ -1,6 +1,6 @@
 // services/rss-feed-podcast/index.js
 // ============================================================
-// 📡 Podcast RSS Feed Creator - Orchestrator
+// 📡 Podcast RSS Feed Creator - Orchestrator (FIXED)
 // ============================================================
 //
 // - Reads episode meta JSON from R2 bucket alias "meta"
@@ -15,7 +15,10 @@ import { generateFeedXML } from "./generateFeed.js";
 import { notifyHubByUrl } from "#shared/podcastIndexClient.js";
 
 const META_BUCKET_ALIAS = "meta";
-const META_PREFIX = "podcast-meta/";
+
+// FIXED: your files live in bucket root, NOT "podcast-meta/"
+const META_PREFIX = "";
+
 const RSS_BUCKET_ALIAS = "podcastRss";
 const RSS_KEY = "turing-torch.xml";
 
@@ -48,7 +51,7 @@ export async function runRssFeedCreator() {
   );
 
   if (metaKeys.length === 0) {
-    warn("No .json metadata files found with podcast-meta/ prefix");
+    warn("No .json metadata files found in meta bucket root");
     return;
   }
 
@@ -124,7 +127,6 @@ export async function runRssFeedCreator() {
       feedUrl: FEED_URL,
     });
   } catch (err) {
-    // Do NOT throw — failure here should not break the pipeline
     warn("⚠️ PodcastIndex Hub notify failed", {
       feedUrl: FEED_URL,
       error: String(err),
