@@ -1,5 +1,5 @@
 // ============================================================
-// 🧩 RSS Feed XML Generator (FULLY UPDATED)
+// 🧩 RSS Feed XML Generator (PSP-1 / Podcasting 2.0 Ready)
 // ============================================================
 //
 // Improvements:
@@ -8,6 +8,7 @@
 // ✔ Prevents silent episode drops
 // ✔ Stable date handling (pubDate → updatedAt → now)
 // ✔ Clean keyword CSV generation
+// ✔ Supplies podcast:guid, podcast:locked, generator to XML builder
 // ============================================================
 
 import { buildRssXml } from "./xmlBuilder.js";
@@ -33,6 +34,10 @@ export function generateFeedXML(episodesMeta) {
     .toLowerCase();
   const language = rawLang === "en-uk" ? "en-gb" : rawLang;
 
+  // Podcast locked: default "yes" unless explicitly "no"
+  const lockedRaw = String(process.env.PODCAST_LOCKED || "yes").trim().toLowerCase();
+  const podcastLocked = lockedRaw === "no" ? "no" : "yes";
+
   const channel = {
     title: process.env.PODCAST_TITLE || "Podcast",
     link: stripQuotes(process.env.PODCAST_LINK || ""),
@@ -52,10 +57,31 @@ export function generateFeedXML(episodesMeta) {
     ].filter(Boolean),
     fundingUrl: process.env.funding_url || "",
     fundingText: process.env.funding_text || "",
+
+    // Atom self-link (feed URL). Strongly recommended for PSP-1.
+    // Prefer explicit feed URL env, fallback to RSS feeds base if set.
     rssSelfLink:
-      process.env.PODCAST_RSS_FEED_URL ||
-      process.env.R2_PUBLIC_BASE_URL_RSS_FEEDS ||
-      ""
+      stripQuotes(process.env.PODCAST_RSS_FEED_URL || "") ||
+      stripQuotes(process.env.R2_PUBLIC_BASE_URL_RSS_FEEDS || ""),
+
+    // Podcasting 2.0 / PSP-1 recommended:
+    // podcast:guid – globally unique ID for the show
+    podcastGuid:
+      stripQuotes(process.env.PODCAST_GUID || "") ||
+      stripQuotes(process.env.PODCAST_LINK || "") || // fallback
+      "turing-torch-ai-weekly",
+
+    // podcast:locked – protect feed from unauthorised import
+    podcastLocked, // "yes" or "no"
+    podcastLockedOwner:
+      process.env.PODCAST_LOCKED_OWNER_EMAIL ||
+      process.env.PODCAST_OWNER_EMAIL ||
+      "",
+
+    // generator – recommended by PSP to identify the tool building the feed
+    generator:
+      process.env.PODCAST_GENERATOR ||
+      "Turing Podcast Suite (Node.js, PSP-1 compatible)"
   };
 
   const items = sorted.map(mapMetaToEpisode).filter(Boolean);
@@ -74,7 +100,7 @@ export function generateFeedXML(episodesMeta) {
 // ============================================================
 
 function mapMetaToEpisode(meta) {
-  // 🔥 Robust sessionId resolution
+  // Robust sessionId resolution
   const sessionId =
     meta.sessionId ||
     meta.session?.sessionId ||
@@ -94,7 +120,7 @@ function mapMetaToEpisode(meta) {
     keywords
   } = meta;
 
-  // 🔥 Show detailed info for missing fields
+  // Detailed info for missing fields
   if (!sessionId || !title || !podcastUrl) {
     warn("⚠️ Episode metadata missing required fields – skipped", {
       title,
@@ -109,7 +135,7 @@ function mapMetaToEpisode(meta) {
 
   const guid = sessionId;
 
-  // 🔥 Strong and resilient pubDate handling
+  // Resilient pubDate handling
   const pubDateStr = pubDate
     ? new Date(pubDate).toUTCString()
     : updatedAt
