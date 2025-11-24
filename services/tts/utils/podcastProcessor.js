@@ -81,8 +81,7 @@ async function safePutObject(bucketAlias, key, body, contentType) {
   if (typeof ct !== "undefined") {
     ct = String(ct)
       // strip any control chars that break HTTP headers
-      .replace(/[
-	]+/g, " ")
+      .replace(/[]+/g, " ")
       .trim();
   }
 
