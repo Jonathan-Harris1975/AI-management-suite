@@ -159,53 +159,39 @@ export async function orchestrateTTS(session) {
     });
 
     // --------------------------
-    // 5️⃣ Podcast Mixdown + Mastering
-    // --------------------------o
-    const t4 = Date.now();
-    const finalAudio = await podcastProcessor(sessionId, editedBuffer);
+// 5️⃣ Podcast Mixdown + Mastering
+// --------------------------
+const t4 = Date.now();
+const final = await podcastProcessor(sessionId, editedBuffer);
 
-    if (!finalAudio?.length) {
-      throw new Error("Mixdown step returned no audio data.");
-    }
+// podcastProcessor returns: { buffer, key, url }
+const finalBuffer = final?.buffer || null;
+const finalKey = final?.key || `${sessionId}_podcast.mp3`;
+const finalUrl = final?.url || (
+  process.env.R2_PUBLIC_BASE_URL_PODCAST
+    ? `${process.env.R2_PUBLIC_BASE_URL_PODCAST}/${finalKey}`
+    : null
+);
 
-    info("🎚️ final podcast audio ready")
-    debug ("🎚️ Mixdown complete", {
-      sessionId,
-      bytes: finalAudio.length,
-      ms: Date.now() - t4,
-    });
-
-    // --------------------------
-    // 6️⃣ Upload final MP3 to R2
-    // --------------------------
-    const outputFile = `${sessionId}.mp3`;
-
-    await putObject(FINAL_BUCKET, outputFile, finalAudio, "audio/mpeg");
-
-    const publicUrl = `${PUBLIC_BASE_URL_PODCAST}/${encodeURIComponent(
-      outputFile
-    )}`;
-
-  info("💾 Uploaded final MP3 to R2")
-    debug ("💾 Uploaded final MP3 to R2", {
-      sessionId,
-      key: outputFile,
-      publicUrl,
-      totalMs: Date.now() - t0,
-    });
-
-    stopKeepAlive("ttsProcessor");
-
-    return { ok: true, sessionId, file: outputFile, url: publicUrl };
-  } catch (err) {
-    error("💥 TTS orchestration failed", {
-      sessionId,
-      error: err?.stack || err?.message,
-    });
-
-    stopKeepAlive("ttsProcessor");
-    throw err;
-  }
+if (!finalBuffer || finalBuffer.length === 0) {
+  throw new Error("Mixdown step returned no audio data.");
 }
+
+info("🎚️ final podcast audio ready", { sessionId });
+debug("🎚️ Mixdown complete", {
+  sessionId,
+  bytes: finalBuffer.length,
+  key: finalKey,
+  url: finalUrl,
+  ms: Date.now() - t4,
+});
+
+// Do NOT upload here — podcastProcessor already uploads!
+return {
+  ok: true,
+  sessionId,
+  key: finalKey,
+  url: finalUrl
+};
 
 export default orchestrateTTS;
