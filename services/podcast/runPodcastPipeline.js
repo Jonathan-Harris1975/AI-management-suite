@@ -18,7 +18,7 @@ export async function runPodcastPipeline(sessionId) {
     log.info("🧾 Script generation complete", { sessionId });
 
     // 2️⃣ Artwork generation (cover art for this episode)
-    const artwork = await createPodcastArtwork(sessionId);
+    const artwork = await createPodcastArtwork({ sessionId });
     log.info("🎨 Artwork generation complete", { sessionId });
 
     // 3️⃣ TTS end-to-end
