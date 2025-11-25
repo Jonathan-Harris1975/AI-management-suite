@@ -114,8 +114,9 @@ export const R2_PUBLIC_URLS = {
  transcript:      R2_PUBLIC_BASE_URL_TRANSCRIPT,
   chunks:          R2_PUBLIC_BASE_URL_CHUNKS,
   "podcast-chunks":R2_PUBLIC_BASE_URL_CHUNKS,
-
-  // NEW — edited/mastered audio
+// Podcast-specific RSS feed
+  podcastRss:      R2_PUBLIC_BASE_URL_PODCAST_RSS,
+  //  edited/mastered audio
   edited:          R2_PUBLIC_BASE_URL_EDITED_AUDIO,
   editedAudio:     R2_PUBLIC_BASE_URL_EDITED_AUDIO,
   "edited-audio":  R2_PUBLIC_BASE_URL_EDITED_AUDIO,
