@@ -1,10 +1,11 @@
 // ============================================================
-// 🖼️ Podcast Artwork Generator (OpenRouter Image Model)
+// 🖼️ Podcast Artwork Generator – Correct OpenRouter / Nano Banana
 // ============================================================
 //
-// NEW VERSION — supports Nano Banana, Gemini Flash Image, Flux, etc.
-// Uses images.generate() instead of chat.completions.create()
-// Guaranteed Base64 extraction
+// Uses chat.completions endpoint as required by OpenRouter.
+// Works with Nano Banana, Flux, Gemini Image, etc.
+// Correctly parses image objects from message content.
+// Guaranteed base64 extraction.
 // ============================================================
 
 import OpenAI from "openai";
@@ -13,11 +14,7 @@ import { warn, error } from "#logger.js";
 // ------------------------------------------------------------
 // 🔍 Required Environment Variables
 // ------------------------------------------------------------
-const REQUIRED = [
-  "OPENROUTER_API_KEY_ART",
-  "OPENROUTER_ART"  // model name for image generation
-];
-
+const REQUIRED = ["OPENROUTER_API_KEY_ART", "OPENROUTER_ART"];
 const missing = REQUIRED.filter(k => !process.env[k] || process.env[k].trim() === "");
 
 if (missing.length > 0) {
@@ -30,7 +27,7 @@ if (missing.length > 0) {
 const cfg = {
   key: process.env.OPENROUTER_API_KEY_ART || "",
   baseURL: "https://openrouter.ai/api/v1",
-  model: process.env.OPENROUTER_ART || "google/gemini-2.5-flash-image-preview:exp",
+  model: process.env.OPENROUTER_ART || "nano-nano/banana"
 };
 
 const client = new OpenAI({
@@ -47,27 +44,45 @@ export async function generatePodcastArtwork(prompt) {
   }
 
   try {
-    // Modern OpenRouter Image API
-    const result = await client.images.generate({
+    const result = await client.chat.completions.create({
       model: cfg.model,
-      prompt: `Create a 1400x1400 podcast cover art image. 
-               Style: cinematic, vibrant, AI-themed. 
-               Theme: "${prompt}". 
-               Do NOT include any text.`,
-      size: "1400x1400",
-      response_format: "b64_json"
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `Create a 1400x1400 podcast cover art image.
+                     Cinematic, vibrant, AI-themed.
+                     Theme: "${prompt}".
+                     Do NOT include any text.`,
+            },
+          ],
+        },
+      ],
+      // Nano Banana returns image objects automatically
     });
 
-    // Extract Base64 (standardised)
-    const image = result.data?.[0]?.b64_json;
-    if (!image) {
-      throw new Error("Image generation returned no b64_json content.");
+    // Extract image from result.choices[0].message.content[]
+    const content = result.choices?.[0]?.message?.content;
+
+    if (Array.isArray(content)) {
+      const image = content.find(c => c.type === "output_image" || c.type === "image");
+
+      if (image?.image_url?.url?.startsWith("data:image")) {
+        return image.image_url.url.split(",")[1]; // base64 only
+      }
     }
 
-    return image; // pure base64 string
+    // Fallback regex for safety
+    const raw = JSON.stringify(result);
+    const match = raw.match(/data:image\/png;base64,([^"]+)/);
+    if (match) return match[1];
+
+    throw new Error("No image data found in OpenRouter response.");
 
   } catch (e) {
     error("Artwork generation error", { error: e?.message || e });
     throw new Error(`Failed to generate artwork: ${e.message}`);
   }
-                      }
+}
