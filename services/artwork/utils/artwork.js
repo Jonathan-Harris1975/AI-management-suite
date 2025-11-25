@@ -2,8 +2,9 @@
 // 🖼️ Podcast Artwork Generator (OpenRouter Image Model)
 // ============================================================
 //
-// Uses the dedicated ART model + API key.
-// This runs separately from the main ai-service.js model routing.
+// NEW VERSION — supports Nano Banana, Gemini Flash Image, Flux, etc.
+// Uses images.generate() instead of chat.completions.create()
+// Guaranteed Base64 extraction
 // ============================================================
 
 import OpenAI from "openai";
@@ -20,7 +21,6 @@ const REQUIRED = [
 const missing = REQUIRED.filter(k => !process.env[k] || process.env[k].trim() === "");
 
 if (missing.length > 0) {
-  // Do NOT crash the entire suite — warn and disable artwork generation.
   warn("⚠️ Artwork generator missing required environment variables", { missing });
 }
 
@@ -47,53 +47,27 @@ export async function generatePodcastArtwork(prompt) {
   }
 
   try {
-    const result = await client.chat.completions.create({
+    // Modern OpenRouter Image API
+    const result = await client.images.generate({
       model: cfg.model,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Create a 1400x1400 podcast cover art image. 
-                     Style: vibrant, futuristic, eye-catching. 
-                     Theme: "${prompt}". 
-                     Do NOT include any text.`,
-            },
-          ],
-        },
-      ],
-      max_tokens: 2048,
+      prompt: `Create a 1400x1400 podcast cover art image. 
+               Style: cinematic, vibrant, AI-themed. 
+               Theme: "${prompt}". 
+               Do NOT include any text.`,
+      size: "1400x1400",
+      response_format: "b64_json"
     });
 
-    // Newer OpenRouter image models respond with images[]
-    const images = result.choices?.[0]?.message?.images;
-    if (Array.isArray(images) && images[0]?.image_url?.url) {
-      const url = images[0].image_url.url;
-      if (url.startsWith("data:image/png;base64,")) {
-        return url.split(",")[1]; // return base64 only
-      }
+    // Extract Base64 (standardised)
+    const image = result.data?.[0]?.b64_json;
+    if (!image) {
+      throw new Error("Image generation returned no b64_json content.");
     }
 
-    // Fallback: check content array for image objects
-    const content = result.choices?.[0]?.message?.content;
-    if (Array.isArray(content)) {
-      const imageItem = content.find(i => i.type === "image" && i.image_url?.url);
-      const url = imageItem?.image_url?.url;
-      if (url && url.startsWith("data:image/png;base64,")) {
-        return url.split(",")[1];
-      }
-    }
-
-    // Fallback: regex search
-    const raw = JSON.stringify(result);
-    const match = raw.match(/data:image\/png;base64,([^"]+)/);
-    if (match) return match[1];
-
-    throw new Error("No image data found in OpenRouter response.");
+    return image; // pure base64 string
 
   } catch (e) {
     error("Artwork generation error", { error: e?.message || e });
     throw new Error(`Failed to generate artwork: ${e.message}`);
   }
-      }
+                      }
