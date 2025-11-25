@@ -5,7 +5,7 @@ import { uploadText } from "#shared/r2-client.js";
 import chunkText from "./chunkText.js";
 import { generateEpisodeMetaLLM } from "./podcastHelper.js";
 import * as sessionCache from "./sessionCache.js";
-
+import { resilientRequest } from "#shared/utils/ai-service.js";   // <-- required for LLM passes
 
 // ------------------------------------------------------------
 // Temporary delayed cleanup (4-minute silent safety net)
@@ -15,10 +15,7 @@ function scheduleCleanup(sessionId) {
     try {
       await clearTempParts(sessionId);
       sessionCache.clearSession(sessionId);
-    } catch (_) {
-      // optional logging if you want it
-      // error("Cleanup failure", { sessionId, err: _?.message });
-    }
+    } catch (_) {}
   }, 4 * 60 * 1000);
 }
 
@@ -43,12 +40,44 @@ export async function orchestrateScript(sessionId) {
       outro
     });
 
-    const fullText =
+    const initialFullText =
       composed?.fullText ??
       [intro, main, outro].join("\n\n");
 
-    // Step 3: Chunk and upload to rawtext bucket (flat paths)
-    const chunks = chunkText(fullText);
+    // ------------------------------------------------------------
+    // NEW Step 2.5: editorialPass (cleanup, cohesion, tone, flow)
+    // ------------------------------------------------------------
+    const editorialText = await resilientRequest("editorialPass", {
+      sessionId: sid,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Perform a full editorial cleanup. Ensure cohesion, fix grammar, improve flow, and unify tone without altering meaning."
+        },
+        { role: "user", content: initialFullText }
+      ]
+    });
+
+    // ------------------------------------------------------------
+    // NEW Step 2.6: editAndFormat (final structured formatting)
+    // ------------------------------------------------------------
+    const formattedText = await resilientRequest("editAndFormat", {
+      sessionId: sid,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Format the script for final podcast delivery. Ensure clean paragraph structure, smooth transitions, and TTS-friendly punctuation."
+        },
+        { role: "user", content: editorialText }
+      ]
+    });
+
+    const finalFullText = formattedText?.trim() || editorialText?.trim() || initialFullText;
+
+    // Step 3: Chunk and upload to rawtext bucket
+    const chunks = chunkText(finalFullText);
     const uploadedChunks = [];
 
     for (let i = 0; i < chunks.length; i++) {
@@ -58,10 +87,10 @@ export async function orchestrateScript(sessionId) {
     }
 
     // Step 4: Upload full transcript
-    await uploadText("transcript", `${sid}.txt`, fullText, "text/plain");
+    await uploadText("transcript", `${sid}.txt`, finalFullText, "text/plain");
 
-    // Step 5: Generate and upload metadata
-    const meta = await generateEpisodeMetaLLM(fullText, sid);
+    // Step 5: Generate and upload metadata (based on formatted text)
+    const meta = await generateEpisodeMetaLLM(finalFullText, sid);
     if (meta) {
       const metaKey = `${sid}.json`;
       await uploadText(
@@ -72,18 +101,16 @@ export async function orchestrateScript(sessionId) {
       );
     }
 
-    // Step 6: Schedule delayed cleanup (safety net)
+    // Step 6: Schedule delayed cleanup
     scheduleCleanup(sid);
 
     // Step 7: Return structured result
     info("✅ Script orchestration complete");
-    debug("✅ Script orchestration complete", {
-      sessionId: sid
-    });
+    debug("✅ Script orchestration complete", { sessionId: sid });
 
     return {
       ...composed,
-      fullText,
+      fullText: finalFullText,
       chunks: uploadedChunks,
       metadata: meta || {}
     };
