@@ -1,3 +1,4 @@
+
 // ============================================================
 // ☁️ Cloudflare R2 Client — Unified + Updated With New Buckets
 // ============================================================
@@ -47,6 +48,7 @@ const {
   R2_PUBLIC_BASE_URL_MERGE,
   R2_PUBLIC_BASE_URL_ART,
   R2_PUBLIC_BASE_URL_RSS,
+  R2_PUBLIC_BASE_URL_PODCAST_RSS,
   R2_PUBLIC_BASE_URL_TRANSCRIPT,
   R2_PUBLIC_BASE_URL_CHUNKS,
   R2_PUBLIC_BASE_URL_EDITED_AUDIO,
@@ -110,13 +112,15 @@ export const R2_PUBLIC_URLS = {
   merged:          R2_PUBLIC_BASE_URL_MERGE,
   art:             R2_PUBLIC_BASE_URL_ART,
   rss:             R2_PUBLIC_BASE_URL_RSS,
-"rss-feeds":       R2_PUBLIC_BASE_URL_RSS,
- transcript:      R2_PUBLIC_BASE_URL_TRANSCRIPT,
+  "rss-feeds":     R2_PUBLIC_BASE_URL_RSS,
+  transcript:      R2_PUBLIC_BASE_URL_TRANSCRIPT,
   chunks:          R2_PUBLIC_BASE_URL_CHUNKS,
   "podcast-chunks":R2_PUBLIC_BASE_URL_CHUNKS,
-// Podcast-specific RSS feed
+
+  // Podcast-specific RSS feed
   podcastRss:      R2_PUBLIC_BASE_URL_PODCAST_RSS,
-  //  edited/mastered audio
+
+  // Edited/mastered audio
   edited:          R2_PUBLIC_BASE_URL_EDITED_AUDIO,
   editedAudio:     R2_PUBLIC_BASE_URL_EDITED_AUDIO,
   "edited-audio":  R2_PUBLIC_BASE_URL_EDITED_AUDIO,
