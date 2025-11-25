@@ -5,7 +5,7 @@ import { uploadText } from "#shared/r2-client.js";
 import chunkText from "./chunkText.js";
 import { generateEpisodeMetaLLM } from "./podcastHelper.js";
 import * as sessionCache from "./sessionCache.js";
-import { resilientRequest } from "#shared/utils/ai-service.js";   // <-- required for LLM passes
+import { resilientRequest } from "../../shared/utils/ai-service.js";   // <-- required for LLM passes
 
 // ------------------------------------------------------------
 // Temporary delayed cleanup (4-minute silent safety net)
