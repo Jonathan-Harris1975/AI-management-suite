@@ -1,186 +1,158 @@
-import { info, debug, warn, error } from "#logger.js";
-import { putText, putJson, buildPublicUrl } from "#shared/r2-client.js";
+// services/script/utils/models.js
+// ============================================================
+// ✨ Generates Intro/Main/Outro → edits → chunked text files
+//   stored in raw-text bucket with public URLs for TTS
+// ============================================================
 
-import {
-  getIntroPrompt,
-  getMainPrompt,
-  getOutroPromptFull,
-} from "./promptTemplates.js";
-
-import { generateEpisodeMetaLLM } from "./podcastHelper.js";
-import { attachEpisodeNumberIfNeeded } from "./episodeCounter.js";
-
+import { resilientRequest } from "../../shared/utils/ai-service.js";
+import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
+import fetchFeedArticles from "./fetchFeeds.js";
+import { putText, putJson, buildPublicUrl } from "../../shared/utils/r2-client.js";
+import { cleanTranscript } from "./textHelpers.js";
+import { calculateDuration } from "./durationCalculator.js";
+import { getWeatherSummary } from "./getWeatherSummary.js";
+import getTuringQuote from "./getTuringQuote.js";
 import editAndFormat from "./editAndFormat.js";
 import chunkText from "./chunkText.js";
+import { generateMainLongform } from "./mainChunker.js";
 import * as sessionCache from "./sessionCache.js";
+import { generateEpisodeMetaLLM } from "./podcastHelper.js";
+import { info, error, debug } from "#logger.js";
 
-import { resilientRequest as resilientLLM } from "../../shared/utils/ai-service.js";
-
-/* ---------------------------------------------------------
-   NORMALISE SESSION META
---------------------------------------------------------- */
-export function normalizeSessionMeta(sessionMeta) {
-  if (!sessionMeta) {
-    return { sessionId: `TT-${Date.now()}` };
-  }
-  if (typeof sessionMeta === "string") {
-    return { sessionId: sessionMeta };
-  }
-  if (typeof sessionMeta === "object") {
-    return {
-      sessionId:
-        sessionMeta.sessionId ||
-        sessionMeta.id ||
-        `TT-${Date.now()}`,
-      ...sessionMeta,
-    };
-  }
-  return { sessionId: `TT-${Date.now()}` };
+function toPlainText(s) {
+  if (!s) return "";
+  return String(s)
+    .replace(/\[(?:music|sfx|cue|intro|outro|.*?)]/gi, "")
+    .replace(/\((?:music|sfx|cue|intro|outro|.*?)]?\)/gi, "")
+    .replace(/\*{1,3}/g, "")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
-/* ---------------------------------------------------------
-   INTRO
---------------------------------------------------------- */
-export async function generateIntro(sessionMetaLike) {
-  const sessionMeta = normalizeSessionMeta(sessionMetaLike);
-  const prompt = getIntroPrompt({ sessionMeta });
-
-  if (!prompt || !prompt.trim()) {
-    throw new Error("Intro prompt came back empty.");
-  }
-
-  const result = await resilientLLM("scriptIntro", {
-    sessionId: sessionMeta.sessionId,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  if (!result || !result.trim()) {
-    warn("⚠️ LLM returned empty INTRO — inserting fallback.");
-    return "Welcome to this week's episode of Turing's Torch.";
-  }
-
-  return result.trim();
+function sanitizeOutput(s) {
+  return cleanTranscript(toPlainText(s));
 }
 
-/* ---------------------------------------------------------
-   MAIN
---------------------------------------------------------- */
-export async function generateMain(sessionMetaLike) {
-  const sessionMeta = normalizeSessionMeta(sessionMetaLike);
-
-  // The main prompt builder expects a shaped object:
-  // { sessionMeta, mainSeconds, articles }
-  const prompt = getMainPrompt({
-    sessionMeta,
-    mainSeconds: sessionMeta.mainSeconds, // safe if undefined
-    articles: sessionMeta.articles || [],
-  });
-
-  if (!prompt || !prompt.trim()) {
-    throw new Error("Main prompt came back empty.");
+function normalizeSessionMeta(sessionIdLike) {
+  if (typeof sessionIdLike === "string") {
+    const m = sessionIdLike.match(/\d{4}-\d{2}-\d{2}/);
+    return { sessionId: sessionIdLike, date: m ? m[0] : undefined };
   }
-
-  const result = await resilientLLM("scriptMain", {
-    sessionId: sessionMeta.sessionId,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  if (!result || !result.trim()) {
-    warn("⚠️ LLM returned empty MAIN — inserting fallback.");
-    return "This week in artificial intelligence, several important developments emerged.";
+  if (typeof sessionIdLike === "object" && sessionIdLike) {
+    return { sessionId: sessionIdLike.sessionId || "", date: sessionIdLike.date };
   }
-
-  return result.trim();
+  return { sessionId: "unknown", date: undefined };
 }
 
-/* ---------------------------------------------------------
-   OUTRO
---------------------------------------------------------- */
-export async function generateOutro(sessionMetaLike) {
-  const sessionMeta = normalizeSessionMeta(sessionMetaLike);
+export async function generateIntro(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
+  const weatherSummary = await getWeatherSummary();
+  const turingQuote = await getTuringQuote();
+  const prompt = getIntroPrompt({ weatherSummary, turingQuote, sessionMeta });
+
+  const res = await resilientRequest("scriptIntro", {
+    sessionId: sessionMeta,
+    section: "intro",
+    messages: [{ role: "system", content: prompt }],
+  });
+
+  const cleaned = sanitizeOutput(res);
+  await sessionCache.storeTempPart(sessionMeta, "intro", cleaned);
+  return cleaned;
+}
+
+export async function generateMain(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
+  const { items, feedUrl } = await fetchFeedArticles();
+
+  const articles = (items || [])
+    .map((it) => ({
+      title: it?.title?.trim() || "",
+      summary: it?.summary?.trim() || it?.contentSnippet?.trim() || it?.description?.trim() || "",
+      link: it?.link || it?.url || "",
+    }))
+    .filter((a) => a.title || a.summary);
+
+  const { mainSeconds, targetMins } = calculateDuration("main", sessionMeta, articles.length);
+  debug("Main script generation", { 
+    targetMinutes: targetMins, 
+    articles: articles.length 
+  });
+
+  const combined = await generateMainLongform(sessionMeta, articles, mainSeconds);
+  await sessionCache.storeTempPart(sessionMeta, "main", combined);
+  return sanitizeOutput(combined);
+}
+
+export async function generateOutro(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
   const prompt = await getOutroPromptFull(sessionMeta);
 
-  if (!prompt || !prompt.trim()) {
-    throw new Error("Outro prompt came back empty.");
-  }
-
-  const result = await resilientLLM("scriptOutro", {
-    sessionId: sessionMeta.sessionId,
-    messages: [{ role: "user", content: prompt }],
+  const res = await resilientRequest("scriptOutro", {
+    sessionId: sessionMeta,
+    section: "outro",
+    messages: [{ role: "system", content: prompt }],
   });
 
-  if (!result || !result.trim()) {
-    warn("⚠️ LLM returned empty OUTRO — inserting fallback.");
-    return "Thanks for listening to Turing's Torch.";
-  }
-
-  return result.trim();
+  const cleaned = sanitizeOutput(res);
+  await sessionCache.storeTempPart(sessionMeta, "outro", cleaned);
+  return cleaned;
 }
 
-/* ---------------------------------------------------------
-   FULL EPISODE GENERATION (LEGACY SUPPORT)
-   - Aligns with new orchestrator
-   - Safe to keep as fallback
---------------------------------------------------------- */
-export async function generateComposedEpisode(sessionMetaLike) {
-  const sessionMeta = normalizeSessionMeta(sessionMetaLike);
-  const id = sessionMeta.sessionId;
+export async function generateComposedEpisode(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
+  const id = sessionMeta.sessionId || `TT-${Date.now()}`;
 
-  const intro =
-    (await sessionCache.getTempPart(sessionMeta, "intro")) ||
-    (await generateIntro(sessionMeta));
-
-  const main =
-    (await sessionCache.getTempPart(sessionMeta, "main")) ||
-    (await generateMain(sessionMeta));
-
-  const outro =
-    (await sessionCache.getTempPart(sessionMeta, "outro")) ||
-    (await generateOutro(sessionMeta));
+  const intro = (await sessionCache.getTempPart(sessionMeta, "intro")) || await generateIntro(sessionMeta);
+  const main = (await sessionCache.getTempPart(sessionMeta, "main")) || await generateMain(sessionMeta);
+  const outro = (await sessionCache.getTempPart(sessionMeta, "outro")) || await generateOutro(sessionMeta);
 
   const rawTranscript = [intro, "", main, "", outro].join("\n");
   const edited = editAndFormat(rawTranscript);
 
-  // Chunk for TTS
   const maxBytes = Number(process.env.MAX_SSML_CHUNK_BYTES || 4200);
   const byteLen = (s) => Buffer.byteLength(s, "utf8");
-  const ttsChunks = chunkText(edited, maxBytes);
+  let ttsChunks = chunkText(edited, maxBytes);
+  
+  if (ttsChunks.length <= 1 && byteLen(edited) > maxBytes) {
+    debug("Force splitting large chunk", { reason: "single-chunk-too-large" });
+    const out = [];
+    let remaining = edited.trim();
+    while (Buffer.byteLength(remaining, "utf8") > maxBytes) {
+      const approx = Math.floor(maxBytes * 0.9);
+      const slice = remaining.slice(0, approx);
+      const cut = slice.lastIndexOf(" ");
+      const chunk = slice.slice(0, cut > 200 ? cut : approx);
+      out.push(chunk.trim());
+      remaining = remaining.slice(chunk.length).trim();
+    }
+    if (remaining) out.push(remaining);
+    ttsChunks = out;
+  }
 
-  // Upload transcript
-  await putText("transcript", `${id}.txt`, edited);
+  await putText("transcripts", `${id}.txt`, edited);
 
-  // Upload rawtext chunks
   const files = [];
   for (let i = 0; i < ttsChunks.length; i++) {
     const name = `${id}/chunk-${String(i + 1).padStart(3, "0")}.txt`;
-    await putText("rawtext", name, ttsChunks[i]);
-
-    files.push({
-      index: i + 1,
-      bytes: byteLen(ttsChunks[i]),
-      url: buildPublicUrl("rawtext", name),
-    });
+    const body = ttsChunks[i];
+    await putText("rawtext", name, body);
+    const url = buildPublicUrl("rawtext", name);
+    files.push({ index: i + 1, bytes: byteLen(body), url });
   }
 
-  // Build metadata
-  let meta = await generateEpisodeMetaLLM(edited, sessionMeta);
-  meta = await attachEpisodeNumberIfNeeded(meta);
+  await putJson("meta", `${id}-tts.json`, { chunks: files, total: files.length });
 
-  await putJson("meta", `${id}.json`, meta);
-
-  info("📃 Script composition complete");
-  return {
-    transcript: edited,
-    chunks: files,
-    meta,
-    sessionId: id,
-  };
+  const meta = await generateEpisodeMetaLLM(edited, sessionMeta);
+  await putJson("meta", `${id}-meta.json`, meta);
+  info("📃 Script orchestration complete"),
+  debug("📃 Script orchestration complete", { 
+    sessionId: id, 
+    chunks: files.length 
+  });
+  
+  return { transcript: edited, chunks: files, meta };
 }
 
-export default {
-  generateIntro,
-  generateMain,
-  generateOutro,
-  generateComposedEpisode,
-  normalizeSessionMeta,
-};
+export default { generateIntro, generateMain, generateOutro, generateComposedEpisode };
