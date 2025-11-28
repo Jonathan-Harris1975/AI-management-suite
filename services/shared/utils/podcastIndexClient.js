@@ -11,19 +11,20 @@
 //
 // Base URL: https://api.podcastindex.org/api/1.0
 //
-// Exposed helpers (all async):
+// Exposed helpers:
 //   - getPodcastByFeedUrl(feedUrl)
 //   - getEpisodesByFeedUrl(feedUrl, options?)
 //   - searchPodcastsByTerm(term, options?)
 //   - getTrendingPodcasts(options?)
 //   - notifyHubByUrl(feedUrl)
-//   - rawRequest(path, options?)  // low-level escape hatch
-//
-// Designed to plug into your existing logger + ESM setup.
+//   - rawRequest(path, options?)
 // ============================================================
 
 import crypto from "node:crypto";
-import { log } from "#logger.js";
+import { info, warn, error, debug } from "#logger.js";
+
+// unifies logging interface expected by this module
+const log = { info, warn, error, debug };
 
 const API_BASE = "https://api.podcastindex.org/api/1.0";
 
@@ -76,7 +77,6 @@ async function podcastIndexRequest(path, options = {}) {
 
   const url = new URL(`${API_BASE}${path}`);
 
-  // Attach query params
   Object.entries(query).forEach(([key, value]) => {
     if (value === undefined || value === null) return;
     url.searchParams.set(key, String(value));
@@ -141,8 +141,6 @@ async function podcastIndexRequest(path, options = {}) {
 // ------------------------------------------------------------
 // 🎧 High-level helpers
 // ------------------------------------------------------------
-
-// Get metadata for a podcast by its RSS feed URL
 export async function getPodcastByFeedUrl(feedUrl) {
   if (!feedUrl) throw new Error("feedUrl is required");
   return podcastIndexRequest("/podcasts/byfeedurl", {
@@ -150,7 +148,6 @@ export async function getPodcastByFeedUrl(feedUrl) {
   });
 }
 
-// Get episodes for a podcast by feed URL
 export async function getEpisodesByFeedUrl(
   feedUrl,
   { max = 20, since = null, fullText = false } = {}
@@ -164,14 +161,12 @@ export async function getEpisodesByFeedUrl(
   };
 
   if (since) {
-    // since = Unix timestamp (seconds) or YYYY-MM-DD handled upstream
     query.since = since;
   }
 
   return podcastIndexRequest("/episodes/byfeedurl", { query });
 }
 
-// Search podcasts by a free-text term
 export async function searchPodcastsByTerm(
   term,
   { max = 10, clean = true, fullText = false } = {}
@@ -188,42 +183,29 @@ export async function searchPodcastsByTerm(
   return podcastIndexRequest("/search/byterm", { query });
 }
 
-// Get trending podcasts (optional helper)
 export async function getTrendingPodcasts({
   max = 20,
   lang = "",
   cat = "",
   notcat = "",
 } = {}) {
-  const query = {
-    max,
-    lang,
-    cat,
-    notcat,
-  };
+  const query = { max, lang, cat, notcat };
 
   return podcastIndexRequest("/podcasts/trending", { query });
 }
 
-// Notify hub that a feed has updated (Hub Pub Notify)
 export async function notifyHubByUrl(feedUrl) {
   if (!feedUrl) throw new Error("feedUrl is required");
 
-  const query = {
-    url: feedUrl,
-  };
-
-  return podcastIndexRequest("/hub/pubnotify", { query });
+  return podcastIndexRequest("/hub/pubnotify", {
+    query: { url: feedUrl },
+  });
 }
 
-// Low-level escape hatch for custom endpoints
 export async function rawRequest(path, options = {}) {
   return podcastIndexRequest(path, options);
 }
 
-// ------------------------------------------------------------
-// 📦 Default export (for convenience)
-// ------------------------------------------------------------
 const podcastIndexClient = {
   getPodcastByFeedUrl,
   getEpisodesByFeedUrl,
