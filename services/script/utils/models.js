@@ -5,7 +5,7 @@
 
 import { info, debug } from "#logger.js";
 import { putText, putJson, buildPublicUrl } from "#shared/r2-client.js";
-import { generateIntro, generateMain, generateOutro } from "./sections.js"; // assuming this exists
+import { generateIntro, generateMain, generateOutro } from "./promptTemplates.js"; // assuming this exists
 import { generateEpisodeMetaLLM } from "./podcastHelper.js";
 import { attachEpisodeNumberIfNeeded } from "./episodeCounter.js";
 import editAndFormat from "./editAndFormat.js";
