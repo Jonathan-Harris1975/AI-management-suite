@@ -15,12 +15,9 @@ function humanizeText(text) {
     return options[Math.floor(Math.random() * options.length)];
   });
 
-  // Randomly add minor punctuation changes for variation
-  const punctuationTweaks = [",", " –", "", " ..."];
-  result = result.replace(/\./g, () => {
-    return "." + (Math.random() < 0.1 ? punctuationTweaks[Math.floor(Math.random() * punctuationTweaks.length)] : "");
-  });
-
+  
+result = result.replace(/\.\.\./g, ".");
+result = result.replace(/\s{2,}/g, " ");
   return result;
 }
 
