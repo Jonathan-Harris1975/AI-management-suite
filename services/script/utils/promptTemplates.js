@@ -1,13 +1,6 @@
-// ============================================================
-// 🎙️ services/script/utils/promptTemplates.js (UPDATED)
-// ============================================================
-// - Weather now blended naturally (no forecast vibe)
-// - Outro URLs rewritten for clean spoken delivery
-// - Everything else unchanged
-// ============================================================
+// services/script/utils/promptTemplates.js
 
 import getSponsor from "./getSponsor.js";
-import generateCta from "./generateCta.js";
 import { calculateDuration } from "./durationCalculator.js";
 import { buildPersona } from "./toneSetter.js";
 
@@ -22,43 +15,39 @@ function weekdayFromDateStr(dateStr) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// INTRO (Weather blended naturally + smoother British tone)
-// ─────────────────────────────────────────────────────────────
 export function getIntroPrompt({ weatherSummary, turingQuote, sessionMeta }) {
   const persona = buildPersona(sessionMeta);
   const maybeWeekday = weekdayFromDateStr(sessionMeta?.date);
   const weekdayLine = maybeWeekday ? ` If you mention a day, it must be "${maybeWeekday}".` : "";
 
-  const tagline = `Tired of drowning in AI headlines? Ready for clarity, insight, and a direct line to the pulse of innovation? Welcome to Turing's Torch: AI Weekly! I'm Jonathan Harris, your host, and I'm cutting through the noise to bring you the most critical AI developments, explained, analysed, and delivered straight to you. Let's ignite your understanding of AI, together.`;
+  const tagline = `Tired of drowning in artificial intelligence headlines? Ready for clarity, insight, and a direct line to the pulse of innovation? Welcome to Turing's Torch: AI Weekly! I'm Jonathan Harris, your host, and I'm cutting through the noise to bring you the most critical artificial intelligence developments, explained, analysed, and delivered straight to you. Let's ignite your understanding of artificial intelligence, together.`;
 
   return `
 You are ${persona.host}, hosting "${persona.show}".
-Write a short, engaging INTRO for an AI news podcast.
+Write a short, engaging INTRO for an artificial intelligence news podcast.
 Tone: dry, witty, British, naturally conversational, not theatrical.
 
-- Reference the weather using: "${weatherSummary}", but weave it in subtly as part of the mood or scene — not as a standalone announcement or forecast.  
+- Reference the weather using: "${weatherSummary}", but weave it in subtly as part of the mood or scene — not as a standalone announcement or forecast.
   It should feel like a passing British observation, mildly amused or wry, not like a weather segment.
 - Smoothly segue into this Alan Turing quote: "${turingQuote}".
-- Link the quote to the mission of making AI understandable for everyone.
-- End **exactly** with this tagline (do not paraphrase it):
+- Link the quote to the mission of making artificial intelligence understandable for everyone.
+- End exactly with this tagline (do not paraphrase it):
   "${tagline}"
 - No music/stage cues. Output plain text only.${weekdayLine}
 `.trim();
 }
 
-// ─────────────────────────────────────────────────────────────
-// MAIN (unchanged)
-// ─────────────────────────────────────────────────────────────
 export function getMainPrompt({ sessionMeta, articles, mainSeconds }) {
   const persona = buildPersona(sessionMeta);
   const targetWords = Math.max(500, Math.round(mainSeconds / 0.8));
 
-  const articlePreview = articles.map((a, i) => {
-    const summary = a.summary || a.description || "";
-    const link = a.link || "";
-    return `${i + 1}. ${a.title}\n   ${summary}\n   Source: ${link}`;
-  }).join("\n\n");
+  const articlePreview = articles
+    .map((a, i) => {
+      const summary = a.summary || a.description || "";
+      const link = a.link || "";
+      return `${i + 1}. ${a.title}\n   ${summary}\n   Source: ${link}`;
+    })
+    .join("\n\n");
 
   return `
 You are ${persona.host}, hosting "${persona.show}" with a ${persona.tone} style.
@@ -78,7 +67,6 @@ ${articlePreview}
 `.trim();
 }
 
-// Utility for TTS-friendly spoken URLs
 function makeSpokenUrl(rawUrl) {
   return rawUrl
     .replace(/^https?:\/\//, "")
@@ -89,9 +77,6 @@ function makeSpokenUrl(rawUrl) {
     .trim();
 }
 
-// ─────────────────────────────────────────────────────────────
-// OUTRO (Sponsor + CTA + clean spoken URL formatting)
-// ─────────────────────────────────────────────────────────────
 export async function getOutroPromptFull(sessionMeta) {
   const persona = buildPersona(sessionMeta);
   const { outroSeconds } = calculateDuration("outro", sessionMeta);
@@ -104,24 +89,23 @@ export async function getOutroPromptFull(sessionMeta) {
     book = null;
   }
 
-  const title = book?.title || "AI in Manufacturing: Modernizing Operations and Maintenance";
+  const title =
+    book?.title || "AI in Manufacturing: Modernizing Operations and Maintenance";
 
   const rawUrl = book?.url || "https://jonathan-harris.online";
   const spokenUrl = makeSpokenUrl(rawUrl);
 
-  const cta = generateCta({ title, url: spokenUrl });
-
-  const closingTagline = `That's it for this week's Turing's Torch. Keep the flame burning, stay curious, and I'll see you next week with more AI insights that matter. I'm Jonathan Harris—keep building the future.`;
+  const closingTagline = `That's it for this week's Turing's Torch. Keep the flame burning, stay curious, and I'll see you next week with more artificial intelligence insights that matter. I'm Jonathan Harris—keep building the future.`;
 
   return `
 You are ${persona.host}, closing "${persona.show}" in a ${persona.tone} tone.
 Write a clean, reflective OUTRO (plain text only) that follows this structure:
 
 1) A brief reflective closing line about the week's themes (no new stories).
-2) A natural sponsor mention, e.g.:
+2) A natural sponsor mention, for example:
    If you'd like to explore this further, check out "${title}" at ${spokenUrl}.
-3) Include this CTA naturally: "${cta}"
-4) End **exactly** with this tagline (do not paraphrase it):
+3) Do not add any additional promotional call-to-action beyond the sponsor mention above.
+4) End exactly with this tagline (do not paraphrase it):
    "${closingTagline}"
 
 Keep within ~${Math.round(outroSeconds / 60)} minute of spoken delivery.
