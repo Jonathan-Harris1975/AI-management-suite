@@ -1,7 +1,4 @@
 // services/podcast/runPodcastPipeline.js
-// ============================================================
-// 🎙 AI Podcast Pipeline — Unified Orchestrator
-// ============================================================
 
 import { log } from "#logger.js";
 import { orchestrateScript } from "../script/index.js";
@@ -18,16 +15,17 @@ export async function runPodcastPipeline(sessionId) {
     const script = await orchestrateScript(sessionId);
     log.info("🧾 Script generation complete", { sessionId });
 
-    // 2️⃣ Artwork generation (cover art for this episode)
-    const artwork = await createPodcastArtwork(sessionId);
+    // 2️⃣ Artwork generation with LLM artwork prompt if available
+    const artworkPrompt =
+      script?.artworkPrompt || script?.metadata?.artworkPrompt || null;
+
+    const artwork = await createPodcastArtwork({
+      sessionId,
+      prompt: artworkPrompt || undefined,
+    });
     log.info("🎨 Artwork generation complete", { sessionId });
 
     // 3️⃣ TTS end-to-end
-    //    TTS service is responsible for:
-    //    - generating audio
-    //    - running editing/merge pipeline
-    //    - uploading final MP3 to R2 (podcast bucket)
-    //    - updating the meta JSON with URLs, duration, fileSize, etc.
     const tts = await orchestrateTTS(sessionId);
     log.info("🗣️ TTS pipeline complete", { sessionId });
 
@@ -54,8 +52,6 @@ export async function runPodcastPipeline(sessionId) {
         error: cleanupErr?.message,
       });
     }
-
-    // 6️⃣ Final summary returned to caller (Make.com, route, etc.)
 
     const summary = { sessionId, script, artwork, tts };
 
