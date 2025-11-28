@@ -1,14 +1,40 @@
 // services/script/utils/editorialPass.js
+// ============================================================
+// ✏️ Light Editorial Pass for Podcast Script
+// ============================================================
+//
+// Goal:
+//   - Very small, human-like polish on the *full episode script*
+//   - Improve flow, clarity, and pacing
+//   - Remove obvious repetition / LLM-isms
+//   - Preserve structure, sections, and technical meaning
+//   - Keep your British Gen X tone (dry, wry, no American hype)
+//   - Strictly avoid big rewrites
+//
+// Controlled by env:
+//   ENABLE_EDITORIAL_PASS = "yes" | "no" (default "no")
+//
+// Usage pattern (inside your script pipeline):
+//   const polished = await runEditorialPass(sessionMeta, rawScript);
+// ============================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import * as sessionCache from "./sessionCache.js";
 import { info, warn, error, debug } from "#logger.js";
 
+/**
+ * Internal: check if editorial pass is enabled via env
+ */
 function isEditorialEnabled() {
   const flag = String(process.env.ENABLE_EDITORIAL_PASS || "").toLowerCase();
   return flag === "yes" || flag === "true" || flag === "on";
 }
 
+/**
+ * Build the editorial prompt.
+ * We assume `scriptText` is the *full* episode script
+ * (intro + weather + quote + main + outro).
+ */
 function buildEditorialPrompt(scriptText) {
   return `
 You are a careful human editor doing a *light* polish on a scripted AI news podcast episode.
@@ -54,6 +80,13 @@ Return ONLY the edited script as plain text, nothing else.
   `.trim();
 }
 
+/**
+ * Run the light editorial pass.
+ *
+ * @param {object} sessionMeta - object that at least contains sessionId (or id)
+ * @param {string} scriptText  - full script to polish
+ * @returns {Promise<string>}  - polished script (or original on failure)
+ */
 export async function runEditorialPass(sessionMeta = {}, scriptText = "") {
   const sessionId = sessionMeta?.sessionId || sessionMeta?.id || "episode";
 
@@ -89,6 +122,7 @@ export async function runEditorialPass(sessionMeta = {}, scriptText = "") {
       return scriptText;
     }
 
+    // Basic sanity: trimmed, not wildly shorter/longer
     const cleaned = edited.trim();
     const editedLength = cleaned.length;
 
@@ -108,6 +142,7 @@ export async function runEditorialPass(sessionMeta = {}, scriptText = "") {
       return scriptText;
     }
 
+    // Optionally cache for debugging / re-use
     try {
       await sessionCache.storeTempPart(sessionMeta, "editedScript", cleaned);
     } catch (cacheErr) {
