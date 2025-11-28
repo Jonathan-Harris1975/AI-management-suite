@@ -1,14 +1,19 @@
+// services/rss-feed-creator/index.js
 import { isAIRelevant } from "./utils/filterAIContent.js";
 
 export async function processFeedItems(items, logger) {
-  const results = [];
+  const output = [];
+
   for (const item of items) {
     const ok = await isAIRelevant(item);
+
     if (!ok) {
       logger?.info?.(`🛑 Skipping non-AI article: ${item.title}`);
       continue;
     }
-    results.push(item);
+
+    output.push(item);
   }
-  return results;
+
+  return output;
 }
