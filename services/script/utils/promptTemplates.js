@@ -37,7 +37,8 @@ Tone: dry, witty, British, naturally conversational, not theatrical.
 `.trim();
 }
 
-export function getMainPrompt({ sessionMeta, articles, mainSeconds }) {
+export function getMainPrompt({ sessionMeta, articles = [], mainSeconds }) {
+  articles = Array.isArray(articles) ? articles : [];
   const persona = buildPersona(sessionMeta);
   const targetWords = Math.max(500, Math.round(mainSeconds / 0.8));
 
