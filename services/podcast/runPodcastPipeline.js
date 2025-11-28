@@ -14,24 +14,22 @@ export async function runPodcastPipeline(sessionId) {
   log.debug("🎧 Starting AI Podcast Pipeline...", { sessionId });
 
   try {
-    // 1️⃣ Script generation (intro / main / outro / meta upstream)
+    // 1️⃣ Script generation
     const script = await orchestrateScript(sessionId);
     log.info("🧾 Script generation complete", { sessionId });
 
-    // 2️⃣ Artwork generation (cover art for this episode)
-    const artwork = await createPodcastArtwork(sessionId);
+    // 2️⃣ Artwork generation WITH the artworkPrompt from meta
+    const artwork = await createPodcastArtwork({
+      sessionId,
+      prompt: script?.meta?.artworkPrompt,
+    });
     log.info("🎨 Artwork generation complete", { sessionId });
 
-    // 3️⃣ TTS end-to-end
-    //    TTS service is responsible for:
-    //    - generating audio
-    //    - running editing/merge pipeline
-    //    - uploading final MP3 to R2 (podcast bucket)
-    //    - updating the meta JSON with URLs, duration, fileSize, etc.
+    // 3️⃣ TTS processing
     const tts = await orchestrateTTS(sessionId);
     log.info("🗣️ TTS pipeline complete", { sessionId });
 
-    // 4️⃣ RSS feed regeneration (non-fatal if it fails)
+    // 4️⃣ RSS regeneration (non-fatal)
     try {
       log.info("📡 Updating podcast RSS feed...", { sessionId });
       await runRssFeedCreator();
@@ -43,7 +41,7 @@ export async function runPodcastPipeline(sessionId) {
       });
     }
 
-    // 5️⃣ Session cleanup (non-fatal; runs after RSS update)
+    // 5️⃣ Cleanup (non-fatal)
     try {
       log.info("🧹 Cleaning up session artefacts from R2...", { sessionId });
       await cleanupSession(sessionId);
@@ -55,8 +53,7 @@ export async function runPodcastPipeline(sessionId) {
       });
     }
 
-    // 6️⃣ Final summary returned to caller (Make.com, route, etc.)
-
+    // Final return
     const summary = { sessionId, script, artwork, tts };
 
     log.info("🏁 Podcast pipeline complete", { sessionId });
