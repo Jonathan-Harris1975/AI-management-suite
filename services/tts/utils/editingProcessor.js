@@ -214,7 +214,7 @@ export async function editingProcessor(sessionId, inputPathObj) {
       sessionId,
       currentInput,
       stage1Path,
-      "rubberband=pitch=0.92:tempo=1.0",
+      "rubberband=pitch=0.93:tempo=1.0",
       "Stage 1: 🗣️ Pitch Shift"
     );
     verifyFileReady(stage1Path, "Stage 1 output");
