@@ -1,93 +1,64 @@
-// ------------------------------------------------------------
-// 🧠 HUMANISER ENGINE
-// - Light, safe, TTS-friendly text smoothing
-// - Enhances naturalness without rewriting style
-// - Replaces "AI" → "artificial intelligence" with context checks
-// ------------------------------------------------------------
+// ====================================================================
+// editAndFormat.js – Full Production Version
+// ====================================================================
+// - TTS-friendly normalisation
+// - Replaces “AI” → “artificial intelligence”
+// - Splits long sentences (>22 words)
+// - Light humanisation layer
+// ====================================================================
 
-// Word variation map (mild, avoids changing meaning)
-const synonymGroups = {
-  "also": ["also", "as well", "too"],
-  "but": ["but", "yet", "however"],
-  "so": ["so", "therefore", "thus"],
-  "really": ["really", "truly", "genuinely"],
-  "very": ["very", "extremely", "particularly"],
-  "important": ["important", "noteworthy", "significant", "worth noting"],
-  "shows": ["shows", "reveals", "demonstrates", "indicates"]
-};
+function splitLongSentences(text) {
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const processed = sentences.map(s => {
+    const wordCount = s.trim().split(/\s+/).length;
+    if (wordCount <= 22) return s;
 
-// Mild sentence warmers (not too informal)
-const softeners = [
-  "To be fair,",
-  "Interestingly,",
-  "One thing worth mentioning is that",
-  "That said,",
-  "On top of that,"
-];
+    // Split long sentences into natural chunks
+    return s.replace(/(.{1,160})(\s|$)/g, "$1. ").trim();
+  });
 
-// Context-aware replacement for "AI"
-function replaceAI(text) {
-  // Replace standalone “AI”, not words containing it.
-  return text.replace(/\bAI\b/g, "artificial intelligence");
+  return processed.join(" ");
 }
 
-// Add small natural variations
-function humanizeText(text) {
-  let result = text;
+// Light humaniser (subtle word variation, not stylistic rewrite)
+function humanise(text) {
+  const variations = {
+    "however": ["however", "mind you", "that said"],
+    "but": ["but", "yet", "still"],
+    "so": ["so", "therefore", "as a result"],
+    "really": ["really", "truly", "genuinely"]
+  };
 
-  // Synonym replacement with low probability
-  result = result.replace(/\b(also|but|so|really|very|important|shows)\b/gi, (match) => {
-    const group = synonymGroups[match.toLowerCase()];
-    if (!group) return match;
-
-    // 35% chance of humanising to avoid over-processing
-    if (Math.random() > 0.35) return match;
-
-    const replacement = group[Math.floor(Math.random() * group.length)];
+  return text.replace(/\b(however|but|so|really)\b/gi, match => {
+    const opts = variations[match.toLowerCase()];
+    if (!opts) return match;
+    if (Math.random() > 0.35) return match; // low probability
+    const choice = opts[Math.floor(Math.random() * opts.length)];
     return match[0] === match[0].toUpperCase()
-      ? replacement.charAt(0).toUpperCase() + replacement.slice(1)
-      : replacement;
+      ? choice.charAt(0).toUpperCase() + choice.slice(1)
+      : choice;
   });
-
-  // Lightly inject softeners at paragraph transitions
-  result = result.replace(/\. ([A-Z])/g, (m, letter) => {
-    if (Math.random() < 0.12) {
-      const softener = softeners[Math.floor(Math.random() * softeners.length)];
-      return `. ${softener} ${letter}`;
-    }
-    return `. ${letter}`;
-  });
-
-  return result;
 }
 
-// Capitalise the start of sentences
-function capitaliseSentences(text) {
-  return text.replace(/(^\s*\w|[.!?]\s+\w)/g, (m) => m.toUpperCase());
-}
-
-// ------------------------------------------------------------
-// MAIN FORMATTER
-// ------------------------------------------------------------
 export default function editAndFormat(text) {
   if (!text || typeof text !== "string") return "";
 
-  let cleaned = text.trim();
+  let out = text.trim();
 
-  // Normalise spacing but preserve newlines
-  cleaned = cleaned.replace(/[ \t]+/g, " ");
+  // Normalise spacing
+  out = out.replace(/[ \t]+/g, " ");
 
-  // Remove ellipses but don't flatten meaning
-  cleaned = cleaned.replace(/\.{3,}/g, ".");
+  // Replace AI → artificial intelligence
+  out = out.replace(/\bAI\b/g, "artificial intelligence");
 
-  // Replace "AI" with "artificial intelligence"
-  cleaned = replaceAI(cleaned);
+  // Remove ellipses
+  out = out.replace(/\.{3,}/g, ".");
 
-  // Apply soft humanisation effects
-  cleaned = humanizeText(cleaned);
+  // Split long sentences
+  out = splitLongSentences(out);
 
-  // Capitalise beginning of sentences
-  cleaned = capitaliseSentences(cleaned);
+  // Apply light humanisation
+  out = humanise(out);
 
-  return cleaned;
-    }
+  return out;
+}
