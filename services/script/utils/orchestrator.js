@@ -11,7 +11,7 @@ import chunkText from "./chunkText.js";
 import { generateEpisodeMetaLLM } from "./podcastHelper.js";
 import * as sessionCache from "./sessionCache.js";
 import { resilientRequest } from "../../shared/utils/ai-service.js";   // LLM passes
-import { attachEpisodeNumberIfNeeded } from "./utils/episodeCounter.js";
+import { attachEpisodeNumberIfNeeded } from "./episodeCounter.js";
 
 // ------------------------------------------------------------
 // Temporary delayed cleanup (4-minute silent safety net)
