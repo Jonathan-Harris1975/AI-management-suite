@@ -8,7 +8,6 @@ https://spritle.com/blog/feed
 https://yatter.in/feed
 https://shaip.com/feed
 https://aiiottalk.com/feed
-https://techspective.net/category/technology/feed
 https://oreilly.com/radar/topics/ai-ml/feed
 https://clarifai.com/blog/rss.xml
 https://unbabel.com/category/blog/feed
