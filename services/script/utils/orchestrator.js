@@ -1,3 +1,8 @@
+// services/script/orchestrator.js
+// ============================================================
+// 🧠 Script Orchestrator — intro/main/outro + editorial + meta
+// ============================================================
+
 import { info, error, debug } from "#logger.js";
 import { generateIntro, generateMain, generateOutro } from "./models.js";
 import { composeEpisode } from "../routes/composeScript.js";
@@ -5,7 +10,8 @@ import { uploadText } from "#shared/r2-client.js";
 import chunkText from "./chunkText.js";
 import { generateEpisodeMetaLLM } from "./podcastHelper.js";
 import * as sessionCache from "./sessionCache.js";
-import { resilientRequest } from "../../shared/utils/ai-service.js";   // <-- required for LLM passes
+import { resilientRequest } from "../../shared/utils/ai-service.js";   // LLM passes
+import { attachEpisodeNumberIfNeeded } from "./utils/episodeCounter.js";
 
 // ------------------------------------------------------------
 // Temporary delayed cleanup (4-minute silent safety net)
@@ -37,15 +43,14 @@ export async function orchestrateScript(sessionId) {
       sessionId: sid,
       intro,
       main,
-      outro
+      outro,
     });
 
     const initialFullText =
-      composed?.fullText ??
-      [intro, main, outro].join("\n\n");
+      composed?.fullText ?? [intro, main, outro].join("\n\n");
 
     // ------------------------------------------------------------
-    // NEW Step 2.5: editorialPass (cleanup, cohesion, tone, flow)
+    // Step 2.5: editorialPass (cleanup, cohesion, tone, flow)
     // ------------------------------------------------------------
     const editorialText = await resilientRequest("editorialPass", {
       sessionId: sid,
@@ -53,14 +58,14 @@ export async function orchestrateScript(sessionId) {
         {
           role: "system",
           content:
-            "Perform a full editorial cleanup. Ensure cohesion, fix grammar, improve flow, and unify tone without altering meaning."
+            "Perform a full editorial cleanup. Ensure cohesion, fix grammar, improve flow, and unify tone without altering meaning.",
         },
-        { role: "user", content: initialFullText }
-      ]
+        { role: "user", content: initialFullText },
+      ],
     });
 
     // ------------------------------------------------------------
-    // NEW Step 2.6: editAndFormat (final structured formatting)
+    // Step 2.6: editAndFormat (final structured formatting)
     // ------------------------------------------------------------
     const formattedText = await resilientRequest("editAndFormat", {
       sessionId: sid,
@@ -68,13 +73,14 @@ export async function orchestrateScript(sessionId) {
         {
           role: "system",
           content:
-            "Format the script for final podcast delivery. Ensure clean paragraph structure, smooth transitions, and TTS-friendly punctuation."
+            "Format the script for final podcast delivery. Ensure clean paragraph structure, smooth transitions, and TTS-friendly punctuation.",
         },
-        { role: "user", content: editorialText }
-      ]
+        { role: "user", content: editorialText },
+      ],
     });
 
-    const finalFullText = formattedText?.trim() || editorialText?.trim() || initialFullText;
+    const finalFullText =
+      formattedText?.trim() || editorialText?.trim() || initialFullText;
 
     // Step 3: Chunk and upload to rawtext bucket
     const chunks = chunkText(finalFullText);
@@ -90,7 +96,18 @@ export async function orchestrateScript(sessionId) {
     await uploadText("transcript", `${sid}.txt`, finalFullText, "text/plain");
 
     // Step 5: Generate and upload metadata (based on formatted text)
-    const meta = await generateEpisodeMetaLLM(finalFullText, sid);
+    let meta = await generateEpisodeMetaLLM(finalFullText, sid);
+
+    // 🔢 Attach persistent episodeNumber when enabled
+    try {
+      meta = await attachEpisodeNumberIfNeeded(meta);
+    } catch (err) {
+      error("episodeNumber.attach.fail", {
+        sessionId: sid,
+        error: String(err),
+      });
+    }
+
     if (meta) {
       const metaKey = `${sid}.json`;
       await uploadText(
@@ -100,19 +117,6 @@ export async function orchestrateScript(sessionId) {
         "application/json"
       );
     }
-
-    // ------------------------------------------------------------
-    // 🔥 NEW: Expose artworkPrompt at the top-level return
-    // ------------------------------------------------------------
-    const artworkPrompt =
-      meta?.artworkPrompt && String(meta.artworkPrompt).trim().length > 0
-        ? meta.artworkPrompt.trim()
-        : null;
-
-    debug("🎨 Artwork prompt resolved", {
-      sessionId: sid,
-      artworkPrompt: artworkPrompt || "(none)"
-    });
 
     // Step 6: Schedule delayed cleanup
     scheduleCleanup(sid);
@@ -126,14 +130,12 @@ export async function orchestrateScript(sessionId) {
       fullText: finalFullText,
       chunks: uploadedChunks,
       metadata: meta || {},
-      // NEW: required for artwork generation pipeline
-      artworkPrompt
     };
   } catch (err) {
     error("💥 Script orchestration failed", {
       sessionId: sid,
       error: err?.message,
-      stack: err?.stack
+      stack: err?.stack,
     });
     throw err;
   }
