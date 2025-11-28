@@ -101,6 +101,19 @@ export async function orchestrateScript(sessionId) {
       );
     }
 
+    // ------------------------------------------------------------
+    // 🔥 NEW: Expose artworkPrompt at the top-level return
+    // ------------------------------------------------------------
+    const artworkPrompt =
+      meta?.artworkPrompt && String(meta.artworkPrompt).trim().length > 0
+        ? meta.artworkPrompt.trim()
+        : null;
+
+    debug("🎨 Artwork prompt resolved", {
+      sessionId: sid,
+      artworkPrompt: artworkPrompt || "(none)"
+    });
+
     // Step 6: Schedule delayed cleanup
     scheduleCleanup(sid);
 
@@ -112,7 +125,9 @@ export async function orchestrateScript(sessionId) {
       ...composed,
       fullText: finalFullText,
       chunks: uploadedChunks,
-      metadata: meta || {}
+      metadata: meta || {},
+      // NEW: required for artwork generation pipeline
+      artworkPrompt
     };
   } catch (err) {
     error("💥 Script orchestration failed", {
