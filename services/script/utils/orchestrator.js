@@ -20,7 +20,7 @@ import { info, error } from "#logger.js";
 // These MUST exist in your project.
 // If names/paths differ, tell me and I'll adjust them.
 import { getWeatherSummary } from "./getWeatherSummary.js";
-import { getTuringQuote } from "./turingQuote.js";
+import { getTuringQuote } from "./getTuringQuote.js";
 
 // ============================================================================
 // Final cleanup for TTS
