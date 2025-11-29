@@ -10,7 +10,7 @@
 // Then logs a summary.
 // ============================================================
 
-import { log } from "#logger.js";
+import { log, debug } from "#logger.js";
 import { listKeys, deleteObject } from "#shared/r2-client.js";
 
 const BUCKETS_TO_CLEAN = ["edited", "rawtext", "merged", "chunks"];
@@ -21,7 +21,7 @@ export async function cleanupSession(sessionId) {
     return;
   }
 
-  log.info("🧹 Starting R2 cleanup for session", { sessionId });
+  log.debug("🧹 Starting R2 cleanup for session", { sessionId });
 
   for (const bucketKey of BUCKETS_TO_CLEAN) {
     try {
@@ -34,7 +34,7 @@ export async function cleanupSession(sessionId) {
         continue;
       }
 
-      log.info("🗑️ Deleting R2 objects for bucket", {
+      log.debug("🗑️ Deleting R2 objects for bucket", {
         bucketKey,
         sessionId,
         count: keys.length,
