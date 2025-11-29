@@ -1,47 +1,52 @@
 // ============================================================================
-// orchestrator.js – Unified Script Pipeline (FIXED + UPDATED)
+// orchestrator.js – Option A (FULL VERSION WITH WEATHER + TURING QUOTE)
 // ============================================================================
-// Responsibilities:
-//   1. Generate intro → main → outro (via models.js)
-//   2. Editorial pass (LLM)
-//   3. Formatting (editAndFormat.js)
-//   4. Final sanitisation (remove music cues, markdown, emojis)
-//   5. Save transcript to R2
-//   6. Save metadata JSON to R2
-//   7. Return usable metaUrls to podcast pipeline
+// - Fetches weather summary
+// - Fetches Turing quote
+// - Builds intro context
+// - Generates intro → main → outro via models.js
+// - Runs editorial pass
+// - Final TTS cleanup
+// - Uploads transcript
+// - Writes metadata JSON
+// - Returns data to podcast pipeline
 // ============================================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
 import { uploadText, putJson } from "../../shared/utils/r2-client.js";
 import { extractMainContent } from "./textHelpers.js";
 import { info, error } from "#logger.js";
-import * as models from "./models.js";
+
+// These MUST exist in your project.
+// If names/paths differ, tell me and I'll adjust them.
+import { getWeatherSummary } from "./weather.js";
+import { getTuringQuote } from "./turingQuote.js";
 
 // ============================================================================
-// FINAL SANITISATION LAYER — makes text TTS-friendly and clean
+// Final cleanup for TTS
 // ============================================================================
 function cleanupFinal(text) {
   if (!text) return "";
 
   return String(text)
-    // Remove markdown (**bold**)
+    // Remove markdown formatting
     .replace(/[*_]{1,3}/g, "")
     .replace(/^#{1,6}\s*/gm, "")
 
-    // Remove scene directions / music cues
-    .replace(/\[.*?(music|sfx|sound|cue|intro|outro|transition).*?]/gi, "")
-    .replace(/\(.*?(music|sfx|sound|cue|intro|outro|transition).*?\)/gi, "")
+    // Remove scene/music cues
+    .replace(/\[.*?(music|sfx|cue|style|intro|outro).*?]/gi, "")
+    .replace(/\(.*?(music|sfx|cue|style|intro|outro).*?\)/gi, "")
 
-    // Remove prefixes like "Voiceover:", "Scene:", "Style:"
+    // Remove prefixes
     .replace(/^(scene|voiceover|style|direction)[:\-]/gim, "")
 
     // Remove emojis
     .replace(/[🎵🎶🎤🎧🎙️✨⭐🌟🔥💥👉➡️❗⚠️★]+/g, "")
 
-    // Remove horizontal rules
-    .replace(/^[-–—]{3,}$/gm, "")
+    // Fix ellipses
+    .replace(/\.{3,}/g, ".")
 
-    // Collapse excessive whitespace
+    // Compact whitespace
     .replace(/\s{3,}/g, "\n\n")
 
     .trim();
@@ -50,81 +55,121 @@ function cleanupFinal(text) {
 // ============================================================================
 // MAIN ORCHESTRATOR
 // ============================================================================
-export async function orchestrateEpisode({ sessionId, date, topic, tone = {} }) {
+export async function orchestrateEpisode({
+  sessionId,
+  date,
+  topic,
+  tone = {},
+}) {
   info("🧠 Orchestrate Script: start", { sessionId });
 
   try {
     // ------------------------------------------------------------------------
-    // 1. Generate intro → main → outro (via updated models.js)
+    // 1. WEATHER SUMMARY + TURING QUOTE
     // ------------------------------------------------------------------------
-    const parts = await models.generateComposedEpisodeParts({
+    let weather = "";
+    let turing = "";
+
+    try {
+      weather = await getWeatherSummary();
+      info("weather.ok");
+    } catch (err) {
+      error("weather.fail", { err: err.message });
+      weather = "";
+    }
+
+    try {
+      turing = await getTuringQuote();
+      info("turingQuote.ok");
+    } catch (err) {
+      error("turingQuote.fail", { err: err.message });
+      turing = "";
+    }
+
+    // ------------------------------------------------------------------------
+    // 2. Generate INTRO / MAIN / OUTRO via models.js
+    // ------------------------------------------------------------------------
+    const parts = await (
+      await import("./models.js")
+    ).generateComposedEpisodeParts({
+      sessionId,
       date,
       topic,
       tone,
+      weather,
+      turing,
     });
 
-    const { intro, main, outro, formatted, callLog } = parts;
+    const {
+      intro,
+      main,
+      outro,
+      formatted,   // optional formatted version from models
+      callLog,
+    } = parts;
 
     const initialFullText =
       formatted?.trim() ||
       `${intro}\n\n${main}\n\n${outro}`.trim();
 
     // ------------------------------------------------------------------------
-    // 2. Editorial Pass — cleans + tightens narrative
+    // 3. EDITORIAL PASS
     // ------------------------------------------------------------------------
     const editorialResp = await resilientRequest({
       routeName: "editorialPass",
-      model: "openai/gpt-4o-mini",
+      sessionId,
+      model: "chatgpt", // your configured best-first route
       messages: [
         {
           role: "system",
           content:
-            "You are an expert editor. Improve clarity, flow, pacing, and remove repetition. Keep tone British conversational. No markdown, no scene cues."
+            "You are an expert British editor. Improve pacing, clarity, flow. Keep concise. No markdown. TTS friendly.",
         },
         {
           role: "user",
-          content: initialFullText
-        }
+          content: initialFullText,
+        },
       ],
       max_tokens: 4000,
     });
 
     const editorialText = extractMainContent(
-      editorialResp?.content || ""
+      editorialResp?.content || editorialResp || ""
     );
 
     // ------------------------------------------------------------------------
-    // 3. Final Clean-up (removes cues, markdown, emojis)
+    // 4. FINAL CLEANUP (TTS-SAFE)
     // ------------------------------------------------------------------------
     const finalFullText = cleanupFinal(
       editorialText || initialFullText
     );
 
     // ------------------------------------------------------------------------
-    // 4. Save transcript to R2
+    // 5. UPLOAD TRANSCRIPT
     // ------------------------------------------------------------------------
     const transcriptKey = `${sessionId}.txt`;
     const transcriptUrl = await uploadText(
-      "transcripts",
+      "transcripts",            // must match R2 alias
       transcriptKey,
       finalFullText,
       "text/plain"
     );
 
     // ------------------------------------------------------------------------
-    // 5. Save metadata JSON (used by TTS / merge / RSS)
+    // 6. WRITE META JSON
     // ------------------------------------------------------------------------
     const metaKey = `${sessionId}.json`;
-
     const meta = {
       session: {
         sessionId,
         date: new Date().toISOString(),
       },
       transcriptUrl,
-      introLength: intro.length,
-      mainLength: main.length,
-      outroLength: outro.length,
+      weather,
+      turingQuote: turing,
+      introLength: intro?.length || 0,
+      mainLength: main?.length || 0,
+      outroLength: outro?.length || 0,
       textLength: finalFullText.length,
       topic,
       tone,
@@ -139,10 +184,11 @@ export async function orchestrateEpisode({ sessionId, date, topic, tone = {} }) 
       sessionId,
       transcriptKey,
       metaKey,
-      calls: callLog?.length,
     });
 
-    // Send results back to podcast pipeline
+    // ------------------------------------------------------------------------
+    // RETURN TO PIPELINE
+    // ------------------------------------------------------------------------
     return {
       ok: true,
       sessionId,
@@ -152,6 +198,7 @@ export async function orchestrateEpisode({ sessionId, date, topic, tone = {} }) 
       text: finalFullText,
       callLog,
     };
+
   } catch (err) {
     error("❌ Script orchestration failed", {
       sessionId,
