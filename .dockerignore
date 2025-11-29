@@ -1,0 +1,81 @@
+# Node.js dependencies - force clean install
+node_modules
+.npm
+.pnpm
+.yarn
+.npmrc
+.pnpmfile.js
+.yarnrc
+
+# Log files
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+logs/
+
+# Environment variables
+.env
+.env.*
+.env.local
+.env.development
+.env.test
+.env.production
+!.env.example
+
+# Build outputs
+dist/
+build/
+coverage/
+.nyc_output/
+.out/
+.next/
+.nuxt/
+
+# Cache directories
+.cache/
+.turbo/
+.webpack/
+.vite/
+tmp/
+temp/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Package manager lock files - FORCE CLEAN INSTALL
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+npm-shrinkwrap.json
+
+# Archives
+*.zip
+*.tar
+*.gz
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Miscellaneous
+*.tmp
+*.temp
+.circleci/
+.nycrc
+.eslintcache

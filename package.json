@@ -1,0 +1,50 @@
+{
+  "name": "AI-management-suite",
+  "version": "2.6.2",
+  "type": "module",
+  "main": "server.js",
+
+  "scripts": {
+    "start": "node server.js",
+    "build": "echo 'Skipping TypeScript build — pure ESM JS project'"
+  },
+
+  "engines": {
+    "node": ">=22 <25"
+  },
+
+  "dependencies": {
+    "@aws-sdk/client-polly": "^3.663.0",
+    "@aws-sdk/client-s3": "^3.663.0",
+    "@google/generative-ai": "0.10.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.19.2",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "fluent-ffmpeg": "^2.1.2",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.56.0",
+    "p-limit": "^4.0.0",
+    "pino": "^9.2.0",
+    "pino-http": "^9.0.0",
+    "pino-pretty": "^11.2.2",
+    "nanoid": "^5.0.7",
+    "rss-parser": "^3.13.0",
+    "undici": "^6.19.8",
+    "xmlbuilder2": "^3.1.1",
+    "zod": "^3.23.8"
+  },
+
+  "imports": {
+    "#shared/*": "./services/shared/utils/*",
+    "#logger.js": "./logger.js",
+    "#routes/*": "./routes/*"
+  },
+
+  "devDependencies": {
+    "supertest": "^7.0.0"
+  },
+
+  "private": true
+}
