@@ -4,7 +4,7 @@
 import { getObjectAsText, putObject } from "#shared/r2-client.js";
 import { info, warn } from "#logger.js";
 
-const COUNTER_BUCKET = "metaSystem";
+const COUNTER_BUCKET = "metasystem";
 const COUNTER_KEY = "episode-counter.json";
 
 export async function getNextEpisodeNumber() {
