@@ -1,143 +1,148 @@
-// services/script/utils/orchestrator.js
-// ------------------------------------------------------------
-// Unified Orchestrator for Intro → Main → Outro → Editorial
-// → Formatting → FINAL CLEANUP → Chunking → Transcript Export
-// ------------------------------------------------------------
+// ============================================================================
+// orchestrator.js – Unified Script Pipeline (FIXED + UPDATED)
+// ============================================================================
+// Responsibilities:
+//   1. Generate intro → main → outro (via models.js)
+//   2. Editorial pass (LLM)
+//   3. Formatting (editAndFormat.js)
+//   4. Final sanitisation (remove music cues, markdown, emojis)
+//   5. Save transcript to R2
+//   6. Save metadata JSON to R2
+//   7. Return usable metaUrls to podcast pipeline
+// ============================================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
+import { uploadText, putJson } from "../../shared/utils/r2-client.js";
+import { extractMainContent } from "./textHelpers.js";
 import { info, error } from "#logger.js";
 import * as models from "./models.js";
-import { extractMainContent } from "./textHelpers.js";
-import { putJson, uploadText } from "../../shared/utils/r2-client.js";
 
-// ------------------------------------------------------------
-// FINAL SANITISATION LAYER — removes ALL style/scene cues
-// ------------------------------------------------------------
+// ============================================================================
+// FINAL SANITISATION LAYER — makes text TTS-friendly and clean
+// ============================================================================
 function cleanupFinal(text) {
   if (!text) return "";
 
   return String(text)
-    // Remove markdown (**bold**, *italics*, ### headers)
+    // Remove markdown (**bold**)
     .replace(/[*_]{1,3}/g, "")
     .replace(/^#{1,6}\s*/gm, "")
 
-    // Remove stage + style directions: [Music…], (SFX…), Voiceover:
+    // Remove scene directions / music cues
     .replace(/\[.*?(music|sfx|sound|cue|intro|outro|transition).*?]/gi, "")
     .replace(/\(.*?(music|sfx|sound|cue|intro|outro|transition).*?\)/gi, "")
-    .replace(/^(scene|style|voiceover|narrator|direction)[:\-]/gim, "")
 
-    // Remove decorative emojis
+    // Remove prefixes like "Voiceover:", "Scene:", "Style:"
+    .replace(/^(scene|voiceover|style|direction)[:\-]/gim, "")
+
+    // Remove emojis
     .replace(/[🎵🎶🎤🎧🎙️✨⭐🌟🔥💥👉➡️❗⚠️★]+/g, "")
 
-    // Remove markdown horizontal rules
+    // Remove horizontal rules
     .replace(/^[-–—]{3,}$/gm, "")
 
-    // Remove double-space gaps
+    // Collapse excessive whitespace
     .replace(/\s{3,}/g, "\n\n")
 
     .trim();
 }
 
-// ------------------------------------------------------------
-// MAIN ORCHESTRATION PIPELINE
-// ------------------------------------------------------------
+// ============================================================================
+// MAIN ORCHESTRATOR
+// ============================================================================
 export async function orchestrateEpisode({ sessionId, date, topic, tone = {} }) {
   info("🧠 Orchestrate Script: start", { sessionId });
 
   try {
-    // -------------------------------
-    // 1) INTRO
-    // -------------------------------
-    const introRaw = await models.generateIntro({ date, topic, tone });
-    const intro = cleanupFinal(introRaw);
+    // ------------------------------------------------------------------------
+    // 1. Generate intro → main → outro (via updated models.js)
+    // ------------------------------------------------------------------------
+    const parts = await models.generateComposedEpisodeParts({
+      date,
+      topic,
+      tone,
+    });
 
-    // -------------------------------
-    // 2) MAIN
-    // -------------------------------
-    const mainRaw = await models.generateMain({ date, topic, tone });
-    const main = cleanupFinal(mainRaw);
+    const { intro, main, outro, formatted, callLog } = parts;
 
-    // -------------------------------
-    // 3) OUTRO
-    // -------------------------------
-    const outroRaw = await models.generateOutro({ date, topic, tone });
-    const outro = cleanupFinal(outroRaw);
+    const initialFullText =
+      formatted?.trim() ||
+      `${intro}\n\n${main}\n\n${outro}`.trim();
 
-    // -------------------------------
-    // Combine full text BEFORE editorial pass
-    // -------------------------------
-    const initialFullText = `${intro}\n\n${main}\n\n${outro}`.trim();
-
-    // -------------------------------
-    // 4) EDITORIAL PASS
-    // -------------------------------
+    // ------------------------------------------------------------------------
+    // 2. Editorial Pass — cleans + tightens narrative
+    // ------------------------------------------------------------------------
     const editorialResp = await resilientRequest({
+      routeName: "editorialPass",
       model: "openai/gpt-4o-mini",
       messages: [
         {
           role: "system",
           content:
-            "You are an expert editor. Remove fluff, keep factual clarity, conversational tone, smooth transitions.",
+            "You are an expert editor. Improve clarity, flow, pacing, and remove repetition. Keep tone British conversational. No markdown, no scene cues."
         },
         {
           role: "user",
-          content: initialFullText,
-        },
+          content: initialFullText
+        }
       ],
-      max_tokens: 4096,
+      max_tokens: 4000,
     });
 
-    const editorialText = cleanupFinal(
-      extractMainContent(editorialResp?.content || "")
+    const editorialText = extractMainContent(
+      editorialResp?.content || ""
     );
 
-    // -------------------------------
-    // 5) FORMATTING PASS (your existing formatter)
-    // -------------------------------
-    const formattedText =
-      models.editAndFormat?.(editorialText) || editorialText;
-
-    // -------------------------------
-    // FINAL CLEANUP (NEW, CRITICAL)
-    // -------------------------------
+    // ------------------------------------------------------------------------
+    // 3. Final Clean-up (removes cues, markdown, emojis)
+    // ------------------------------------------------------------------------
     const finalFullText = cleanupFinal(
-      formattedText?.trim() ||
-        editorialText?.trim() ||
-        initialFullText
+      editorialText || initialFullText
     );
 
-    // -------------------------------
-    // 6) EXPORT TRANSCRIPT TO R2
-    // -------------------------------
+    // ------------------------------------------------------------------------
+    // 4. Save transcript to R2
+    // ------------------------------------------------------------------------
     const transcriptKey = `${sessionId}.txt`;
     const transcriptUrl = await uploadText(
-      "transcript",
+      "transcripts",
       transcriptKey,
-      finalFullText
+      finalFullText,
+      "text/plain"
     );
 
-    // -------------------------------
-    // 7) STORE METADATA
-    // -------------------------------
+    // ------------------------------------------------------------------------
+    // 5. Save metadata JSON (used by TTS / merge / RSS)
+    // ------------------------------------------------------------------------
     const metaKey = `${sessionId}.json`;
+
     const meta = {
-      session: { sessionId, date: new Date().toISOString() },
+      session: {
+        sessionId,
+        date: new Date().toISOString(),
+      },
       transcriptUrl,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      introLength: intro.length,
+      mainLength: main.length,
+      outroLength: outro.length,
       textLength: finalFullText.length,
       topic,
       tone,
+      callLog,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
     await putJson("meta", metaKey, meta);
 
     info("✅ Script orchestration complete", {
       sessionId,
-      metaKey,
       transcriptKey,
+      metaKey,
+      calls: callLog?.length,
     });
 
+    // Send results back to podcast pipeline
     return {
       ok: true,
       sessionId,
@@ -145,6 +150,7 @@ export async function orchestrateEpisode({ sessionId, date, topic, tone = {} }) 
         transcriptUrl,
       },
       text: finalFullText,
+      callLog,
     };
   } catch (err) {
     error("❌ Script orchestration failed", {
