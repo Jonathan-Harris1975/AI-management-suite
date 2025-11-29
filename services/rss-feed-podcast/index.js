@@ -22,81 +22,50 @@ const META_PREFIX = "";
 const RSS_BUCKET_ALIAS = "podcastRss";
 const RSS_KEY = "turing-torch.xml";
 
-// Feed URL for PodcastIndex notifications (robust absolute URL builder)
-function buildFeedUrl() {
-  const filename = RSS_KEY;
-  const explicit = (process.env.PODCAST_RSS_FEED_URL || "").trim();
-  const baseFromEnv =
-    (process.env.R2_PUBLIC_BASE_URL_RSS_FEEDS ||
-      process.env.R2_PUBLIC_BASE_URL_PODCAST ||
-      "").trim();
-
-  // If explicitly set to full URL, trust it
-  if (explicit && /^https?:\/\//i.test(explicit)) {
-    return explicit;
-  }
-
-  // If explicitly set but looks like a path (e.g. "/turing-torch.xml"),
-  // try to combine with a configured public base URL.
-  if (explicit && explicit.startsWith("/")) {
-    if (!baseFromEnv) {
-      warn(
-        "PODCAST_RSS_FEED_URL is relative but no base URL configured; PodcastIndex notify may fail.",
-        { explicit }
-      );
-      return explicit; // preserve existing behaviour as last resort
-    }
-    return `${baseFromEnv.replace(/\/+$/, "")}${explicit}`;
-  }
-
-  // If no explicit value, but we have a base URL, build from it
-  if (baseFromEnv) {
-    return `${baseFromEnv.replace(/\/+$/, "")}/${filename}`;
-  }
-
-  // Absolute fallback: log a warning and return a relative path
-  warn(
-    "No PODCAST_RSS_FEED_URL or base RSS URL configured; using relative path which PodcastIndex may reject.",
-    { filename }
-  );
-  return `/${filename}`;
-}
-
-const FEED_URL = buildFeedUrl();
+// Feed URL for PodcastIndex notifications
+const FEED_URL =
+  process.env.PODCAST_RSS_FEED_URL ||
+  `${process.env.R2_PUBLIC_BASE_URL_RSS_FEEDS || ""}/turing-torch.xml`;
 
 export async function runRssFeedCreator() {
   info("🚀 Starting RSS feed generation");
 
   // ------------------------------------------------------------
-  // Discover meta JSON files
+  // Load meta files
   // ------------------------------------------------------------
-  const keys = await listKeys(META_BUCKET_ALIAS, META_PREFIX);
+  let keys;
+  try {
+    keys = await listKeys(META_BUCKET_ALIAS, META_PREFIX);
+  } catch (err) {
+    error("Failed to list meta objects", { error: err.message });
+    throw err;
+  }
 
-  if (!keys || keys.length === 0) {
-    warn("No metadata files found in R2 — RSS feed will be empty.");
+  if (!Array.isArray(keys) || keys.length === 0) {
+    warn("No metadata files found in meta bucket");
     return;
   }
 
-  info("Found metadata files", {
-    count: keys.length,
-  });
+  const metaKeys = keys.filter((key) =>
+    typeof key === "string" ? key.endsWith(".json") : false
+  );
 
-  // ------------------------------------------------------------
-  // Load + parse metadata
-  // ------------------------------------------------------------
+  if (metaKeys.length === 0) {
+    warn("No .json metadata files found in meta bucket root");
+    return;
+  }
+
+  info("Found metadata files", { count: metaKeys.length });
+
   const episodes = [];
 
-  for (const key of keys) {
+  for (const key of metaKeys) {
     try {
-      const jsonText = await getObjectAsText(META_BUCKET_ALIAS, key);
-      const meta = JSON.parse(jsonText);
-
-      episodes.push(meta);
+      const text = await getObjectAsText(META_BUCKET_ALIAS, key);
+      const json = JSON.parse(text);
+      episodes.push(json);
     } catch (err) {
-      warn("Failed to parse metadata JSON — skipping file", {
-        key,
-        error: err.message,
-      });
+      warn("Failed to parse meta file", { key, error: err.message });
     }
   }
 
@@ -120,9 +89,12 @@ export async function runRssFeedCreator() {
   // Upload RSS
   // ------------------------------------------------------------
   try {
-    await putObject(RSS_BUCKET_ALIAS, RSS_KEY, xml, {
-      contentType: "application/rss+xml",
-    });
+    await putObject(
+      RSS_BUCKET_ALIAS,
+      RSS_KEY,
+      Buffer.from(xml, "utf-8"),
+      "application/rss+xml"
+    );
 
     info("RSS feed uploaded successfully", {
       bucketAlias: RSS_BUCKET_ALIAS,
