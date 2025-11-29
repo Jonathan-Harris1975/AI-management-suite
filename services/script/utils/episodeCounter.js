@@ -1,37 +1,34 @@
 // services/script/utils/episodeCounter.js
-// Unified episode counter + auto-number assignment
+// ============================================================
+// 🔢 Episode Counter (metasystem bucket)
+//   - Stores a simple JSON: { "nextEpisodeNumber": N }
+//   - Provides attachEpisodeNumberIfNeeded(meta)
+// ============================================================
 
 import { getObjectAsText, putObject } from "#shared/r2-client.js";
 import { info, warn } from "#logger.js";
 
-// 👇 NEW BUCKET (make sure env contains R2_BUCKET_META_SYSTEM)
 const COUNTER_BUCKET = "metasystem";
 const COUNTER_KEY = "episode-counter.json";
 
-/**
- * Load the next available episode number.
- */
 export async function getNextEpisodeNumber() {
   try {
     const txt = await getObjectAsText(COUNTER_BUCKET, COUNTER_KEY);
     const json = JSON.parse(txt);
     return json.nextEpisodeNumber || 1;
-  } catch {
+  } catch (err) {
     warn("Episode counter missing — starting at 1");
     return 1;
   }
 }
 
-/**
- * Increment and persist counter after assigning a new episode number.
- */
 export async function incrementEpisodeCounter(current) {
   const next = { nextEpisodeNumber: current + 1 };
 
   await putObject(
     COUNTER_BUCKET,
     COUNTER_KEY,
-    Buffer.from(JSON.stringify(next, null, 2), "utf-8"),
+    JSON.stringify(next),
     "application/json"
   );
 
@@ -39,16 +36,16 @@ export async function incrementEpisodeCounter(current) {
 }
 
 /**
- * MAIN FUNCTION REQUIRED BY orchestrator.js
- *
- * If metadata already has an episode number → keep it.
- * Otherwise → assign next value, update counter, return new metadata.
+ * Attach an episodeNumber to metadata if missing.
+ * Uses metasystem counter, then increments it.
  */
 export async function attachEpisodeNumberIfNeeded(meta) {
   if (!meta || typeof meta !== "object") return meta;
 
   if (meta.episodeNumber && Number(meta.episodeNumber) > 0) {
-    info("Episode number already exists", { episodeNumber: meta.episodeNumber });
+    info("Episode number already present", {
+      episodeNumber: meta.episodeNumber,
+    });
     return meta;
   }
 
