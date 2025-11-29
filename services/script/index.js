@@ -1,14 +1,15 @@
 // services/script/index.js
+// Unified export layer to expose orchestrateScript to other services
 
-import orchestrateScriptDefault from "./utils/orchestrator.js";
+import { orchestrateEpisode as orchestrateScript } from "./utils/orchestrator.js";
+import * as models from "./utils/models.js";
 
-// Create named alias for backward compatibility
-export const orchestrateScript = orchestrateScriptDefault;
+export {
+  orchestrateScript,
+  models
+};
 
-// Backward-compatible shim for older pipelines (uses orchestrateEpisode name)
-export async function orchestrateEpisode(sessionId) {
-  return orchestrateScriptDefault(sessionId);
-}
-
-// Default export maintained for convenience
-export default orchestrateScriptDefault;
+export default {
+  orchestrateScript,
+  models
+};
