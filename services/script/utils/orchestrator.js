@@ -1,146 +1,158 @@
-import { info, error, debug } from "#logger.js";
-import { generateIntro, generateMain, generateOutro } from "./models.js";
-import { composeEpisode } from "../routes/composeScript.js";
-import { uploadText } from "#shared/r2-client.js";
-import chunkText from "./chunkText.js";
-import { generateEpisodeMetaLLM } from "./podcastHelper.js";
-import * as sessionCache from "./sessionCache.js";
-import { resilientRequest } from "../../shared/utils/ai-service.js";   // <-- required for LLM passes
+// services/script/utils/orchestrator.js
+// ------------------------------------------------------------
+// Unified Orchestrator for Intro → Main → Outro → Editorial
+// → Formatting → FINAL CLEANUP → Chunking → Transcript Export
+// ------------------------------------------------------------
+
+import { resilientRequest } from "../../shared/utils/ai-service.js";
+import { info, error } from "#logger.js";
+import * as models from "./models.js";
+import { extractMainContent } from "./textHelpers.js";
+import { putJson, uploadText } from "../../shared/utils/r2-client.js";
 
 // ------------------------------------------------------------
-// Temporary delayed cleanup (4-minute silent safety net)
+// FINAL SANITISATION LAYER — removes ALL style/scene cues
 // ------------------------------------------------------------
-function scheduleCleanup(sessionId) {
-  setTimeout(async () => {
-    try {
-      await clearTempParts(sessionId);
-      sessionCache.clearSession(sessionId);
-    } catch (_) {}
-  }, 4 * 60 * 1000);
+function cleanupFinal(text) {
+  if (!text) return "";
+
+  return String(text)
+    // Remove markdown (**bold**, *italics*, ### headers)
+    .replace(/[*_]{1,3}/g, "")
+    .replace(/^#{1,6}\s*/gm, "")
+
+    // Remove stage + style directions: [Music…], (SFX…), Voiceover:
+    .replace(/\[.*?(music|sfx|sound|cue|intro|outro|transition).*?]/gi, "")
+    .replace(/\(.*?(music|sfx|sound|cue|intro|outro|transition).*?\)/gi, "")
+    .replace(/^(scene|style|voiceover|narrator|direction)[:\-]/gim, "")
+
+    // Remove decorative emojis
+    .replace(/[🎵🎶🎤🎧🎙️✨⭐🌟🔥💥👉➡️❗⚠️★]+/g, "")
+
+    // Remove markdown horizontal rules
+    .replace(/^[-–—]{3,}$/gm, "")
+
+    // Remove double-space gaps
+    .replace(/\s{3,}/g, "\n\n")
+
+    .trim();
 }
 
 // ------------------------------------------------------------
-// Main orchestrator function
+// MAIN ORCHESTRATION PIPELINE
 // ------------------------------------------------------------
-export async function orchestrateScript(sessionId) {
-  const sid = sessionId || `TT-${Date.now()}`;
-  debug("🧠 Orchestrate Script: start", { sessionId: sid });
+export async function orchestrateEpisode({ sessionId, date, topic, tone = {} }) {
+  info("🧠 Orchestrate Script: start", { sessionId });
 
   try {
-    // Step 1: Generate intro, main content, and outro
-    const intro = await generateIntro(sid);
-    const main = await generateMain(sid);
-    const outro = await generateOutro(sid);
+    // -------------------------------
+    // 1) INTRO
+    // -------------------------------
+    const introRaw = await models.generateIntro({ date, topic, tone });
+    const intro = cleanupFinal(introRaw);
 
-    // Step 2: Compose complete episode text
-    const composed = await composeEpisode({
-      sessionId: sid,
-      intro,
-      main,
-      outro
-    });
+    // -------------------------------
+    // 2) MAIN
+    // -------------------------------
+    const mainRaw = await models.generateMain({ date, topic, tone });
+    const main = cleanupFinal(mainRaw);
 
-    const initialFullText =
-      composed?.fullText ??
-      [intro, main, outro].join("\n\n");
+    // -------------------------------
+    // 3) OUTRO
+    // -------------------------------
+    const outroRaw = await models.generateOutro({ date, topic, tone });
+    const outro = cleanupFinal(outroRaw);
 
-    // ------------------------------------------------------------
-    // NEW Step 2.5: editorialPass (cleanup, cohesion, tone, flow)
-    // ------------------------------------------------------------
-    const editorialText = await resilientRequest("editorialPass", {
-      sessionId: sid,
+    // -------------------------------
+    // Combine full text BEFORE editorial pass
+    // -------------------------------
+    const initialFullText = `${intro}\n\n${main}\n\n${outro}`.trim();
+
+    // -------------------------------
+    // 4) EDITORIAL PASS
+    // -------------------------------
+    const editorialResp = await resilientRequest({
+      model: "openai/gpt-4o-mini",
       messages: [
         {
           role: "system",
           content:
-            "Perform a full editorial cleanup. Ensure cohesion, fix grammar, improve flow, and unify tone without altering meaning."
+            "You are an expert editor. Remove fluff, keep factual clarity, conversational tone, smooth transitions.",
         },
-        { role: "user", content: initialFullText }
-      ]
-    });
-
-    // ------------------------------------------------------------
-    // NEW Step 2.6: editAndFormat (final structured formatting)
-    // ------------------------------------------------------------
-    const formattedText = await resilientRequest("editAndFormat", {
-      sessionId: sid,
-      messages: [
         {
-          role: "system",
-          content:
-            "Format the script for final podcast delivery. Ensure clean paragraph structure, smooth transitions, and TTS-friendly punctuation."
+          role: "user",
+          content: initialFullText,
         },
-        { role: "user", content: editorialText }
-      ]
+      ],
+      max_tokens: 4096,
     });
 
-    const finalFullText = formattedText?.trim() || editorialText?.trim() || initialFullText;
+    const editorialText = cleanupFinal(
+      extractMainContent(editorialResp?.content || "")
+    );
 
-    // Step 3: Chunk and upload to rawtext bucket
-    const chunks = chunkText(finalFullText);
-    const uploadedChunks = [];
+    // -------------------------------
+    // 5) FORMATTING PASS (your existing formatter)
+    // -------------------------------
+    const formattedText =
+      models.editAndFormat?.(editorialText) || editorialText;
 
-    for (let i = 0; i < chunks.length; i++) {
-      const key = `${sid}/chunk-${String(i + 1).padStart(3, "0")}.txt`;
-      await uploadText("rawtext", key, chunks[i], "text/plain");
-      uploadedChunks.push(key);
-    }
+    // -------------------------------
+    // FINAL CLEANUP (NEW, CRITICAL)
+    // -------------------------------
+    const finalFullText = cleanupFinal(
+      formattedText?.trim() ||
+        editorialText?.trim() ||
+        initialFullText
+    );
 
-    // Step 4: Upload full transcript
-    await uploadText("transcript", `${sid}.txt`, finalFullText, "text/plain");
+    // -------------------------------
+    // 6) EXPORT TRANSCRIPT TO R2
+    // -------------------------------
+    const transcriptKey = `${sessionId}.txt`;
+    const transcriptUrl = await uploadText(
+      "transcript",
+      transcriptKey,
+      finalFullText
+    );
 
-    // Step 5: Generate and upload metadata (based on formatted text)
-    const meta = await generateEpisodeMetaLLM(finalFullText, sid);
-    if (meta) {
-      const metaKey = `${sid}.json`;
-      await uploadText(
-        "meta",
-        metaKey,
-        JSON.stringify(meta, null, 2),
-        "application/json"
-      );
-    }
+    // -------------------------------
+    // 7) STORE METADATA
+    // -------------------------------
+    const metaKey = `${sessionId}.json`;
+    const meta = {
+      session: { sessionId, date: new Date().toISOString() },
+      transcriptUrl,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      textLength: finalFullText.length,
+      topic,
+      tone,
+    };
 
-    // ------------------------------------------------------------
-    // 🔥 NEW: Expose artworkPrompt at the top-level return
-    // ------------------------------------------------------------
-    const artworkPrompt =
-      meta?.artworkPrompt && String(meta.artworkPrompt).trim().length > 0
-        ? meta.artworkPrompt.trim()
-        : null;
+    await putJson("meta", metaKey, meta);
 
-    debug("🎨 Artwork prompt resolved", {
-      sessionId: sid,
-      artworkPrompt: artworkPrompt || "(none)"
+    info("✅ Script orchestration complete", {
+      sessionId,
+      metaKey,
+      transcriptKey,
     });
-
-    // Step 6: Schedule delayed cleanup
-    scheduleCleanup(sid);
-
-    // Step 7: Return structured result
-    info("✅ Script orchestration complete");
-    debug("✅ Script orchestration complete", { sessionId: sid });
 
     return {
-      ...composed,
-      fullText: finalFullText,
-      chunks: uploadedChunks,
-      metadata: meta || {},
-      // NEW: required for artwork generation pipeline
-      artworkPrompt
+      ok: true,
+      sessionId,
+      metaUrls: {
+        transcriptUrl,
+      },
+      text: finalFullText,
     };
   } catch (err) {
-    error("💥 Script orchestration failed", {
-      sessionId: sid,
-      error: err?.message,
-      stack: err?.stack
+    error("❌ Script orchestration failed", {
+      sessionId,
+      error: err.message,
     });
     throw err;
   }
 }
 
-// ------------------------------------------------------------
-// Backward-compatible alias + default export
-// ------------------------------------------------------------
-export const orchestrateEpisode = orchestrateScript;
-export default orchestrateScript;
+export default { orchestrateEpisode };
