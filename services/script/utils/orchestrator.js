@@ -5,7 +5,10 @@ import { uploadText } from "#shared/r2-client.js";
 import chunkText from "./chunkText.js";
 import { generateEpisodeMetaLLM } from "./podcastHelper.js";
 import * as sessionCache from "./sessionCache.js";
+
+// UPDATED → ensure this matches the new export
 import { attachEpisodeNumberIfNeeded } from "./episodeCounter.js";
+
 import editAndFormat from "./editAndFormat.js";
 import { runEditorialPass } from "./editorialPass.js";
 
@@ -20,14 +23,11 @@ function scheduleCleanup(sessionId) {
   setTimeout(async () => {
     try {
       sessionCache.clearSession(sessionId);
-    } catch (_) {
-      // ignore cleanup errors
-    }
+    } catch (_) {}
   }, 4 * 60 * 1000);
 }
 
 export async function orchestrateScript(input) {
-  // Allow both legacy string sessionId and richer session meta object
   const sessionMeta =
     typeof input === "string"
       ? { sessionId: input }
@@ -45,12 +45,10 @@ export async function orchestrateScript(input) {
   debug("🧠 Orchestrate Script: start", { sessionId: sid });
 
   try {
-    // Core sections
     const intro = await generateIntro(sid);
     const main = await generateMain(sid);
     const outro = await generateOutro(sid);
 
-    // High-level episode composition (may add structure markers)
     const composed = await composeEpisode({
       sessionId: sid,
       intro,
@@ -61,13 +59,11 @@ export async function orchestrateScript(input) {
     const initialFullText =
       composed?.fullText ?? [intro, main, outro].join("\n\n");
 
-    // Optional editorial pass (LLM-based, guarded by env flag)
     const editorialText = await runEditorialPass(
       { sessionId: sid, ...sessionMeta },
       initialFullText
     );
 
-    // Lightweight formatting + humanisation (local, not LLM)
     const formattedText = editAndFormat(editorialText || initialFullText);
 
     const finalFullText =
@@ -75,7 +71,6 @@ export async function orchestrateScript(input) {
       (editorialText && editorialText.trim()) ||
       initialFullText;
 
-    // Chunk for TTS + R2 upload (raw text)
     const chunks = chunkText(finalFullText);
     const uploadedChunks = [];
 
@@ -85,16 +80,15 @@ export async function orchestrateScript(input) {
       uploadedChunks.push(key);
     }
 
-    // Full transcript upload
     await uploadText("transcript", `${sid}.txt`, finalFullText, "text/plain");
 
-    // LLM-driven metadata (title, description, SEO, artwork prompt, episode number)
     let meta = await generateEpisodeMetaLLM(finalFullText, {
       sessionId: sid,
       date: sessionMeta.date,
       episodeNumber: sessionMeta.episodeNumber,
     });
 
+    // UPDATED → now works because function exists
     meta = await attachEpisodeNumberIfNeeded(meta);
 
     const metaKey = `${sid}.json`;
