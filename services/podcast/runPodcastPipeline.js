@@ -1,5 +1,4 @@
 // services/podcast/runPodcastPipeline.js
-
 import { log } from "#logger.js";
 import { orchestrateScript } from "../script/index.js";
 import { orchestrateTTS } from "../tts/utils/orchestrator.js";
@@ -8,14 +7,31 @@ import cleanupSession from "../shared/utils/cleanupSession.js";
 import runRssFeedCreator from "../rss-feed-podcast/index.js";
 
 export async function runPodcastPipeline(sessionId) {
-  log.debug("🎧 Starting AI Podcast Pipeline...", { sessionId });
+  log.info("api.podcast.start", { sessionId });
 
   try {
-    // 1️⃣ Script generation (intro / main / outro / meta upstream)
-    const script = await orchestrateScript(sessionId);
-    log.info("🧾 Script generation complete", { sessionId });
+    // -----------------------------------------------------------
+    // 🧠 1) SCRIPT GENERATION (CRITICAL FIX: Payload must be object)
+    // -----------------------------------------------------------
+    log.info("🧠 Orchestrate Script: start");
 
-    // 2️⃣ Artwork generation with LLM artwork prompt if available
+    const script = await orchestrateScript({
+      sessionId,
+      date: new Date().toISOString(),
+      tone: "balanced",
+      location: "London",
+      weather: null,        // orchestrator fetches weather internally
+      turingQuote: null,    // orchestrator fetches Turing quote internally
+    });
+
+    log.info("🧾 Script generation complete", {
+      transcriptKey: script?.transcriptKey,
+      metaKey: script?.metaKey,
+    });
+
+    // -----------------------------------------------------------
+    // 🎨 2) ARTWORK GENERATION
+    // -----------------------------------------------------------
     const artworkPrompt =
       script?.artworkPrompt || script?.metadata?.artworkPrompt || null;
 
@@ -23,44 +39,56 @@ export async function runPodcastPipeline(sessionId) {
       sessionId,
       prompt: artworkPrompt || undefined,
     });
+
     log.info("🎨 Artwork generation complete", { sessionId });
 
-    // 3️⃣ TTS end-to-end
+    // -----------------------------------------------------------
+    // 🗣️ 3) TEXT-TO-SPEECH GENERATION
+    // -----------------------------------------------------------
     const tts = await orchestrateTTS(sessionId);
     log.info("🗣️ TTS pipeline complete", { sessionId });
 
-    // 4️⃣ RSS feed regeneration (non-fatal if it fails)
+    // -----------------------------------------------------------
+    // 📡 4) RSS FEED UPDATE
+    // -----------------------------------------------------------
     try {
-      log.info("📡 Updating podcast RSS feed...", { sessionId });
+      log.info("📡 Updating podcast RSS feed...");
       await runRssFeedCreator();
-      log.info("📡 Podcast RSS feed updated successfully", { sessionId });
+      log.info("📡 Podcast RSS feed updated successfully");
     } catch (rssErr) {
-      log.error("❌ RSS feed update failed (non-fatal)", {
+      log.error("❌ RSS feed update failed", {
         sessionId,
         error: rssErr?.message,
       });
     }
 
-    // 5️⃣ Session cleanup (non-fatal; runs after RSS update)
+    // -----------------------------------------------------------
+    // 🧹 5) CLEANUP SESSION
+    // -----------------------------------------------------------
     try {
-      log.info("🧹 Cleaning up session artefacts from R2...", { sessionId });
+      log.info("🧹 Cleaning up session artefacts from R2...");
       await cleanupSession(sessionId);
-      log.info("🧹 Session cleanup complete", { sessionId });
+      log.info("🧹 Session cleanup complete");
     } catch (cleanupErr) {
-      log.error("⚠️ Session cleanup failed (non-fatal)", {
+      log.error("⚠️ Cleanup failed", {
         sessionId,
         error: cleanupErr?.message,
       });
     }
 
+    // -----------------------------------------------------------
+    // 🎉 DONE
+    // -----------------------------------------------------------
     const summary = { sessionId, script, artwork, tts };
-
     log.info("🏁 Podcast pipeline complete", { sessionId });
+
     return summary;
+
   } catch (err) {
     log.error("💥 Podcast pipeline failed", {
       sessionId,
       error: err?.message,
+      stack: err?.stack,
     });
     throw err;
   }
