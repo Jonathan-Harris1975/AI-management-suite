@@ -2,7 +2,7 @@
 // ☁️ Cloudflare R2 Client — Unified + Updated With New Buckets
 // ============================================================
 //
-// Now includes:
+// Includes:
 //   • metasystem bucket for episode counter + system files
 //   • R2_PUBLIC_BASE_URL_META_SYSTEM
 //   • R2_BUCKET_EDITED_AUDIO
@@ -59,7 +59,6 @@ const {
 
   // NEW — metasystem public URL (optional)
   R2_PUBLIC_BASE_URL_META_SYSTEM,
-
 } = process.env;
 
 // ------------------------------------------------------------
@@ -124,7 +123,11 @@ export const R2_PUBLIC_URLS = {
   art:             R2_PUBLIC_BASE_URL_ART,
   rss:             R2_PUBLIC_BASE_URL_RSS,
   "rss-feeds":     R2_PUBLIC_BASE_URL_RSS,
+
+  // ✅ FIX: both singular & plural transcript aliases
   transcript:      R2_PUBLIC_BASE_URL_TRANSCRIPT,
+  transcripts:     R2_PUBLIC_BASE_URL_TRANSCRIPT,
+
   chunks:          R2_PUBLIC_BASE_URL_CHUNKS,
   "podcast-chunks":R2_PUBLIC_BASE_URL_CHUNKS,
 
