@@ -1,13 +1,14 @@
-
 // ============================================================
 // ☁️ Cloudflare R2 Client — Unified + Updated With New Buckets
 // ============================================================
 //
 // Now includes:
+//   • metasystem bucket for episode counter + system files
+//   • R2_PUBLIC_BASE_URL_META_SYSTEM
 //   • R2_BUCKET_EDITED_AUDIO
 //   • R2_PUBLIC_BASE_URL_EDITED_AUDIO
-//   • Correct dual RSS bucket handling (newsletter feed vs podcast feed)
-//   • Backwards-compatible aliases for all services
+//   • Correct dual RSS setup (newsletter + podcast RSS)
+//   • Backwards-compatible aliases for ALL services
 // ============================================================
 
 import {
@@ -35,11 +36,14 @@ const {
   R2_BUCKET_META,
   R2_BUCKET_MERGED,
   R2_BUCKET_ART,
-  R2_BUCKET_RSS_FEEDS,            // newsletter feed
-  R2_BUCKET_PODCAST_RSS_FEEDS,    // podcast-specific RSS feed
+  R2_BUCKET_RSS_FEEDS,            // newsletter RSS
+  R2_BUCKET_PODCAST_RSS_FEEDS,    // podcast-specific RSS
   R2_BUCKET_TRANSCRIPTS,
   R2_BUCKET_CHUNKS,
   R2_BUCKET_EDITED_AUDIO,
+
+  // NEW — metasystem bucket for episode counter
+  R2_BUCKET_META_SYSTEM,
 
   // Public URLs
   R2_PUBLIC_BASE_URL_PODCAST,
@@ -52,6 +56,9 @@ const {
   R2_PUBLIC_BASE_URL_TRANSCRIPT,
   R2_PUBLIC_BASE_URL_CHUNKS,
   R2_PUBLIC_BASE_URL_EDITED_AUDIO,
+
+  // NEW — metasystem public URL (optional)
+  R2_PUBLIC_BASE_URL_META_SYSTEM,
 
 } = process.env;
 
@@ -87,17 +94,21 @@ export const R2_BUCKETS = {
   "rss-feeds":     R2_BUCKET_RSS_FEEDS,
   rssfeeds:        R2_BUCKET_RSS_FEEDS,
 
-  // Podcast-specific RSS feed
+  // Podcast RSS feed
   podcastRss:      R2_BUCKET_PODCAST_RSS_FEEDS,
 
   // Transcripts
   transcripts:     R2_BUCKET_TRANSCRIPTS,
   transcript:      R2_BUCKET_TRANSCRIPTS,
 
-  // NEW — final edited mastered audio
+  // NEW — final edited/mastered audio
   edited:          R2_BUCKET_EDITED_AUDIO,
   editedAudio:     R2_BUCKET_EDITED_AUDIO,
   "edited-audio":  R2_BUCKET_EDITED_AUDIO,
+
+  // NEW — metasystem bucket (episode-counter + system files)
+  metasystem:      R2_BUCKET_META_SYSTEM,
+  metaSystem:      R2_BUCKET_META_SYSTEM,
 };
 
 // ------------------------------------------------------------
@@ -117,13 +128,17 @@ export const R2_PUBLIC_URLS = {
   chunks:          R2_PUBLIC_BASE_URL_CHUNKS,
   "podcast-chunks":R2_PUBLIC_BASE_URL_CHUNKS,
 
-  // Podcast-specific RSS feed
+  // Podcast RSS
   podcastRss:      R2_PUBLIC_BASE_URL_PODCAST_RSS,
 
   // Edited/mastered audio
   edited:          R2_PUBLIC_BASE_URL_EDITED_AUDIO,
   editedAudio:     R2_PUBLIC_BASE_URL_EDITED_AUDIO,
   "edited-audio":  R2_PUBLIC_BASE_URL_EDITED_AUDIO,
+
+  // NEW — metasystem public URL
+  metasystem:      R2_PUBLIC_BASE_URL_META_SYSTEM,
+  metaSystem:      R2_PUBLIC_BASE_URL_META_SYSTEM,
 };
 
 // ------------------------------------------------------------
@@ -185,7 +200,6 @@ export const r2Get = getObjectAsText;
 export const putJson = async (bucketKey, key, obj) =>
   uploadText(bucketKey, key, JSON.stringify(obj, null, 2), "application/json");
 
-// URL builder (legacy use)
 export function buildPublicUrl(bucketKey, key) {
   const base = R2_PUBLIC_URLS[bucketKey];
   if (!base) throw new Error(`❌ No public URL configured for ${bucketKey}`);
