@@ -1,4 +1,4 @@
-// services/script/utils/podcastHelper.js  
+// services/script/utils/podcastHelper.js
 // LLM-driven metadata generation for the podcast: title, description,
 // SEO keywords, and artwork prompt (cached only).
 
@@ -77,10 +77,7 @@ export function sanitizeForSpeech(text = "") {
   );
 
   processed = processed
-    .replace(
-      /([a-z0-9._%+-]+)@([a-z0-9.-]+\.[a-z]{2,})/gi,
-      "$1 at $2"
-    )
+    .replace(/([a-z0-9._%+-]+)@([a-z0-9.-]+\.[a-z]{2,})/gi, "$1 at $2")
     .replace(/\s-\s/g, " to ")
     .replace(/-/g, " ")
     .replace(/\b(\d+)\.(\d+)\b/g, "$1 point $2")
@@ -151,21 +148,22 @@ Return ONLY the comma-separated keywords.`;
 }
 
 /* -----------------------------------------------------------
- * UPDATED Artwork Prompt (Sharper + Main-Section Focus Only)
+ * FIXED: Artwork Prompt — Now Uses MAIN SECTION ONLY
  * -----------------------------------------------------------
  */
-export function getArtworkPrompt(description) {
-  return `Ultra-detailed cinematic artwork prompt based ONLY on the MAIN section themes.
-Focus on the core artificial intelligence topics, risks, breakthroughs, systems landscapes, or technologies described.
-Use neon holographic lighting, glowing circuitry, swirling data energy, abstract motion structures, vibrant depth.
-STRICT RULES:
-- No text or letters
-- No humans
-- No intro or outro themes
-- ≤ 250 chars total
+export function getArtworkPrompt(mainSection) {
+  return `Ultra-detailed cinematic artwork prompt derived ONLY from the MAIN section themes.
+Extract the core artificial intelligence ideas, breakthroughs, risks, systems or technologies directly discussed.
+Use neon holographic glows, abstract circuitry, swirling data flows, luminous depth.
 
-MAIN DESCRIPTION:
-${description}`;
+STRICT RULES:
+- No text
+- No letters
+- No humans
+- ≤ 250 characters
+
+MAIN SECTION CONTENT:
+${mainSection}`;
 }
 
 /* -----------------------------------------------------------
@@ -243,7 +241,8 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
   let mainOnly = "";
   try {
     const extracted = extractMainContent(rawTranscript);
-    if (!extracted || extracted.length < 40) throw new Error("Main content too short.");
+    if (!extracted || extracted.length < 40)
+      throw new Error("Main content too short.");
 
     mainOnly = sanitizeForSpeech(extracted);
     opStatus.mainExtract.success = true;
@@ -279,11 +278,12 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
   }
 
   if (!title.trim()) title = `AI News — ${date.slice(0, 10)}`;
-  if (!description.trim()) description = "A deep dive into the latest AI and technology news.";
+  if (!description.trim())
+    description = "A deep dive into the latest artificial intelligence news.";
 
   const safeDescription = sanitizeForSpeech(description);
 
-  /* 3. SEO */
+  /* 3. SEO KEYWORDS */
   let keywords = [];
   try {
     const kw = await resilientRequest("seoKeywords", {
@@ -300,7 +300,7 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
     opStatus.keywords.fallback = true;
   }
 
-  /* 4. Artwork Prompt */
+  /* 4. Artwork Prompt — NOW USING MAIN SECTION */
   let artworkPrompt =
     "Cinematic abstract neon depiction of artificial intelligence systems, swirling data lights, no text";
 
@@ -308,7 +308,7 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
     const ap = await resilientRequest("artworkPrompt", {
       sessionId: id,
       section: "meta-artwork",
-      messages: [{ role: "user", content: getArtworkPrompt(safeDescription) }],
+      messages: [{ role: "user", content: getArtworkPrompt(mainOnly) }],
     });
 
     let prompt = String(ap).trim().replace(/^["'`]+|["'`]+$/g, "");
@@ -329,7 +329,7 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
     opStatus.artwork.cached = true;
   }
 
-  /* 5. Episode Number */
+  /* 5. Episode Number Resolution */
   let episodeNumber = 1;
   try {
     if (sessionMeta?.episodeNumber != null) {
