@@ -6,6 +6,7 @@ import {
   generateIntro,
   generateMain,
   generateOutro,
+  generateComposedEpisode,
 } from "../utils/models.js";
 import { orchestrateEpisode } from "../utils/orchestrator.js";
 
@@ -61,12 +62,12 @@ router.post("/outro", async (req, res) => {
 });
 
 // ─────────────────────────────
-//  COMPOSE (now uses full orchestrator)
+//  COMPOSE
 // ─────────────────────────────
 router.post("/compose", async (req, res) => {
   try {
     info("script.compose.req", { date: req.body.date });
-    const result = await orchestrateEpisode(req.body);
+    const result = await generateComposedEpisode(req.body);
     res.json({ ok: true, ...result });
   } catch (err) {
     error("script.compose.fail", { err: err.message });
