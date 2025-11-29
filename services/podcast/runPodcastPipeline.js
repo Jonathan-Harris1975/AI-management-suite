@@ -1,7 +1,4 @@
 // services/podcast/runPodcastPipeline.js
-// ============================================================
-// 🎙 AI Podcast Pipeline — Unified Orchestrator
-// ============================================================
 
 import { log } from "#logger.js";
 import { orchestrateScript } from "../script/index.js";
@@ -14,22 +11,25 @@ export async function runPodcastPipeline(sessionId) {
   log.debug("🎧 Starting AI Podcast Pipeline...", { sessionId });
 
   try {
-    // 1️⃣ Script generation
+    // 1️⃣ Script generation (intro / main / outro / meta upstream)
     const script = await orchestrateScript(sessionId);
     log.info("🧾 Script generation complete", { sessionId });
 
-    // 2️⃣ Artwork generation WITH the artworkPrompt from meta
+    // 2️⃣ Artwork generation with LLM artwork prompt if available
+    const artworkPrompt =
+      script?.artworkPrompt || script?.metadata?.artworkPrompt || null;
+
     const artwork = await createPodcastArtwork({
       sessionId,
-      prompt: script?.meta?.artworkPrompt,
+      prompt: artworkPrompt || undefined,
     });
     log.info("🎨 Artwork generation complete", { sessionId });
 
-    // 3️⃣ TTS processing
+    // 3️⃣ TTS end-to-end
     const tts = await orchestrateTTS(sessionId);
     log.info("🗣️ TTS pipeline complete", { sessionId });
 
-    // 4️⃣ RSS regeneration (non-fatal)
+    // 4️⃣ RSS feed regeneration (non-fatal if it fails)
     try {
       log.info("📡 Updating podcast RSS feed...", { sessionId });
       await runRssFeedCreator();
@@ -41,7 +41,7 @@ export async function runPodcastPipeline(sessionId) {
       });
     }
 
-    // 5️⃣ Cleanup (non-fatal)
+    // 5️⃣ Session cleanup (non-fatal; runs after RSS update)
     try {
       log.info("🧹 Cleaning up session artefacts from R2...", { sessionId });
       await cleanupSession(sessionId);
@@ -53,7 +53,6 @@ export async function runPodcastPipeline(sessionId) {
       });
     }
 
-    // Final return
     const summary = { sessionId, script, artwork, tts };
 
     log.info("🏁 Podcast pipeline complete", { sessionId });
