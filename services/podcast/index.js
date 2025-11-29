@@ -1,40 +1,85 @@
-// services/podcast/index.js
-import express from "express";
-import { runPodcastPipeline } from "./runPodcastPipeline.js";
-import { info } from "#logger.js";
+// services/rss-feed-podcast/index.js
+// Patched: Ignore system files + strict schema validation + safe XML upload
 
-const router = express.Router();
+import { listKeys, getObjectAsText, putObject } from "#shared/r2-client.js";
+import { info, warn, error } from "#logger.js";
+import { generateFeedXML } from "./generateFeed.js";
+import { notifyHubByUrl } from "#shared/podcastIndexClient.js";
 
-router.post("/run", async (req, res) => {
-  try {
-    // Handle both nested and raw JSON payloads
-    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    const sessionId =
-      body?.sessionId ||
-      body?.data?.sessionId ||
-      `TT-${new Date().toISOString().slice(0, 10)}`;
+const META_BUCKET = "meta";
+const RSS_BUCKET = "podcastRss";
+const RSS_KEY = "turing-torch.xml";
 
-    info("api.podcast.start", { sessionId });
+function isSystemMeta(key) {
+  return key.includes("counter") || key.startsWith("_") || key.includes("system");
+}
 
-    if (!sessionId) throw new Error("sessionId is required");
+function isValidEpisode(meta) {
+  return (
+    meta &&
+    meta.session &&
+    meta.session.sessionId &&
+    meta.podcastUrl &&
+    meta.title &&
+    meta.episodeNumber
+  );
+}
 
-    // Kick off async process
-    runPodcastPipeline(sessionId)
-      .then(() => info("api.podcast.complete", { sessionId }))
-      .catch((err) => info("api.podcast.error", { sessionId, error: err.message }));
+export async function runRssFeedCreator() {
+  info("🚀 Running RSS feed creator…");
 
-    res.json({
-      ok: true,
-      sessionId,
-      message: "Pipeline started. Logs will record progress.",
-    });
-  } catch (err) {
-    res.status(400).json({ ok: false, error: err.message });
+  const keys = await listKeys(META_BUCKET, "");
+  if (!keys || keys.length === 0) {
+    warn("No metadata files found.");
+    return;
   }
-});
 
-router.get("/health", (_req, res) =>
-  res.json({ ok: true, service: "podcast", time: new Date().toISOString() })
-);
+  info("Found metadata files", { count: keys.length });
 
-export default router;
+  const episodes = [];
+
+  for (const key of keys) {
+    if (isSystemMeta(key)) {
+      warn("Skipping system/meta file", { key });
+      continue;
+    }
+
+    try {
+      const txt = await getObjectAsText(META_BUCKET, key);
+      const meta = JSON.parse(txt);
+
+      if (!isValidEpisode(meta)) {
+        warn("Skipping invalid episode metadata", { key });
+        continue;
+      }
+
+      episodes.push(meta);
+    } catch (err) {
+      warn("Failed parsing metadata file", { key, error: err.message });
+    }
+  }
+
+  if (episodes.length === 0) {
+    warn("RSS generation aborted — no valid episodes.");
+    return;
+  }
+
+  let xml;
+  try {
+    xml = generateFeedXML(episodes).replace(/\x00/g, ""); // safety clean
+  } catch (err) {
+    error("RSS XML generation failed", { error: err.message });
+    throw err;
+  }
+
+  try {
+    await putObject(RSS_BUCKET, RSS_KEY, xml, {
+      contentType: "application/rss+xml; charset=utf-8",
+    });
+    info("RSS feed uploaded", { RSS_BUCKET, RSS_KEY });
+  } catch (err) {
+    error("RSS upload failed", { error: err.message });
+  }
+}
+
+export default runRssFeedCreator;
