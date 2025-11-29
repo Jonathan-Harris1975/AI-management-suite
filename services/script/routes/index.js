@@ -1,7 +1,4 @@
 // services/script/routes/index.js
-// ─────────────────────────────────────────────────────────────
-// Unified Script Route Layer (No generateComposedEpisode)
-// ─────────────────────────────────────────────────────────────
 
 import express from "express";
 import { info, error } from "#logger.js";
@@ -64,13 +61,12 @@ router.post("/outro", async (req, res) => {
 });
 
 // ─────────────────────────────
-//  COMPOSE (NOW POINTS TO FULL ORCHESTRATOR)
-//  NOTE: generateComposedEpisode REMOVED (no longer exists)
+//  COMPOSE (now uses full orchestrator)
 // ─────────────────────────────
 router.post("/compose", async (req, res) => {
   try {
     info("script.compose.req", { date: req.body.date });
-    const result = await orchestrateEpisode(req.body); // 🔥 correct replacement
+    const result = await orchestrateEpisode(req.body);
     res.json({ ok: true, ...result });
   } catch (err) {
     error("script.compose.fail", { err: err.message });
@@ -79,7 +75,7 @@ router.post("/compose", async (req, res) => {
 });
 
 // ─────────────────────────────
-//  ORCHESTRATE (FULL PIPELINE - unchanged)
+//  ORCHESTRATE (FULL PIPELINE)
 // ─────────────────────────────
 router.post("/orchestrate", async (req, res) => {
   try {
