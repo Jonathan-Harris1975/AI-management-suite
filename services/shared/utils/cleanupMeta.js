@@ -1,51 +1,79 @@
 // services/shared/utils/cleanupMeta.js
-// Removes invalid or system JSON files from the meta bucket
+// ============================================================
+// 🧹 SAFE Metadata Cleanup
+//   - Keeps all valid or partial episode JSON until audio exists
+//   - Removes corrupt JSON, zero-byte files, or non-episode objects
+//   - Leaves episode counter intact
+// ============================================================
 
 import { listKeys, deleteObject, getObjectAsText } from "#shared/r2-client.js";
-import { info, warn } from "#logger.js";
+import { info, warn, debug } from "#logger.js";
 
 const META_BUCKET = "meta";
 
+// Only delete these explicit system files
 function isSystemMeta(key) {
-  return key.includes("counter") || key.includes("system") || key.startsWith("_");
+  return (
+    key === "episode-counter.json" ||
+    key === "_system.json" ||
+    key.startsWith("_")
+  );
 }
 
-function isValidEpisode(meta) {
+// Episode JSON is considered valid if it has at least:
+//   - session.sessionId
+//   - title
+//   - description
+//   - pubDate
+// podcastUrl may still be missing (audio not yet processed)
+function isLikelyEpisode(meta) {
   return (
     meta &&
+    typeof meta === "object" &&
     meta.session &&
     meta.session.sessionId &&
-    meta.podcastUrl &&
     meta.title &&
-    meta.episodeNumber
+    meta.description &&
+    meta.pubDate
   );
 }
 
 export async function cleanupOrphanMeta() {
-  info("🧹 Starting orphan metadata cleanup…");
+  info("🧹 Starting SAFE metadata cleanup…");
 
   const keys = await listKeys(META_BUCKET, "");
 
   for (const key of keys) {
-    if (isSystemMeta(key)) {
-      await deleteObject(META_BUCKET, key);
-      warn("Deleted system meta file", { key });
-      continue;
-    }
+    // Keep counter + protected keys
+    if (isSystemMeta(key)) continue;
 
     try {
       const txt = await getObjectAsText(META_BUCKET, key);
+      if (!txt || txt.trim().length === 0) {
+        await deleteObject(META_BUCKET, key);
+        warn("Deleted empty metadata file", { key });
+        continue;
+      }
+
       const json = JSON.parse(txt);
 
-      if (!isValidEpisode(json)) {
-        await deleteObject(META_BUCKET, key);
-        warn("Deleted invalid metadata file", { key });
+      // KEEP: partial / full / fresh episodes
+      if (isLikelyEpisode(json)) {
+        debug("Keeping metadata file", { key });
+        continue;
       }
-    } catch {
+
+      // Delete everything else
       await deleteObject(META_BUCKET, key);
-      warn("Deleted corrupt metadata file", { key });
+      warn("Deleted invalid metadata file", { key });
+
+    } catch (err) {
+      await deleteObject(META_BUCKET, key);
+      warn("Deleted corrupt metadata file", { key, err: err.message });
     }
   }
 
-  info("Cleanup complete.");
+  info("🧹 SAFE metadata cleanup complete.");
 }
+
+export default { cleanupOrphanMeta };
