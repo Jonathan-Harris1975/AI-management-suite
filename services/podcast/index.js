@@ -3,7 +3,7 @@
 
 import { listKeys, getObjectAsText, putObject } from "#shared/r2-client.js";
 import { info, warn, error } from "#logger.js";
-import { generateFeedXML } from "./generateFeed.js";
+import { generateFeedXML } from "../rss-feed-podcast/generateFeed.js";
 import { notifyHubByUrl } from "#shared/podcastIndexClient.js";
 
 const META_BUCKET = "meta";
