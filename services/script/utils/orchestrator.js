@@ -1,159 +1,260 @@
 // ============================================================================
 // services/script/utils/orchestrator.js
-// CLEAN, CORRECT, FULL PRODUCTION VERSION
+// Unified Script Pipeline – weather + Turing quote + sponsor + chunks
+// ============================================================================
+//
+// Flow:
+//   1. Build context (weather, Turing quote, sponsor, taglines, tone)
+//   2. Generate intro → main → outro via models.generateComposedEpisodeParts
+//      (this uses promptTemplates + toneSetter under the hood)
+//   3. Optional editorial pass (editorialPass.js)
+//   4. Final cleanup for TTS friendliness
+//   5. Save full transcript to R2 ("transcripts" alias)
+//   6. Chunk transcript and save to R2 ("chunks" alias)
+//   7. Write rich metadata JSON to "meta" bucket
 // ============================================================================
 
-import { info, error, debug } from "#logger.js";
-import {
-  generateIntro,
-  generateMain,
-  generateOutro,
-} from "./models.js";
-
-import { runEditorialPass } from "./editorialPass.js";
-import editAndFormat from "./editAndFormat.js";
-import { getIntroPrompt, getMainPrompt, getOutroPromptFull} from "./promptTemplates.js";
-import { buildPersona} from "./toneSetter.js";
-
-import {
-  uploadText,
-  putJson,
-} from "../../shared/utils/r2-client.js";
-
+import { uploadText, putJson } from "../../shared/utils/r2-client.js";
 import { extractMainContent } from "./textHelpers.js";
-
-// BUCKET ALIASES USED BY SCRIPT SERVICE
-const TRANSCRIPTS_BUCKET = "transcripts";
-const META_BUCKET = "meta";
+import getWeatherSummary from "./getWeatherSummary.js";
+import getTuringQuote from "./getTuringQuote.js";
+import getSponsor from "./getSponsor.js";
+import generateCta from "./generateCta.js";
+import chunkText from "./chunkText.js";
+import * as models from "./models.js";
+import { runEditorialPass } from "./editorialPass.js";
+import { info, error } from "#logger.js";
 
 // ============================================================================
-// ORCHESTRATE FULL SCRIPT GENERATION
+// FINAL SANITISATION LAYER — makes text TTS-friendly and clean
 // ============================================================================
+function cleanupFinal(text) {
+  if (!text) return "";
 
+  return String(text)
+    // Remove markdown (**bold**, _italics_, ### headers)
+    .replace(/[*_]{1,3}/g, "")
+    .replace(/^#{1,6}\s*/gm, "")
+
+    // Remove scene directions / music cues
+    .replace(/\[.*?(music|sfx|sound|cue|intro|outro|transition).*?]/gi, "")
+    .replace(/\(.*?(music|sfx|sound|cue|intro|outro|transition).*?\)/gi, "")
+
+    // Remove prefixes like "Voiceover:", "Scene:", "Style:"
+    .replace(/^(scene|voiceover|style|direction|narrator)[:\-]/gim, "")
+
+    // Remove obvious emojis
+    .replace(/[🎵🎶🎤🎧🎙️✨⭐🌟🔥💥👉➡️❗⚠️★]+/g, "")
+
+    // Strip stray markdown bullets
+    .replace(/^\s*[-*]\s+/gm, "")
+
+    // Collapse excessive whitespace
+    .replace(/\s{3,}/g, "\n\n")
+
+    .trim();
+}
+
+// Helper: should we run editorial pass?
+function editorialEnabled() {
+  const raw = String(process.env.ENABLE_EDITORIAL_PASS || "yes")
+    .trim()
+    .toLowerCase();
+  return raw === "yes" || raw === "true" || raw === "y";
+}
+
+// ============================================================================
+// MAIN ORCHESTRATOR
+// ============================================================================
 export async function orchestrateEpisode(payload = {}) {
-  const sessionId = payload.sessionId;
-  if (!sessionId) {
-    throw new Error("❌ orchestrator: sessionId is required");
-  }
+  // Allow both `{ sessionId, ... }` and bare string sessionId
+  const base =
+    typeof payload === "string" ? { sessionId: payload } : (payload || {});
 
-  info("script.orchestrate.start", { sessionId });
+  const now = new Date();
 
-  try {
-    // -----------------------------------------------------------------------
-    // 1. BUILD PROMPTS (Tone + Template)
-    // -----------------------------------------------------------------------
-    const introPrompt  = buildPersona(buildIntroPrompt(payload));
-    const mainPrompt   = buildPersona(buildMainPrompt(payload));
-    const outroPrompt  = buildPersona(buildOutroPrompt(payload));
+  const sessionId =
+    base.sessionId ||
+    base.session?.sessionId ||
+    `TT-${now.toISOString().slice(0, 10)}`;
 
-    // -----------------------------------------------------------------------
-    // 2. GENERATE INTRO
-    // -----------------------------------------------------------------------
-    const intro = await generateIntro({
-      ...payload,
-      prompt: introPrompt,
-      sessionId
-    });
+  const date = base.date || now.toISOString().slice(0, 10);
+  const topic =
+    base.topic ||
+    "the most important artificial intelligence stories of the week";
 
-    // -----------------------------------------------------------------------
-    // 3. GENERATE MAIN (six parts)
-    // -----------------------------------------------------------------------
-    const mains = [];
-    for (let i = 1; i <= 6; i++) {
-      const mainText = await generateMain({
-        ...payload,
-        part: i,
-        prompt: mainPrompt,
-        sessionId
-      });
-      mains.push(mainText);
-    }
-
-    // Combine main content
-    const mainCombined = mains.join("\n\n");
-
-    // -----------------------------------------------------------------------
-    // 4. GENERATE OUTRO
-    // -----------------------------------------------------------------------
-    const outro = await generateOutro({
-      ...payload,
-      prompt: outroPrompt,
-      sessionId
-    });
-
-    // -----------------------------------------------------------------------
-    // 5. MERGE INTO A SINGLE SCRIPT
-    // -----------------------------------------------------------------------
-    let fullScript = [
-      intro,
-      mainCombined,
-      outro
-    ].join("\n\n");
-
-    // Ensure main content is extracted cleanly
-    fullScript = extractMainContent(fullScript);
-
-    // -----------------------------------------------------------------------
-    // 6. EDITORIAL PASS (HUMAN POLISH)
-    // -----------------------------------------------------------------------
-    let polishedScript = await runEditorialPass({ sessionId }, fullScript);
-
-    // -----------------------------------------------------------------------
-    // 7. FINAL FORMATTING (AI → artificial intelligence, split long sentences)
-    // -----------------------------------------------------------------------
-    polishedScript = editAndFormat(polishedScript);
-
-    // -----------------------------------------------------------------------
-    // 8. UPLOAD TRANSCRIPT
-    // -----------------------------------------------------------------------
-    const transcriptKey = `${sessionId}.txt`;
-
-    await uploadText(
-      TRANSCRIPTS_BUCKET,
-      transcriptKey,
-      polishedScript,
-      "text/plain"
-    );
-
-    // -----------------------------------------------------------------------
-    // 9. UPLOAD META
-    // -----------------------------------------------------------------------
-    const metaKey = `${sessionId}.json`;
-
-    const meta = {
-      sessionId,
-      transcriptKey,
-      title: payload.title || "",
-      date: payload.date || new Date().toISOString()
+  const tone =
+    base.tone || {
+      energy: "2.5/5",
+      style: "dry British Gen X, sceptical but fair",
     };
 
-    await putJson(META_BUCKET, metaKey, meta);
+  info("🧠 Orchestrate Script: start", { sessionId, date, topic });
+
+  try {
+    // ------------------------------------------------------------------------
+    // 1. Weather + Turing quote + sponsor + taglines
+    // ------------------------------------------------------------------------
+    let weatherSummary = "";
+    let turingQuote = "";
+
+    try {
+      weatherSummary =
+        (await getWeatherSummary()) ||
+        "very typical British weather, so feel free to keep it vague and lightly self-deprecating.";
+    } catch (err) {
+      error("weather.fail", { sessionId, error: String(err) });
+      weatherSummary =
+        "very typical British weather, so feel free to keep it vague and lightly self-deprecating.";
+    }
+
+    try {
+      turingQuote =
+        (await getTuringQuote()) ||
+        `We can only see a short distance ahead, but we can see plenty there that needs to be done.`;
+    } catch (err) {
+      error("turingQuote.fail", { sessionId, error: String(err) });
+      turingQuote = "";
+    }
+
+    const sponsorBook = getSponsor();
+    const sponsorCta = sponsorBook ? generateCta(sponsorBook) : "";
+
+    const introTagline =
+      `Tired of drowning in artificial intelligence headlines and hype? ` +
+      `Welcome to Turing's Torch: AI Weekly. I'm Jonathan Harris, here to cut through the noise and focus on what actually matters.`;
+
+    const closingTagline =
+      `That's it for this week's Turing's Torch: AI Weekly — your Gen-X guide to artificial intelligence without the fluff. ` +
+      `I'm Jonathan Harris; thanks for listening, and keep building the future without losing your mind in the headlines.`;
+
+    const context = {
+      sessionId,
+      date,
+      topic,
+      tone,
+      weatherSummary,
+      turingQuote,
+      sponsorBook,
+      sponsorCta,
+      introTagline,
+      closingTagline,
+    };
+
+    // ------------------------------------------------------------------------
+    // 2. Generate intro → main → outro via models (uses promptTemplates + tone)
+    // ------------------------------------------------------------------------
+    const { intro, main, outro, formatted, callLog } =
+      await models.generateComposedEpisodeParts(context);
+
+    const initialFullText =
+      (formatted && formatted.trim()) ||
+      `${intro}\n\n${main}\n\n${outro}`.trim();
+
+    // Make sure we only keep the “real” script text
+    const initialClean = cleanupFinal(extractMainContent(initialFullText));
+
+    // ------------------------------------------------------------------------
+    // 3. Editorial Pass (optional, via editorialPass.js)
+    // ------------------------------------------------------------------------
+    let editedText = initialClean;
+
+    if (editorialEnabled()) {
+      const edited = await runEditorialPass({ sessionId }, initialClean);
+      if (edited && edited.trim().length > 0) {
+        editedText = edited.trim();
+      }
+    }
+
+    // ------------------------------------------------------------------------
+    // 4. Final cleanup for TTS
+    // ------------------------------------------------------------------------
+    const finalFullText = cleanupFinal(editedText);
+
+    // ------------------------------------------------------------------------
+    // 5. Save transcript to R2 ("transcripts" alias)
+    // ------------------------------------------------------------------------
+    const transcriptKey = `${sessionId}.txt`;
+    const transcriptUrl = await uploadText(
+      "transcripts",
+      transcriptKey,
+      finalFullText,
+      "text/plain",
+    );
+
+    // ------------------------------------------------------------------------
+    // 6. Chunk transcript and save to R2 ("chunks" alias)
+    //    Keys: TT-YYYY-MM-DD/chunk-001.txt etc.
+    // ------------------------------------------------------------------------
+    const textChunks = chunkText(finalFullText);
+    const chunkKeys = [];
+
+    for (let i = 0; i < textChunks.length; i++) {
+      const chunk = textChunks[i];
+      const key = `${sessionId}/chunk-${String(i + 1).padStart(3, "0")}.txt`;
+      // 🔑 IMPORTANT: alias "chunks" so TTS can find them
+      await uploadText("chunks", key, chunk, "text/plain");
+      chunkKeys.push(key);
+    }
+
+    info("script.chunks.saved", {
+      sessionId,
+      count: chunkKeys.length,
+    });
+
+    // ------------------------------------------------------------------------
+    // 7. Save metadata JSON to "meta" bucket
+    // ------------------------------------------------------------------------
+    const metaKey = `${sessionId}.json`;
+    const nowIso = now.toISOString();
+
+    const meta = {
+      session: {
+        sessionId,
+        date,
+      },
+      transcriptUrl,
+      transcriptKey,
+      chunks: chunkKeys,
+      weatherSummary,
+      turingQuote,
+      sponsorBook,
+      sponsorCta,
+      introTagline,
+      closingTagline,
+      topic,
+      tone,
+      callLog: callLog || [],
+      textLength: finalFullText.length,
+      chunkCount: chunkKeys.length,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    await putJson("meta", metaKey, meta);
 
     info("script.orchestrate.complete", {
       sessionId,
       transcriptKey,
-      metaKey
+      metaKey,
+      chunkCount: chunkKeys.length,
     });
 
     return {
       ok: true,
       sessionId,
       transcriptKey,
-      metaKey
+      transcriptUrl,
+      metaKey,
+      meta,
     };
-
   } catch (err) {
     error("script.orchestrate.fail", {
       sessionId,
-      error: err.message,
-      stack: err.stack
+      error: String(err),
+      stack: err?.stack,
     });
-
-    return {
-      ok: false,
-      sessionId,
-      error: err.message
-    };
+    throw err;
   }
 }
 
