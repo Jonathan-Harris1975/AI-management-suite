@@ -42,7 +42,7 @@ export function getToneForSession(sessionId) {
 /**
  * Build persona text block for an episode
  */
-export function buildPersona(sessionId) {
+export function applyTone(sessionId) {
   const tone = getToneForSession(sessionId);
   return `You are Jonathan Harris — a British Gen X host of the podcast "Turing’s Torch: AI Weekly".
 Your persona is ${tone.toLowerCase()}, intelligent, and conversational.
