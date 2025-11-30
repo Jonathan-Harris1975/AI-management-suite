@@ -10,7 +10,7 @@
 //   3. Optional editorial pass (editorialPass.js)
 //   4. Final cleanup for TTS friendliness
 //   5. Save full transcript to R2 ("transcripts" alias)
-//   6. Chunk transcript and save to R2 ("chunks" alias)
+//   6. Chunk transcript and save to R2 (rawText" alias)
 //   7. Write rich metadata JSON to "meta" bucket
 // ============================================================================
 
@@ -193,7 +193,7 @@ export async function orchestrateEpisode(payload = {}) {
       const chunk = textChunks[i];
       const key = `${sessionId}/chunk-${String(i + 1).padStart(3, "0")}.txt`;
       // 🔑 IMPORTANT: alias "chunks" so TTS can find them
-      await uploadText("chunks", key, chunk, "text/plain");
+      await uploadText("rawText", key, chunk, "text/plain");
       chunkKeys.push(key);
     }
 
