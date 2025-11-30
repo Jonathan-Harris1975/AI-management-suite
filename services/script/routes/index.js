@@ -1,7 +1,6 @@
+// services/script/routes/index.js
 // ============================================================================
-// services/script/routes/index.js – CLEAN, MODERN, FULLY WORKING VERSION
-// ============================================================================
-// Final version with correct imports and correct orchestration wiring.
+// Script service routes – health, direct generators, full orchestrate
 // ============================================================================
 
 import express from "express";
@@ -26,7 +25,7 @@ router.get("/health", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// INTRO (DIRECT)
+// INTRO (direct debug endpoint)
 // ---------------------------------------------------------------------------
 router.post("/intro", async (req, res) => {
   try {
@@ -39,7 +38,7 @@ router.post("/intro", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// MAIN (DIRECT)
+// MAIN (direct debug endpoint)
 // ---------------------------------------------------------------------------
 router.post("/main", async (req, res) => {
   try {
@@ -52,7 +51,7 @@ router.post("/main", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// OUTRO (DIRECT)
+// OUTRO (direct debug endpoint)
 // ---------------------------------------------------------------------------
 router.post("/outro", async (req, res) => {
   try {
@@ -65,7 +64,7 @@ router.post("/outro", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// COMPOSE (intro + mains + outro, but WITHOUT editorial pass)
+/* COMPOSE (intro + main + outro, no transcript write) */
 // ---------------------------------------------------------------------------
 router.post("/compose", async (req, res) => {
   try {
@@ -78,7 +77,7 @@ router.post("/compose", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// FULL SCRIPT PIPELINE (orchestrator)
+// FULL PIPELINE (this is what runPodcastPipeline calls)
 // ---------------------------------------------------------------------------
 router.post("/orchestrate", async (req, res) => {
   try {
@@ -88,14 +87,10 @@ router.post("/orchestrate", async (req, res) => {
     });
 
     const result = await orchestrateEpisode(req.body);
-
     res.json(result);
   } catch (err) {
     error("script.orchestrate.fail", { err: err.message });
-    res.status(500).json({
-      ok: false,
-      error: err.message,
-    });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
