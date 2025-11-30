@@ -12,7 +12,7 @@ import {
 
 import { runEditorialPass } from "./editorialPass.js";
 import editAndFormat from "./editAndFormat.js";
-import { buildIntroPrompt, buildMainPrompt, buildOutroPrompt } from "./promptTemplates.js";
+import { getIntroPrompt, getMainPrompt, getOutroPromptFull} from "./promptTemplates.js";
 import { buildPersona} from "./toneSetter.js";
 
 import {
