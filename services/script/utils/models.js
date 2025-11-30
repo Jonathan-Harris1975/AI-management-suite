@@ -1,11 +1,7 @@
+// services/script/utils/models.js
 // ============================================================================
-// models.js – FULLY FIXED VERSION (final)
-// ============================================================================
-// - Uses resilientRequest correctly
-// - Weather + Turing quote passed through
-// - Proper SYSTEM + USER message structure (critical!)
-// - Ensures the LLM always returns full, non-empty text
-// - Returns clean, TTS-friendly output
+// Minimal script models – intro / main / outro
+// Uses resilientRequest + ai-config routing by routeName
 // ============================================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
@@ -13,163 +9,141 @@ import { extractMainContent } from "./textHelpers.js";
 import editAndFormat from "./editAndFormat.js";
 import { info } from "#logger.js";
 
-// ---------------------------------------------------------------------------
-// Safe routeName helper
-// ---------------------------------------------------------------------------
-function safeRouteName(name) {
-  if (!name) return "unknown";
-  return typeof name === "string" ? name : JSON.stringify(name);
-}
-
-// ---------------------------------------------------------------------------
-// Shared log
-// ---------------------------------------------------------------------------
 const callLog = [];
-export function getCallLog() {
-  return callLog;
-}
 
 // ---------------------------------------------------------------------------
-// Wrapper around resilientRequest
+// Low-level helper – use routeName only, let ai-config pick the model
 // ---------------------------------------------------------------------------
-async function safeLLM({ routeName, model, messages, max_tokens }) {
-  const safeName = safeRouteName(routeName);
+async function llmCall(routeName, messages, max_tokens = 1600) {
+  const safeRouteName = typeof routeName === "string" ? routeName : "unknown";
 
   const res = await resilientRequest({
-    routeName: safeName,
-    model,
+    routeName: safeRouteName,
     messages,
     max_tokens,
   });
 
   callLog.push({
-    routeName: safeName,
+    routeName: safeRouteName,
     provider: res?.provider || "unknown",
   });
 
-  return extractMainContent(res?.content || "");
+  return extractMainContent(res?.content || res || "");
 }
 
 // ============================================================================
 // INTRO
 // ============================================================================
-export async function generateIntro({ date, topic, tone, weather, turing }) {
+export async function generateIntro({ date, topic, tone } = {}) {
   const systemPrompt = `
-You are writing the INTRO for a British AI news podcast.
+You are writing the INTRO for a British artificial intelligence news podcast.
 Use a calm, polished, conversational tone.
 Avoid hype, markdown, emojis, and scene directions.
 `.trim();
 
   const userPrompt = `
-Today's date: ${date}
-Topic: ${topic || "recent advancements in artificial intelligence"}
+Today's date: ${date || new Date().toISOString()}
+Topic: ${topic || "recent developments in artificial intelligence"}
+Tone: ${JSON.stringify(tone || { style: "balanced" })}
 
-Weather summary for the intro:
-${weather || "(no weather available)"}
-
-Alan Turing quote for opening context:
-${turing || "(no quote available)"}
-
-Tone guidance: ${JSON.stringify(tone || {})}
-
-Write 2 short paragraphs, clean and natural.
+Write 2 short paragraphs that set the scene and hook the listener.
+Do not include any headings or speaker labels.
 `.trim();
 
-  return safeLLM({
-    routeName: "scriptIntro",
-    model: "chatgpt",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    max_tokens: 1000,
-  });
+  return llmCall("scriptIntro", [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ]);
 }
 
 // ============================================================================
-// MAIN (chunked)
+// MAIN – 6 segments
 // ============================================================================
 async function generateMainChunk({ date, topic, tone, index }) {
   const systemPrompt = `
-You are producing a MAIN segment for a British artificial intelligence news podcast.
-Keep concise, conversational, non-technical unless needed.
+You are writing a MAIN segment for a British artificial intelligence news podcast.
+Keep it clear, grounded, and non-technical unless needed.
+No markdown, no scene directions, no emojis.
 `.trim();
 
   const userPrompt = `
 This is part ${index} of the main section.
 
-Topic: ${topic}
-Date: ${date}
-Tone: ${JSON.stringify(tone || {})}
+Date: ${date || new Date().toISOString()}
+Topic: ${topic || "recent developments in artificial intelligence"}
+Tone: ${JSON.stringify(tone || { style: "balanced" })}
 
-Discuss one angle or insight related to the topic.
-Write 1–2 paragraphs, no markdown, no cues.
+Explain one distinct angle, risk, opportunity, or human impact.
+Write 1–2 short paragraphs.
 `.trim();
 
-  return safeLLM({
-    routeName: `scriptMain-${index}`,
-    model: "google",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    max_tokens: 1300,
-  });
+  return llmCall(`scriptMain-${index}`, [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ]);
 }
 
-export async function generateMain(args) {
-  const parts = [];
+export async function generateMain(args = {}) {
+  const segments = [];
   for (let i = 1; i <= 6; i++) {
-    parts.push(await generateMainChunk({ ...args, index: i }));
+    // If you ever want fewer segments, just change the loop bound.
+    // Keeping 6 to match your existing logging.
+    // scriptMain-1 .. scriptMain-6
+    const seg = await generateMainChunk({ ...args, index: i });
+    segments.push(seg.trim());
   }
-  return parts.join("\n\n");
+  return segments.join("\n\n");
 }
 
 // ============================================================================
 // OUTRO
 // ============================================================================
-export async function generateOutro({ date, topic, tone }) {
+export async function generateOutro({ date, topic, tone } = {}) {
   const systemPrompt = `
-Write a British outro for an AI news podcast.
-Keep it sharp, warm, and human.
-No CTA. No markdown. No scene cues.
+You are writing the OUTRO for a British artificial intelligence news podcast.
+Keep it natural, warm, and concise.
+No markdown, no scene cues, no sound-effect descriptions.
 `.trim();
 
   const userPrompt = `
-Topic reference: ${topic}
-Date: ${date}
-Tone: ${JSON.stringify(tone || {})}
+Date: ${date || new Date().toISOString()}
+Topic: ${topic || "today's artificial intelligence themes"}
+Tone: ${JSON.stringify(tone || { style: "balanced" })}
 
-Write 1 short paragraph.
+Write a short closing paragraph that thanks the listener,
+briefly reinforces the main idea, and signs off naturally.
 `.trim();
 
-  return safeLLM({
-    routeName: "scriptOutro",
-    model: "google",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    max_tokens: 600,
-  });
+  return llmCall("scriptOutro", [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ]);
 }
 
 // ============================================================================
-// COMPOSE + FORMAT
+// COMPOSE – intro + main + outro → formatted script
 // ============================================================================
 export function composeFullScript(intro, main, outro) {
-  return editAndFormat(`${intro}\n\n${main}\n\n${outro}`.trim());
+  const raw = `${intro}\n\n${main}\n\n${outro}`.trim();
+  return editAndFormat(raw);
 }
 
 // ============================================================================
-// Main exported entry for orchestrator
+// High-level entry point used by orchestrator
 // ============================================================================
-export async function generateComposedEpisodeParts(args) {
+export async function generateComposedEpisodeParts(args = {}) {
   const intro = await generateIntro(args);
   const main = await generateMain(args);
   const outro = await generateOutro(args);
 
   const formatted = composeFullScript(intro, main, outro);
+
+  info("🧠 Script parts generated", {
+    date: args.date,
+    hasIntro: !!intro,
+    hasMain: !!main,
+    hasOutro: !!outro,
+  });
 
   return {
     intro,
@@ -178,6 +152,10 @@ export async function generateComposedEpisodeParts(args) {
     formatted,
     callLog,
   };
+}
+
+export function getCallLog() {
+  return callLog;
 }
 
 export default {
