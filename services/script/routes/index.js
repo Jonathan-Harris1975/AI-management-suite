@@ -1,10 +1,22 @@
 // ============================================================================
-// services/script/routes/index.js – CLEAN ORCHESTRATE-ONLY ROUTER
+// services/script/routes/index.js
+// ----------------------------------------------------------------------------
+// Public HTTP routes for the script service.
+// - /script/health
+// - /script/intro
+// - /script/main
+// - /script/outro
+// - /script/orchestrate  (full episode script pipeline)
 // ============================================================================
 
 import express from "express";
 import { info, error } from "#logger.js";
 import { orchestrateEpisode } from "../utils/orchestrator.js";
+import {
+  generateIntro,
+  generateMain,
+  generateOutro,
+} from "../utils/models.js";
 
 const router = express.Router();
 
@@ -16,38 +28,69 @@ router.get("/health", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// FULL SCRIPT PIPELINE (intro → main → outro → editorial → format → chunk)
+// INTRO ONLY
+// ---------------------------------------------------------------------------
+router.post("/intro", async (req, res) => {
+  try {
+    const ctx = req.body || {};
+    info("script.intro.req", { date: ctx.date, sessionId: ctx.sessionId });
+
+    const text = await generateIntro(ctx);
+    res.json({ ok: true, text });
+  } catch (err) {
+    error("script.intro.fail", { error: String(err) });
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// MAIN ONLY
+// ---------------------------------------------------------------------------
+router.post("/main", async (req, res) => {
+  try {
+    const ctx = req.body || {};
+    info("script.main.req", { date: ctx.date, sessionId: ctx.sessionId });
+
+    const text = await generateMain(ctx);
+    res.json({ ok: true, text });
+  } catch (err) {
+    error("script.main.fail", { error: String(err) });
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// OUTRO ONLY
+// ---------------------------------------------------------------------------
+router.post("/outro", async (req, res) => {
+  try {
+    const ctx = req.body || {};
+    info("script.outro.req", { date: ctx.date, sessionId: ctx.sessionId });
+
+    const text = await generateOutro(ctx);
+    res.json({ ok: true, text });
+  } catch (err) {
+    error("script.outro.fail", { error: String(err) });
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// FULL ORCHESTRATION (INTRO → MAIN → OUTRO → EDITORIAL → CHUNKS)
 // ---------------------------------------------------------------------------
 router.post("/orchestrate", async (req, res) => {
-  const { sessionId, date, topic, tone } = req.body || {};
-
   try {
+    const ctx = req.body || {};
     info("script.orchestrate.req", {
-      sessionId,
-      date,
+      date: ctx.date,
+      sessionId: ctx.sessionId,
     });
 
-    const result = await orchestrateEpisode({
-      sessionId,
-      date,
-      topic,
-      tone,
-    });
-
-    res.json({
-      ok: true,
-      ...result,
-    });
+    const result = await orchestrateEpisode(ctx);
+    res.json(result);
   } catch (err) {
-    error("script.orchestrate.fail", {
-      sessionId,
-      error: err.message,
-    });
-
-    res.status(500).json({
-      ok: false,
-      error: err.message,
-    });
+    error("script.orchestrate.fail", { error: String(err) });
+    res.status(500).json({ ok: false, error: String(err) });
   }
 });
 
