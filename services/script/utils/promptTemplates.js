@@ -1,17 +1,13 @@
 // services/script/utils/promptTemplates.js
-// ============================================================================
-// Prompt builders wired to the tone persona + sponsor + durations
-// ============================================================================
 
+import { buildPersona, getClosingTagline } from "./toneSetter.js";
 import getSponsor from "./getSponsor.js";
 import { calculateDuration } from "./durationCalculator.js";
-import { buildPersona } from "./toneSetter.js";
 
-// Utility: safe weekday name from YYYY-MM-DD
 function weekdayFromDateStr(dateStr) {
   try {
     if (!dateStr) return null;
-    const [y, m, d] = String(dateStr).split("-").map(Number);
+    const [y, m, d] = dateStr.split("-").map(Number);
     const date = new Date(Date.UTC(y, m - 1, d));
     return date.toLocaleString("en-GB", {
       weekday: "long",
@@ -22,168 +18,110 @@ function weekdayFromDateStr(dateStr) {
   }
 }
 
-// Helper: get a sessionId from various shapes of sessionMeta
-function getSessionIdFromMeta(sessionMeta) {
-  if (!sessionMeta) return "";
-  return (
-    sessionMeta.sessionId ||
-    sessionMeta.session?.sessionId ||
-    sessionMeta.id ||
-    ""
-  );
-}
+export function buildIntroPrompt({
+  sessionId,
+  date,
+  weatherSummary,
+  turingQuote,
+}) {
+  const persona = buildPersona(sessionId);
+  const weekday = date ? weekdayFromDateStr(date.slice(0, 10)) : null;
 
-// Helper: get a date string from various shapes of sessionMeta
-function getDateFromMeta(sessionMeta) {
-  if (!sessionMeta) return null;
-  return (
-    sessionMeta.date ||
-    sessionMeta.session?.date ||
-    null
-  );
-}
-
-// ============================================================================
-// INTRO PROMPT
-// ============================================================================
-export function getIntroPrompt({ weatherSummary, turingQuote, sessionMeta }) {
-  const sessionId = getSessionIdFromMeta(sessionMeta);
-  const personaText = buildPersona(sessionId); // ← this returns a full persona string
-  const maybeWeekday = weekdayFromDateStr(getDateFromMeta(sessionMeta));
-
-  const weekdayLine = maybeWeekday
-    ? ` If you mention a day of the week, it must be "${maybeWeekday}".`
+  const dateLine = weekday
+    ? `It is ${weekday}, ${date}.`
+    : date
+    ? `The date is ${date}.`
     : "";
 
-  const tagline = `Tired of drowning in artificial intelligence headlines? Ready for clarity, insight, and a direct line to the pulse of innovation? Welcome to Turing's Torch: AI Weekly! I'm Jonathan Harris, your host, and I'm cutting through the noise to bring you the most critical artificial intelligence developments, explained, analysed, and delivered straight to you. Let's ignite your understanding of artificial intelligence, together.`;
+  const weatherLine = weatherSummary
+    ? `Open with a single, light reference to today’s weather: ${weatherSummary}.`
+    : "You may optionally nod to the UK weather in one short line.";
 
-  const safeWeather =
-    weatherSummary ||
-    "very typical British weather — feel free to nod to it briefly with a dry aside.";
-
-  const safeQuote =
-    turingQuote ||
-    `We can only see a short distance ahead, but we can see plenty there that needs to be done.`;
+  const turingLine = turingQuote
+    ? `Weave in this Alan Turing quote in a natural way, once only: "${turingQuote}".`
+    : "If you reference Alan Turing, do it once and keep it sharp.";
 
   return `
-${personaText}
+${persona}
 
-You are recording the INTRO for an artificial intelligence news podcast.
+Write a short INTRO for the podcast episode. Spoken, not read.
+${dateLine}
 
-Tone:
-- Dry, witty, British, conversational.
-- Gen X sensibility: sceptical but fair, never hysterical.
-- Sounds spoken, not written.
-
-You must:
-- Subtly reference the weather using this line as inspiration, without sounding like a forecast:
-  "${safeWeather}"
-- Smoothly weave in this Alan Turing quote at a natural point (not as a list item or label):
-  "${safeQuote}"
-- Briefly connect the quote to the mission of making artificial intelligence understandable for normal people.
-- End EXACTLY with this tagline (do not paraphrase it or change any words):
-  "${tagline}"
-
-Rules:
-- No music or stage cues.
-- No markdown, no bullet points, no headings.
-- Output plain text only.${weekdayLine}
+Requirements:
+- Set up that this is a weekly AI news and analysis round-up.
+- Emphasise that you cut through hype, marketing fluff, and doom.
+- ${weatherLine}
+- ${turingLine}
+- No section headings, no bullet points, no sound cues.
+- Finish with a natural transition into the main stories (but do not list them).
 `.trim();
 }
 
-// ============================================================================
-// MAIN PROMPT
-// ============================================================================
-export function getMainPrompt({ articles = [], sessionMeta }) {
-  const sessionId = getSessionIdFromMeta(sessionMeta);
-  const personaText = buildPersona(sessionId);
+export function buildMainPrompt({
+  sessionId,
+  articles,
+}) {
+  const persona = buildPersona(sessionId);
+  const duration = calculateDuration(articles || []);
 
-  const articlePreview = articles
-    .map((a, i) => {
-      const title = a.title || `Story ${i + 1}`;
-      const summary = a.summary || a.description || "";
-      return `${i + 1}. ${title}\n${summary}`;
-    })
-    .join("\n\n");
+  const articleLines =
+    (articles || [])
+      .slice(0, 6)
+      .map(
+        (a, i) =>
+          `${i + 1}) ${a.title} — ${a.link || ""} (${a.source || "unknown source"})`,
+      )
+      .join("\n") || "No specific headlines available; focus on general AI trends.";
 
   return `
-${personaText}
+${persona}
 
-You are recording the MAIN ANALYSIS section of an artificial intelligence news podcast.
+You are presenting the MAIN BODY of the episode.
+Here are the candidate stories and links for context:
 
-Your style:
-- Conversational, intelligent, British Gen X (energy about 2.5/5).
-- Think BBC Radio 4 meets Wired UK.
-- Lightly witty where appropriate, but never slapstick or theatrical.
+${articleLines}
 
-Your job:
-- Analyse and explain the key stories in a way a smart non-expert can follow.
-- Focus on what matters and why, not just what happened.
-- Draw out themes and connections between stories where they exist.
-
-Stories to cover:
-${articlePreview || "(If no stories are listed, pick 2–3 plausible, non-fictional AI themes and discuss them as if summarising the week's news.)"}
-
-Rules:
-- No lists or bullet points in the final output.
-- No fictional scenes, no imagined dialogues, no role-play.
-- Keep paragraphs short and TTS-friendly (2–4 sentences).
-- Do NOT invent extra facts beyond what a well-informed AI commentator might reasonably say.
-- Do NOT include headings or markdown.
-- Return plain text only.
+Guidelines:
+- Aim for about ${duration} minutes of spoken content in total.
+- Group related stories together so it feels like a coherent narrative.
+- For each story you choose to cover:
+  - Explain what happened in plain English.
+  - Add context: why it matters and who it affects.
+  - Offer a short Gen-X style opinion — dry humour allowed, but no cruelty.
+- You do NOT need to cover all stories; depth is better than breadth.
+- Do not reference URLs out loud; if you must mention a site, say the name only.
+- No headings, bullet points, or stage directions.
 `.trim();
 }
 
-// ============================================================================
-// OUTRO PROMPT
-// ============================================================================
-export function getOutroPromptFull(book, sessionMeta) {
-  const sessionId = getSessionIdFromMeta(sessionMeta);
-  const personaText = buildPersona(sessionId);
+export async function buildOutroPrompt({
+  sessionId,
+}) {
+  const persona = buildPersona(sessionId);
+  const closingTagline = getClosingTagline();
+  const sponsor = await getSponsor();
+  const book = sponsor?.book;
+  const spokenLink = sponsor?.spokenLink || "just search for Jonathan Harris on Amazon";
 
-  const { outroSeconds } = calculateDuration("outro", sessionMeta || {});
-
-  const chosenBook =
-    book ||
-    getSponsor() ||
-    {
-      title: "my latest book on artificial intelligence",
-      url: "https://jonathan-harris.online",
-    };
-
-  const rawUrl = chosenBook.url || "https://jonathan-harris.online";
-  const spoken = rawUrl
-    .replace(/^https?:\/\//, "")
-    .replace(/www\./, "")
-    .replace(/\./g, " dot ")
-    .replace(/-/g, " dash ")
-    .replace(/\//g, " slash ")
-    .trim();
-
-  const closingTagline = `That's it for this week's Turing's Torch. Keep the flame burning, stay curious, and I'll see you next week with more artificial intelligence insights that matter. I'm Jonathan Harris—keep building the future.`;
+  const sponsorLine = book
+    ? `Give a short, sincere promo for the book "${book.title}". Mention that listeners can find it by ${spokenLink}.`
+    : "Give a short, sincere one-line plug for Jonathan Harris's AI ebooks on Amazon.";
 
   return `
-${personaText}
+${persona}
 
-You are recording the OUTRO for this week's episode of "Turing's Torch: AI Weekly".
+Write a short OUTRO to close the episode.
 
 Structure:
-1) A short reflective close on the week's overall feel about artificial intelligence — grounded, not melodramatic.
-2) Sponsor mention for this book:
-   Title: "${chosenBook.title}"
-   Website (paraphrased for speech): ${spoken}
+1) Reflect briefly on the week in artificial intelligence and what still feels uncertain.
+2) ${sponsorLine}
 3) Newsletter CTA:
-   "And while you're there, you can sign up for the daily artificial intelligence newsletter — it’s quick, sharp, and blissfully free of fluff."
-4) End EXACTLY with this closing line (do not alter it):
+   Encourage listeners to visit jonathan-harris dot online for the newsletter and more.
+4) Invite them to follow or subscribe in their podcast app.
+5) End EXACTLY with:
    "${closingTagline}"
 
-Guidance:
-- Aim for roughly ${outroSeconds || 20} seconds of natural speech.
-- Keep it conversational, not salesy.
-- No raw URLs; speak them in a friendly, human way as above.
-- No music or stage directions.
-- No markdown, no lists, plain text only.
+Plain text only.
+No headings, no bullet points, no sound cues.
 `.trim();
 }
-
-export default { getIntroPrompt, getMainPrompt, getOutroPromptFull };
