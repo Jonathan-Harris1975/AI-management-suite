@@ -1,67 +1,97 @@
 // ============================================================================
 // services/script/utils/models.js
-// Script model layer using prompt templates + tone persona
+// Unified script model layer for Turing's Torch
+// ----------------------------------------------------------------------------
+// - Uses resilientRequest(routeName, { ...opts }) signature
+// - Prompts are provided by promptTemplates + toneSetter
+// - Intro / main / outro generation with weather + Turing quote + RSS articles
+// - Keeps things TTS-friendly (no markdown, no cues, no emojis)
 // ============================================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-import { extractMainContent } from "./textHelpers.js";
-import editAndFormat from "./editAndFormat.js";
-import { info, error } from "#logger.js";
+import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
+import fetchFeedArticles from "./fetchFeeds.js";
+import { cleanTranscript } from "./textHelpers.js";
+import { calculateDuration } from "./durationCalculator.js";
+import getWeatherSummary from "./getWeatherSummary.js";
+import getTuringQuote from "./getTuringQuote.js";
+import { generateMainLongform } from "./mainChunker.js";
+import * as sessionCache from "./sessionCache.js";
+import { info, debug } from "#logger.js";
 
-import {
-  getIntroPrompt,
-  getMainPrompt,
-  getOutroPromptFull,
-} from "./promptTemplates.js";
+// ---------------------------------------------------------------------------
+// Helper: strip scene cues / markdown so the LLM output is TTS-friendly
+// ---------------------------------------------------------------------------
+function toPlainText(s) {
+  if (!s) return "";
+  return String(s)
+    // Strip obvious scene directions / music cues
+    .replace(/\[(?:music|sfx|sound|cue|intro|outro|transition|.*?)]/gi, "")
+    .replace(/\((?:music|sfx|sound|cue|intro|outro|transition|.*?)]?\)/gi, "")
 
-// Shared log for debugging / meta
-const callLog = [];
+    // Strip markdown formatting
+    .replace(/\*{1,3}/g, "")
+    .replace(/^#{1,6}\s*/gm, "")
 
-function resetCallLog() {
-  callLog.length = 0;
+    // Neaten whitespace
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
-export function getCallLog() {
-  return [...callLog];
+function sanitizeOutput(s) {
+  return cleanTranscript(toPlainText(s));
 }
 
-// Core LLM call – uses routeName so ai-config can pick models
-async function callLLM(routeName, { sessionId, section, prompt, maxTokens }) {
-  try {
-    const content = await resilientRequest(routeName, {
-      sessionId,
-      section,
-      messages: [
-        {
-          role: "system",
-          content: prompt,
-        },
-      ],
-      max_tokens: maxTokens,
-    });
-
-    const text = extractMainContent(content || "");
-    callLog.push(routeName);
-    return text;
-  } catch (err) {
-    error("models.callLLM.fail", { routeName, err: err.message });
-    callLog.push(`${routeName}:error`);
-    return "";
+// ---------------------------------------------------------------------------
+// Session metadata normalisation
+// ---------------------------------------------------------------------------
+function normalizeSessionMeta(ctx = {}) {
+  // Accept either a plain sessionId string or a small context object
+  if (typeof ctx === "string") {
+    const m = ctx.match(/\d{4}-\d{2}-\d{2}/);
+    return { sessionId: ctx, date: m ? m[0] : undefined };
   }
+
+  if (typeof ctx === "object" && ctx) {
+    return {
+      sessionId: ctx.sessionId || "",
+      date: ctx.date,
+      topic: ctx.topic,
+      tone: ctx.tone,
+    };
+  }
+
+  return { sessionId: "unknown", date: undefined };
 }
 
 // ---------------------------------------------------------------------------
-// INTRO
+// Core LLM caller (old ai-service signature)
 // ---------------------------------------------------------------------------
-export async function generateIntro(ctx = {}) {
-  const { sessionId, date, topic, weatherSummary, turingQuote, tone } = ctx;
-
-  const sessionMeta = {
+async function callLLM(routeName, { sessionId, section, prompt, maxTokens }) {
+  const content = await resilientRequest(routeName, {
     sessionId,
-    date,
-    topic,
-    tone,
-  };
+    section,
+    messages: [
+      {
+        role: "system",
+        content: prompt,
+      },
+    ],
+    max_tokens: maxTokens,
+  });
+
+  return sanitizeOutput(content || "");
+}
+
+// ============================================================================
+// 1) INTRO – uses promptTemplates + weather + Turing quote
+// ============================================================================
+export async function generateIntro(ctx = {}) {
+  const sessionMeta = normalizeSessionMeta(ctx);
+
+  const weatherSummary = await getWeatherSummary();
+  const turingQuote = await getTuringQuote();
 
   const prompt = getIntroPrompt({
     weatherSummary,
@@ -69,100 +99,104 @@ export async function generateIntro(ctx = {}) {
     sessionMeta,
   });
 
-  return callLLM("scriptIntro", {
-    sessionId,
+  const text = await callLLM("scriptIntro", {
+    sessionId: sessionMeta,
     section: "intro",
     prompt,
     maxTokens: 900,
   });
-}
 
-// ---------------------------------------------------------------------------
-// MAIN (multi-article analysis)
-// ---------------------------------------------------------------------------
-export async function generateMain(ctx = {}) {
-  const { sessionId, date, topic, tone, articles = [] } = ctx;
+  await sessionCache.storeTempPart(sessionMeta, "intro", text);
 
-  const sessionMeta = {
-    sessionId,
-    date,
-    topic,
-    tone,
-  };
-
-  const prompt = getMainPrompt({
-    articles,
-    sessionMeta,
-  });
-
-  // We still keep the 6-part main routeNames for logging / routing, but
-  // promptTemplates handles the full main body in one go.
-  const text = await callLLM("scriptMain", {
-    sessionId,
-    section: "main",
-    prompt,
-    maxTokens: 2800,
+  info("script.intro.generated", {
+    sessionId: sessionMeta.sessionId,
+    date: sessionMeta.date,
   });
 
   return text;
 }
 
-// ---------------------------------------------------------------------------
-// OUTRO
-// ---------------------------------------------------------------------------
+// ============================================================================
+// 2) MAIN – longform, driven by RSS feed articles
+// ============================================================================
+export async function generateMain(ctx = {}) {
+  const sessionMeta = normalizeSessionMeta(ctx);
+
+  const { items } = await fetchFeedArticles();
+
+  const articles = (items || [])
+    .map((it) => ({
+      title: it?.title?.trim() || "",
+      summary:
+        it?.summary?.trim() ||
+        it?.contentSnippet?.trim() ||
+        it?.description?.trim() ||
+        "",
+      link: it?.link || it?.url || "",
+    }))
+    .filter((a) => a.title || a.summary);
+
+  const { mainSeconds, targetMins } = calculateDuration(
+    "main",
+    sessionMeta,
+    articles.length
+  );
+
+  debug("script.main.generate", {
+    sessionId: sessionMeta.sessionId,
+    targetMinutes: targetMins,
+    articleCount: articles.length,
+  });
+
+  // Build a single "big" prompt for the whole main section
+  const prompt = getMainPrompt({
+    articles,
+    sessionMeta,
+  });
+
+  // generateMainLongform wraps the LLM calls into multiple “scriptMain-*” routes
+  const combined = await generateMainLongform(
+    { ...sessionMeta, mainSeconds },
+    articles,
+    mainSeconds
+  );
+
+  const cleaned = sanitizeOutput(combined);
+  await sessionCache.storeTempPart(sessionMeta, "main", cleaned);
+
+  return cleaned;
+}
+
+// ============================================================================
+// 3) OUTRO – full outro with sponsor + CTA via promptTemplates
+// ============================================================================
 export async function generateOutro(ctx = {}) {
-  const { sessionId, date, topic, tone, sponsorBook } = ctx;
+  const sessionMeta = normalizeSessionMeta(ctx);
 
-  const sessionMeta = {
-    sessionId,
-    date,
-    topic,
-    tone,
-  };
+  const prompt = await getOutroPromptFull(sessionMeta);
 
-  const prompt = getOutroPromptFull(sponsorBook, sessionMeta);
-
-  return callLLM("scriptOutro", {
-    sessionId,
+  const text = await callLLM("scriptOutro", {
+    sessionId: sessionMeta,
     section: "outro",
     prompt,
     maxTokens: 900,
   });
-}
 
-// ---------------------------------------------------------------------------
-// COMPOSE FULL SCRIPT
-// ---------------------------------------------------------------------------
-export function composeFullScript(intro, main, outro) {
-  const raw = `${intro}\n\n${main}\n\n${outro}`.trim();
-  return editAndFormat(raw);
-}
+  await sessionCache.storeTempPart(sessionMeta, "outro", text);
 
-// ---------------------------------------------------------------------------
-// HIGH-LEVEL ENTRY FOR ORCHESTRATOR
-// ---------------------------------------------------------------------------
-export async function generateComposedEpisodeParts(ctx = {}) {
-  resetCallLog();
-
-  const intro = await generateIntro(ctx);
-  const main = await generateMain(ctx);
-  const outro = await generateOutro(ctx);
-
-  const formatted = composeFullScript(intro, main, outro);
-  const snapshot = getCallLog();
-
-  info("script.models.complete", {
-    sessionId: ctx.sessionId,
-    calls: snapshot,
+  info("script.outro.generated", {
+    sessionId: sessionMeta.sessionId,
+    date: sessionMeta.date,
   });
 
-  return {
-    intro,
-    main,
-    outro,
-    formatted,
-    callLog: snapshot,
-  };
+  return text;
+}
+
+// ============================================================================
+// 4) Optional local “compose” helper (used by some debug routes)
+// ============================================================================
+export function composeFullScript(intro, main, outro) {
+  return `${intro}\n\n${main}\n\n${outro}`.trim();
 }
 
 export default {
@@ -170,6 +204,4 @@ export default {
   generateMain,
   generateOutro,
   composeFullScript,
-  generateComposedEpisodeParts,
-  getCallLog,
 };
