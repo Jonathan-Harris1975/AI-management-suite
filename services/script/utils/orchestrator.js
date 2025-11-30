@@ -13,7 +13,7 @@ import {
 import { runEditorialPass } from "./editorialPass.js";
 import editAndFormat from "./editAndFormat.js";
 import { buildIntroPrompt, buildMainPrompt, buildOutroPrompt } from "./promptTemplates.js";
-import { applyTone } from "./toneSetter.js";
+import { buildPersona} from "./toneSetter.js";
 
 import {
   uploadText,
@@ -42,9 +42,9 @@ export async function orchestrateEpisode(payload = {}) {
     // -----------------------------------------------------------------------
     // 1. BUILD PROMPTS (Tone + Template)
     // -----------------------------------------------------------------------
-    const introPrompt  = applyTone(buildIntroPrompt(payload));
-    const mainPrompt   = applyTone(buildMainPrompt(payload));
-    const outroPrompt  = applyTone(buildOutroPrompt(payload));
+    const introPrompt  = buildPersona(buildIntroPrompt(payload));
+    const mainPrompt   = buildPersona(buildMainPrompt(payload));
+    const outroPrompt  = buildPersona(buildOutroPrompt(payload));
 
     // -----------------------------------------------------------------------
     // 2. GENERATE INTRO
