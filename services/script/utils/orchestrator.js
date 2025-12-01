@@ -26,7 +26,7 @@ import { runEditorialPass } from "./editorialPass.js";
 import { cleanupFinal } from "./textHelpers.js";
 
 import promptTemplates from "./promptTemplates.js";
-import { applyTone } from "./toneSetter.js";
+import { buildPersona } from "./toneSetter.js";
 
 import podcastHelper from "./podcastHelper.js";
 
@@ -73,17 +73,17 @@ export async function orchestrateEpisode(input = {}) {
   // ==========================================================================
   // 3. BUILD PROMPTS USING promptTemplates + toneSetter
   // ==========================================================================
-  const introPrompt = applyTone(
+  const introPrompt = buildPersona(
     promptTemplates.intro({ date, weatherSummary, turingQuote }),
     tone
   );
 
-  const mainPrompt = applyTone(
+  const mainPrompt = buildPersona(
     promptTemplates.main({ topic }),
     tone
   );
 
-  const outroPrompt = applyTone(
+  const outroPrompt = buildPersona(
     promptTemplates.outro({ sponsorBook, sponsorCta }),
     tone
   );
