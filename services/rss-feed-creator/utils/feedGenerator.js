@@ -7,7 +7,7 @@
 import crypto from "crypto";
 import { XMLBuilder } from "fast-xml-parser";
 import { r2Put, r2Get } from "../../shared/utils/r2-client.js";
-import { info, error ,debug} from "#logger.js";
+import { info, error, debug } from "#logger.js";
 
 const FEED_RETENTION_DAYS = Number(process.env.FEED_RETENTION_DAYS) || 7; // default 7 days
 
@@ -76,6 +76,11 @@ export async function generateFeed(bucket, rewrittenItems) {
             "@_href": `${channelLink}/feed.xml`,
             "@_rel": "self",
             "@_type": "application/rss+xml"
+          },
+          image: {
+            url: "https://assets.jonathan-harris.online/favicon.ico",
+            title: escapeXml(channelTitle),
+            link: channelLink,
           },
           item: validItems.map((it) => ({
             title: escapeXml(it.title || "Untitled Article"),
@@ -259,4 +264,4 @@ function escapeXml(str = "") {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
-        }
+    }
