@@ -23,7 +23,7 @@ export async function generateFeed(bucket, rewrittenItems) {
     const retentionCutoff = new Date(now.getTime() - FEED_RETENTION_DAYS * 24 * 60 * 60 * 1000);
 
     const channelTitle =
-      process.env.RSS_FEED_TITLE?.trim() || "Turing's Torch: AI Weekly";
+      process.env.RSS_FEED_TITLE?.trim() || "gen-X tone AI news";
     const channelLink = "https://jonathan-harris.online";
     const channelDesc =
       process.env.RSS_FEED_DESCRIPTION?.trim() ||
