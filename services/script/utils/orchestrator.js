@@ -18,7 +18,7 @@ import { uploadText, putJson } from "../../shared/utils/r2-client.js";
 
 import getWeatherSummary from "./getWeatherSummary.js";
 import getTuringQuote from "./getTuringQuote.js";
-import { selectRandomBook, buildSponsorCTA } from "./sponsorHelpers.js";
+
 
 import { generateIntro, generateMain, generateOutro, generateComposedEpisodeParts } from "./models.js";
 
@@ -68,11 +68,7 @@ export async function orchestrateEpisode(input = {}) {
     error("turingQuote.fail", { sessionId, error: String(err) });
   }
 
-  // ==========================================================================
-  // 2. SPONSOR BOOK + CTA
-  // ==========================================================================
-  const sponsorBook = selectRandomBook();
-  const sponsorCta = buildSponsorCTA(sponsorBook);
+  
 
   // ==========================================================================
   // 3. BUILD PROMPTS USING promptTemplates + toneSetter
