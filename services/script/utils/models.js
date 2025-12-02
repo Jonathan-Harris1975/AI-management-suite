@@ -12,8 +12,7 @@ import {
   buildMainPrompt,
   buildOutroPrompt,
 } from "./promptTemplates.js";
-import { buildPersona } from "./toneSetter.js";
-import fetchFeeds from "./fetchFeeds.js";
+import fetchFeedArticles from "./fetchFeeds.js";
 import { info } from "#logger.js";
 
 function normaliseContext(input = {}) {
@@ -22,21 +21,24 @@ function normaliseContext(input = {}) {
   }
   const now = new Date();
   return {
-    sessionId:
-      input.sessionId ||
-      `TT-${now.toISOString().slice(0, 10)}`,
+    sessionId: input.sessionId || `TT-${now.toISOString().slice(0, 10)}`,
     date: input.date || now.toISOString().slice(0, 10),
     topic: input.topic || null,
     tone: input.tone || {},
+
     weatherSummary: input.weatherSummary || "",
     turingQuote: input.turingQuote || "",
+
+    sponsorBook: input.sponsorBook || null,
+    sponsorCta: input.sponsorCta || "",
   };
 }
 
-async function callRoute(routeName, { sessionId, systemContent, userContent, maxTokens = 1500 }) {
-  const messages = [
-    { role: "system", content: systemContent },
-  ];
+async function callRoute(
+  routeName,
+  { sessionId, systemContent, userContent, maxTokens = 1500 },
+) {
+  const messages = [{ role: "system", content: systemContent }];
   if (userContent) {
     messages.push({ role: "user", content: userContent });
   }
@@ -56,6 +58,7 @@ async function callRoute(routeName, { sessionId, systemContent, userContent, max
 // ---------------------------------------------------------------------------
 export async function generateIntro(rawCtx = {}) {
   const ctx = normaliseContext(rawCtx);
+
   const systemContent = buildIntroPrompt({
     sessionId: ctx.sessionId,
     date: ctx.date,
@@ -76,10 +79,9 @@ export async function generateIntro(rawCtx = {}) {
 // ---------------------------------------------------------------------------
 async function generateMainPart(rawCtx, index) {
   const ctx = normaliseContext(rawCtx);
-  const persona = buildPersona(ctx.sessionId);
 
-  // pull feed items once per episode (cached in fetchFeeds internally)
-  const articles = await fetchFeeds();
+  // pull feed items once per episode (fetchFeedArticles already encapsulates RSS parsing)
+  const { items: articles = [] } = await fetchFeedArticles();
 
   const systemContent = buildMainPrompt({
     sessionId: ctx.sessionId,
@@ -93,7 +95,7 @@ Keep tone and pacing consistent with the rest of the episode.
 
   return callRoute(`scriptMain-${index}`, {
     sessionId: ctx.sessionId,
-    systemContent: `${persona}\n\n${systemContent}`,
+    systemContent,
     userContent,
     maxTokens: 1400,
   });
@@ -113,8 +115,11 @@ export async function generateMain(rawCtx = {}) {
 // ---------------------------------------------------------------------------
 export async function generateOutro(rawCtx = {}) {
   const ctx = normaliseContext(rawCtx);
-  const systemContent = await buildOutroPrompt({
+
+  const systemContent = buildOutroPrompt({
     sessionId: ctx.sessionId,
+    sponsorBook: ctx.sponsorBook,
+    sponsorCta: ctx.sponsorCta,
   });
 
   return callRoute("scriptOutro", {
