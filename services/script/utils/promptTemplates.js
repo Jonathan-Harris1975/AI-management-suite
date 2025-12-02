@@ -1,10 +1,9 @@
 // ====================================================================
-// promptTemplates.js – Full Production Version
-// ====================================
+// promptTemplates.js – Updated Editorial Flow Version
+// ====================================================================
 
 import { buildPersona } from "./toneSetter.js";
 import { calculateDuration } from "./durationCalculator.js";
-
 
 function weekdayFromDateStr(dateStr) {
   try {
@@ -20,31 +19,33 @@ function weekdayFromDateStr(dateStr) {
   }
 }
 
+// INTRO TEMPLATE
 export function getIntroPrompt({ weatherSummary, turingQuote, sessionMeta } = {}) {
   const persona = buildPersona(sessionMeta);
   const maybeWeekday = weekdayFromDateStr(sessionMeta?.date);
   const weekdayLine = maybeWeekday
-    ? ` If you mention a day, it must be "${maybeWeekday}".`
+    ? ` If you reference a day, it must be "${maybeWeekday}".`
     : "";
 
   const tagline = `Tired of drowning in artificial intelligence headlines? Ready for clarity, insight, and a direct line to the pulse of innovation? Welcome to Turing's Torch: AI Weekly! I'm Jonathan Harris, your host, and I'm cutting through the noise to bring you the most critical artificial intelligence developments, explained, analysed, and delivered straight to you. Let's ignite your understanding of artificial intelligence, together.`;
 
   return `
 You are ${persona.host}, hosting "${persona.show}".
-Write a short, engaging INTRO for an artificial intelligence news podcast.
-Tone: dry, witty, British, naturally conversational, not theatrical.
 
-- Reference the weather using: "${weatherSummary}", but weave it in subtly as part of the mood or scene — not as a standalone announcement or forecast.
-  It should feel like a passing British observation, mildly amused or wry, not like a weather segment.
-- Smoothly segue into this Alan Turing quote: "${turingQuote}".
-- Link the quote to the mission of making artificial intelligence understandable for everyone.
-- End exactly with this tagline (do not paraphrase it):
-  "${tagline}"
-- No music/stage cues. Output plain text only.${weekdayLine}
+Write a tight, confident radio-style INTRO with a British Gen-X tone:
+- Subtle nod to the weather using: "${weatherSummary}" — keep it wry and passing.
+- Smoothly introduce this Alan Turing quote: "${turingQuote}" and link it to the mission of demystifying artificial intelligence.
+- Maintain a dry BBC/WIRED editorial energy — sharp, never theatrical.
+- No metaphors about “journeys”, no stage cues.
+
+End EXACTLY with this tagline:
+"${tagline}"
+${weekdayLine}
 `.trim();
 }
 
 
+// MAIN TEMPLATE – ***UPDATED FOR THEMATIC FLOW + RADIO NARRATIVE***
 export function getMainPrompt({ articles, sessionMeta }) {
   const persona = buildPersona(sessionMeta);
 
@@ -53,23 +54,30 @@ export function getMainPrompt({ articles, sessionMeta }) {
     .join("\n\n");
 
   return `
-You are ${persona.host}, hosting "${persona.show}" in a conversational British Gen-X tone (2.5).
+You are ${persona.host}, hosting "${persona.show}" in a sceptical, witty British Gen-X voice.
 
-Write the MAIN analysis section using these rules:
+Write the MAIN SECTION as a professional radio editorial with WIRED-style analysis.
 
-TONE:
-- Conversational, intelligent, BBC Radio 4 / Wired UK style.
-- Lightly witty in places, never theatrical.
-- Sounds spoken, not written.
+REQUIRED FLOW:
+- Read all articles and *automatically group them into 2–3 natural themes*.
+  Examples: AI safety, agentic systems, climate technology, future of work, digital ethics.
+- For each theme:
+  - Introduce it in one clean sentence.
+  - Explain what the grouped stories reveal collectively.
+  - Add dry Gen-X commentary — amused, intelligent, not theatrical.
+  - Keep transitions smooth and human, like a seasoned radio presenter tying threads together.
 
-RULES:
-- No lists or bullets in the final output.
-- No storytelling or fictional scenes.
-- Explain clearly what matters and why.
-- Connect themes smoothly with natural transitions.
-- Keep it factual — no adding new claims.
-- Keep paragraphs short and TTS-friendly.
+AVOID:
+- Lists, bullets, “first we have / next up”.
+- Repeating article text verbatim.
+- Abrupt topic jumps.
+- Fictional scenes or hypotheticals.
+- Generic filler.
 
+STYLE:
+- Conversational BBC-meets-Wired vibe.
+- Short paragraphs, TTS-friendly.
+- Spoken, not written. Clean rhythm. No over-explanation.
 
 ARTICLES:
 ${articlePreview}
@@ -78,6 +86,8 @@ Return plain text only.
 `.trim();
 }
 
+
+// OUTRO TEMPLATE – ***UPDATED FOR SPONSOR → CTA → SIGN-OFF FLOW***
 export function getOutroPromptFull(book, sessionMeta) {
   const persona = buildPersona(sessionMeta);
   const { outroSeconds } = calculateDuration("outro", sessionMeta);
@@ -94,19 +104,20 @@ export function getOutroPromptFull(book, sessionMeta) {
   const closingTagline = `That's it for this week's Turing's Torch. Keep the flame burning, stay curious, and I'll see you next week with more artificial intelligence insights that matter. I'm Jonathan Harris—keep building the future.`;
 
   return `
-Write a reflective OUTRO for the podcast "${persona.show}" in a British Gen-X tone.
+Write a reflective OUTRO for "${persona.show}" in a British Gen-X podcast tone.
 
-STRUCTURE:
-1) A closing line tying together the sense of the week.
-2) Sponsor mention: "${book.title}" at ${spoken}.
-3) Newsletter CTA:
-   "And while you're there, you can sign up for the daily artificial intelligence newsletter — it’s quick, sharp, and blissfully free of fluff."
-4) End EXACTLY with:
-   "${closingTagline}"
+FLOW:
+- Start with a single reflective line that ties together the week's themes.
+- Smoothly segue into the sponsor mention — it must feel conversational, not bolted on:
+    "${book.title}" available at ${spoken}.
+- Immediately and naturally blend into the CTA:
+    "And while you're there, you can sign up for the daily artificial intelligence newsletter — it’s quick, sharp, and blissfully free of fluff."
+- No separation or robotic pattern — treat sponsor → CTA as one flowing thought.
+- End EXACTLY with:
+"${closingTagline}"
 
-No music cues. Plain text only.
+Plain text only.
 `.trim();
 }
 
 export default { getIntroPrompt, getMainPrompt, getOutroPromptFull };
-
