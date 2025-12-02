@@ -1,5 +1,5 @@
 // ====================================================================
-// promptTemplates.js – Updated Editorial Flow Version
+// promptTemplates.js – Updated Editorial Flow Version (Option A)
 // ====================================================================
 
 import { buildPersona } from "./toneSetter.js";
@@ -36,7 +36,7 @@ Write a tight, confident radio-style INTRO with a British Gen-X tone:
 - Subtle nod to the weather using: "${weatherSummary}" — keep it wry and passing.
 - Smoothly introduce this Alan Turing quote: "${turingQuote}" and link it to the mission of demystifying artificial intelligence.
 - Maintain a dry BBC/WIRED editorial energy — sharp, never theatrical.
-- No metaphors about “journeys”, no stage cues.
+- No metaphors about "journeys", no stage cues.
 
 End EXACTLY with this tagline:
 "${tagline}"
@@ -45,11 +45,11 @@ ${weekdayLine}
 }
 
 
-// MAIN TEMPLATE – ***UPDATED FOR THEMATIC FLOW + RADIO NARRATIVE***
+// MAIN TEMPLATE – Thematic Radio Editorial
 export function getMainPrompt({ articles, sessionMeta }) {
   const persona = buildPersona(sessionMeta);
 
-  const articlePreview = articles
+  const articlePreview = (articles || [])
     .map((a, i) => `${i + 1}. ${a.title}\n${a.summary}`)
     .join("\n\n");
 
@@ -59,7 +59,7 @@ You are ${persona.host}, hosting "${persona.show}" in a sceptical, witty British
 Write the MAIN SECTION as a professional radio editorial with WIRED-style analysis.
 
 REQUIRED FLOW:
-- Read all articles and *automatically group them into 2–3 natural themes*.
+- Read all articles and automatically group them into 2–3 natural themes.
   Examples: AI safety, agentic systems, climate technology, future of work, digital ethics.
 - For each theme:
   - Introduce it in one clean sentence.
@@ -68,7 +68,7 @@ REQUIRED FLOW:
   - Keep transitions smooth and human, like a seasoned radio presenter tying threads together.
 
 AVOID:
-- Lists, bullets, “first we have / next up”.
+- Lists, bullets, or “first we have / next up” style.
 - Repeating article text verbatim.
 - Abrupt topic jumps.
 - Fictional scenes or hypotheticals.
@@ -87,12 +87,12 @@ Return plain text only.
 }
 
 
-// OUTRO TEMPLATE – ***UPDATED FOR SPONSOR → CTA → SIGN-OFF FLOW***
+// OUTRO TEMPLATE – Sponsor → CTA → Sign-off
 export function getOutroPromptFull(book, sessionMeta) {
   const persona = buildPersona(sessionMeta);
-  const { outroSeconds } = calculateDuration("outro", sessionMeta);
+  const { outroSeconds } = calculateDuration("outro", sessionMeta); // kept for future use
 
-  const rawUrl = book.url || "https://jonathan-harris.online";
+  const rawUrl = book?.url || "https://jonathan-harris.online";
   const spoken = rawUrl
     .replace(/^https?:\/\//, "")
     .replace(/www\./, "")
@@ -103,17 +103,20 @@ export function getOutroPromptFull(book, sessionMeta) {
 
   const closingTagline = `That's it for this week's Turing's Torch. Keep the flame burning, stay curious, and I'll see you next week with more artificial intelligence insights that matter. I'm Jonathan Harris—keep building the future.`;
 
+  const safeTitle = book?.title || "one of my artificial intelligence ebooks";
+
   return `
 Write a reflective OUTRO for "${persona.show}" in a British Gen-X podcast tone.
 
-FLOW:
-- Start with a single reflective line that ties together the week's themes.
-- Smoothly segue into the sponsor mention — it must feel conversational, not bolted on:
-    "${book.title}" available at ${spoken}.
-- Immediately and naturally blend into the CTA:
-    "And while you're there, you can sign up for the daily artificial intelligence newsletter — it’s quick, sharp, and blissfully free of fluff."
-- No separation or robotic pattern — treat sponsor → CTA as one flowing thought.
-- End EXACTLY with:
+Start with a single reflective line that ties together the feel of this week's themes.
+
+Then, without using bullets, naturally segue into the sponsor mention in one or two sentences:
+Mention "${safeTitle}", available at ${spoken}, in a conversational way.
+
+Immediately and naturally blend into this CTA as part of the same flow:
+"And while you're there, you can sign up for the daily artificial intelligence newsletter — it’s quick, sharp, and blissfully free of fluff."
+
+End EXACTLY with:
 "${closingTagline}"
 
 Plain text only.
