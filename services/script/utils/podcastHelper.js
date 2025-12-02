@@ -151,17 +151,39 @@ Return ONLY the comma-separated keywords.`;
 }
 
 /* -----------------------------------------------------------
- * UPDATED Artwork Prompt (Sharper + Main-Section Focus Only)
+ * UPDATED Artwork Prompt (Natural + Seasonal Feel)
  * -----------------------------------------------------------
  */
 export function getArtworkPrompt(description) {
-  return `Ultra-detailed cinematic artwork prompt based ONLY on the MAIN section themes.
-Focus on the core artificial intelligence topics, risks, breakthroughs, systems landscapes, or technologies described.
-Use neon holographic lighting, glowing circuitry, swirling data energy, abstract motion structures, vibrant depth.
+  // Get current month to determine season
+  const month = new Date().getMonth(); // 0-11
+  let seasonalElements = "";
+  
+  // Define seasonal aesthetics
+  if (month >= 2 && month <= 4) {
+    // Spring (Mar-May)
+    seasonalElements = "soft pastels, fresh blooms, morning light, renewal energy";
+  } else if (month >= 5 && month <= 7) {
+    // Summer (Jun-Aug)
+    seasonalElements = "warm golden hour, vibrant colors, bright sunshine, dynamic energy";
+  } else if (month >= 8 && month <= 10) {
+    // Fall (Sep-Nov)
+    seasonalElements = "warm amber tones, rich earth colors, cozy atmosphere, harvest glow";
+  } else {
+    // Winter (Dec-Feb)
+    seasonalElements = "cool crisp light, deep blues, warm contrasts, serene atmosphere";
+  }
+
+  return `Professional editorial illustration based on the MAIN section themes.
+Focus on the core artificial intelligence topics, innovations, or concepts described.
+Style: Modern abstract with ${seasonalElements}.
+Use elegant gradients, flowing organic shapes, sophisticated composition, natural depth.
 STRICT RULES:
 - No text or letters
 - No humans
+- No robots or circuits
 - No intro or outro themes
+- Contemporary design aesthetic
 - ≤ 250 chars total
 
 MAIN DESCRIPTION:
@@ -302,7 +324,7 @@ export async function generateEpisodeMetaLLM(rawTranscript, sessionMeta = {}) {
 
   /* 4. Artwork Prompt */
   let artworkPrompt =
-    "Cinematic abstract neon depiction of artificial intelligence systems, swirling data lights, no text";
+    "Professional editorial illustration of artificial intelligence concepts, elegant gradients, flowing organic shapes, sophisticated composition, no text";
 
   try {
     const ap = await resilientRequest("artworkPrompt", {
