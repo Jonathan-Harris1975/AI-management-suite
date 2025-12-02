@@ -5,7 +5,11 @@
 // ============================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
+import {
+  getIntroPrompt,
+  getMainPrompt,
+  getOutroPromptFull,
+} from "./promptTemplates.js";
 import fetchFeedArticles from "./fetchFeeds.js";
 import { putText, putJson, buildPublicUrl } from "../../shared/utils/r2-client.js";
 import { cleanTranscript } from "./textHelpers.js";
@@ -17,6 +21,7 @@ import chunkText from "./chunkText.js";
 import { generateMainLongform } from "./mainChunker.js";
 import * as sessionCache from "./sessionCache.js";
 import { generateEpisodeMetaLLM } from "./podcastHelper.js";
+import getSponsor from "./getSponsor.js";
 import { info, error, debug } from "#logger.js";
 
 function toPlainText(s) {
@@ -62,32 +67,73 @@ export async function generateIntro(sessionIdLike) {
   return cleaned;
 }
 
+// MAIN – Option A: prompt-driven editorial, longform as fallback
 export async function generateMain(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
-  const { items, feedUrl } = await fetchFeedArticles();
+  const { items } = await fetchFeedArticles();
 
   const articles = (items || [])
     .map((it) => ({
       title: it?.title?.trim() || "",
-      summary: it?.summary?.trim() || it?.contentSnippet?.trim() || it?.description?.trim() || "",
+      summary:
+        it?.summary?.trim() ||
+        it?.contentSnippet?.trim() ||
+        it?.description?.trim() ||
+        "",
       link: it?.link || it?.url || "",
     }))
     .filter((a) => a.title || a.summary);
 
-  const { mainSeconds, targetMins } = calculateDuration("main", sessionMeta, articles.length);
-  debug("Main script generation", { 
-    targetMinutes: targetMins, 
-    articles: articles.length 
+  const { mainSeconds, targetMins } = calculateDuration(
+    "main",
+    sessionMeta,
+    articles.length
+  );
+
+  debug("Main script generation (Option A)", {
+    articles: articles.length,
+    targetMinutes: targetMins,
+    mainSeconds,
   });
 
-  const combined = await generateMainLongform(sessionMeta, articles, mainSeconds);
-  await sessionCache.storeTempPart(sessionMeta, "main", combined);
-  return sanitizeOutput(combined);
+  // Primary: single, coherent editorial using the new prompt
+  const mainPrompt = getMainPrompt({
+    articles,
+    sessionMeta,
+  });
+
+  const res = await resilientRequest("scriptMain", {
+    sessionId: sessionMeta,
+    section: "main",
+    messages: [{ role: "system", content: mainPrompt }],
+  });
+
+  let cleaned = sanitizeOutput(res);
+  const wordCount = cleaned ? cleaned.split(/\s+/).length : 0;
+
+  // If the main section comes out too thin, fall back to longform generator
+  if (!cleaned || wordCount < 250) {
+    debug("Main section too short; falling back to longform generator", {
+      wordCount,
+    });
+
+    const combined = await generateMainLongform(sessionMeta, articles, mainSeconds);
+    await sessionCache.storeTempPart(sessionMeta, "main", combined);
+    return sanitizeOutput(combined);
+  }
+
+  await sessionCache.storeTempPart(sessionMeta, "main", cleaned);
+  return cleaned;
 }
 
+// OUTRO – Sponsor + CTA wired correctly
 export async function generateOutro(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
-  const prompt = await getOutroPromptFull(sessionMeta);
+
+  // Load a sponsor book from books.json (or fallback)
+  const book = getSponsor();
+
+  const prompt = getOutroPromptFull(book, sessionMeta);
 
   const res = await resilientRequest("scriptOutro", {
     sessionId: sessionMeta,
@@ -97,6 +143,11 @@ export async function generateOutro(sessionIdLike) {
 
   const cleaned = sanitizeOutput(res);
   await sessionCache.storeTempPart(sessionMeta, "outro", cleaned);
+  debug("Outro generated with sponsor", {
+    sessionId: sessionMeta.sessionId,
+    sponsorTitle: book?.title,
+    sponsorUrl: book?.url,
+  });
   return cleaned;
 }
 
@@ -104,9 +155,15 @@ export async function generateComposedEpisode(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
   const id = sessionMeta.sessionId || `TT-${Date.now()}`;
 
-  const intro = (await sessionCache.getTempPart(sessionMeta, "intro")) || await generateIntro(sessionMeta);
-  const main = (await sessionCache.getTempPart(sessionMeta, "main")) || await generateMain(sessionMeta);
-  const outro = (await sessionCache.getTempPart(sessionMeta, "outro")) || await generateOutro(sessionMeta);
+  const intro =
+    (await sessionCache.getTempPart(sessionMeta, "intro")) ||
+    (await generateIntro(sessionMeta));
+  const main =
+    (await sessionCache.getTempPart(sessionMeta, "main")) ||
+    (await generateMain(sessionMeta));
+  const outro =
+    (await sessionCache.getTempPart(sessionMeta, "outro")) ||
+    (await generateOutro(sessionMeta));
 
   const rawTranscript = [intro, "", main, "", outro].join("\n");
   const edited = editAndFormat(rawTranscript);
@@ -114,7 +171,7 @@ export async function generateComposedEpisode(sessionIdLike) {
   const maxBytes = Number(process.env.MAX_SSML_CHUNK_BYTES || 4200);
   const byteLen = (s) => Buffer.byteLength(s, "utf8");
   let ttsChunks = chunkText(edited, maxBytes);
-  
+
   if (ttsChunks.length <= 1 && byteLen(edited) > maxBytes) {
     debug("Force splitting large chunk", { reason: "single-chunk-too-large" });
     const out = [];
@@ -146,13 +203,19 @@ export async function generateComposedEpisode(sessionIdLike) {
 
   const meta = await generateEpisodeMetaLLM(edited, sessionMeta);
   await putJson("meta", `${id}-meta.json`, meta);
-  info("📃 Script orchestration complete"),
-  debug("📃 Script orchestration complete", { 
-    sessionId: id, 
-    chunks: files.length 
+
+  info("📃 Script orchestration complete");
+  debug("📃 Script orchestration complete", {
+    sessionId: id,
+    chunks: files.length,
   });
-  
+
   return { transcript: edited, chunks: files, meta };
 }
 
-export default { generateIntro, generateMain, generateOutro, generateComposedEpisode };
+export default {
+  generateIntro,
+  generateMain,
+  generateOutro,
+  generateComposedEpisode,
+};
