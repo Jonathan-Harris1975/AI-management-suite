@@ -2,8 +2,8 @@
 // services/script/utils/orchestrator.js
 // Full script orchestration with:
 // - weather + Turing quote
-// - sponsor selection
-// - promptTemplates + toneSetter
+// - sponsor selection (single source of truth here)
+// - models + promptTemplates + toneSetter
 // - intro / main / outro generation
 // - editorial pass
 // - TTS cleanup
@@ -18,21 +18,20 @@ import { uploadText, putJson } from "../../shared/utils/r2-client.js";
 
 import getWeatherSummary from "./getWeatherSummary.js";
 import getTuringQuote from "./getTuringQuote.js";
+import getSponsor from "./getSponsor.js";
+import generateCta from "./generateCta.js";
 
-
-import { generateIntro, generateMain, generateOutro, generateComposedEpisodeParts } from "./models.js";
+import {
+  generateComposedEpisodeParts,
+} from "./models.js";
 
 import { runEditorialPass } from "./editorialPass.js";
 import { cleanupFinal } from "./textHelpers.js";
-
-import promptTemplates from "./promptTemplates.js";
-import { buildPersona } from "./toneSetter.js";
 
 import podcastHelper from "./podcastHelper.js";
 
 import chunkText from "./chunkText.js";
 import mainChunker from "./mainChunker.js";
-
 
 // ============================================================================
 // MAIN ORCHESTRATION FUNCTION
@@ -68,49 +67,51 @@ export async function orchestrateEpisode(input = {}) {
     error("turingQuote.fail", { sessionId, error: String(err) });
   }
 
-  
-
   // ==========================================================================
-  // 3. BUILD PROMPTS USING promptTemplates + toneSetter
+  // 2. SPONSOR SELECTION (single place)
   // ==========================================================================
-  const introPrompt = buildPersona(
-    promptTemplates.intro({ date, weatherSummary, turingQuote }),
-    tone
-  );
-
-  const mainPrompt = buildPersona(
-    promptTemplates.main({ topic }),
-    tone
-  );
-
-  const outroPrompt = buildPersona(
-    promptTemplates.outro({ sponsorBook, sponsorCta }),
-    tone
-  );
-
-  // ==========================================================================
-  // 4. GENERATE INTRO / MAIN / OUTRO
-  // ==========================================================================
-  let intro = "";
-  let main = "";
-  let outro = "";
+  let sponsorBook = null;
+  let sponsorCta = "";
 
   try {
-    intro = await generateIntro({ prompt: introPrompt, sessionId });
-    main = await generateMain({ prompt: mainPrompt, sessionId });
-    outro = await generateOutro({ prompt: outroPrompt, sessionId });
-
-    info("script.generators.ok", { sessionId });
+    sponsorBook = getSponsor();
+    sponsorCta = generateCta(sponsorBook);
+    info("sponsor.selected", {
+      sessionId,
+      title: sponsorBook?.title || "unknown",
+    });
   } catch (err) {
-    error("script.generators.fail", { sessionId, error: String(err) });
-    throw err;
+    error("sponsor.fail", { sessionId, error: String(err) });
+    sponsorBook = null;
+    sponsorCta = "";
   }
 
-  // Combine before editorial pass
-  const rawScript = [intro, main, outro].filter(Boolean).join("\n\n");
+  // ==========================================================================
+  // 3. GENERATE INTRO / MAIN / OUTRO VIA MODELS
+  // ==========================================================================
+  const modelCtx = {
+    sessionId,
+    date,
+    topic,
+    tone,
+    weatherSummary,
+    turingQuote,
+    sponsorBook,
+    sponsorCta,
+  };
+
+  const {
+    intro,
+    main,
+    outro,
+    formatted,
+  } = await generateComposedEpisodeParts(modelCtx);
+
+  const rawScript =
+    formatted || [intro, main, outro].filter(Boolean).join("\n\n");
 
   // ==========================================================================
-  // 5. EDITORIAL PASS + FINAL CLEANUP
+  // 4. EDITORIAL PASS + FINAL CLEANUP
   // ==========================================================================
   let edited = "";
   try {
@@ -123,7 +124,7 @@ export async function orchestrateEpisode(input = {}) {
   const finalFullText = cleanupFinal(edited);
 
   // ==========================================================================
-  // 6. SAVE TRANSCRIPT → R2
+  // 5. SAVE TRANSCRIPT → R2
   // ==========================================================================
   const transcriptKey = `${sessionId}.txt`;
 
@@ -131,11 +132,11 @@ export async function orchestrateEpisode(input = {}) {
     "transcripts",
     transcriptKey,
     finalFullText,
-    "text/plain"
+    "text/plain",
   );
 
   // ==========================================================================
-  // 7. CHUNK TRANSCRIPT → R2 (raw-text)
+  // 6. CHUNK TRANSCRIPT → R2 (raw-text)
   // ==========================================================================
   const rawChunks = chunkText(finalFullText);
   const preparedChunks = mainChunker(rawChunks);
@@ -147,26 +148,25 @@ export async function orchestrateEpisode(input = {}) {
     const key = `${sessionId}/chunk-${String(chunkIndex).padStart(3, "0")}.txt`;
     await uploadText("raw-text", key, chunk, "text/plain");
     chunkKeys.push(key);
-    chunkIndex++;
+    chunkIndex += 1;
   }
 
   info("script.chunks.saved", { sessionId, count: chunkKeys.length });
 
   // ==========================================================================
-  // 8. PODCAST META (title, description, keywords, artworkPrompt, episodeNumber)
+  // 7. PODCAST META (title, description, keywords, artworkPrompt, episodeNumber)
+  //    NOTE: sponsorBook / sponsorCta are NOT stored in meta (per Q5).
   // ==========================================================================
   const episodeMeta = await podcastHelper.generateEpisodeMetaLLM(
     finalFullText,
     {
       sessionId,
       date,
-      sponsorBook,
-      sponsorCta,
-    }
+    },
   );
 
   // ==========================================================================
-  // 9. FINAL COMPACT METADATA (RSS-ready)
+  // 8. FINAL COMPACT METADATA (RSS-ready)
   // ==========================================================================
   const metaKey = `${sessionId}.json`;
   const nowIso = now.toISOString();
@@ -187,14 +187,12 @@ export async function orchestrateEpisode(input = {}) {
     artworkPrompt: episodeMeta.artworkPrompt,
     episodeNumber: episodeMeta.episodeNumber,
 
-    // --- Context (minimal) ---
+    // --- Context (minimal, no sponsor in persisted meta) ---
     weatherSummary,
     turingQuote,
-    sponsorBook,
-    sponsorCta,
 
     createdAt: nowIso,
-    updatedAt: nowIso
+    updatedAt: nowIso,
   };
 
   await putJson("meta", metaKey, meta);
@@ -212,7 +210,7 @@ export async function orchestrateEpisode(input = {}) {
     transcriptKey,
     transcriptUrl,
     metaKey,
-    meta
+    meta,
   };
 }
 
