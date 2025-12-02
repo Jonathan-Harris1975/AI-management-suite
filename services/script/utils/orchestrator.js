@@ -1,3 +1,7 @@
+// ====================================================================
+// orchestrator.js 
+// ====================================================================
+
 import { info, error, debug } from "#logger.js";
 import models from "./models.js";
 import { composeEpisode } from "../routes/composeScript.js";
@@ -13,21 +17,19 @@ const {
   generateIntro,
   generateMain,
   generateOutro,
-  generateComposedEpisode,
 } = models;
 
+// Cleanup after a few minutes to avoid session buildup
 function scheduleCleanup(sessionId) {
   setTimeout(async () => {
     try {
       sessionCache.clearSession(sessionId);
-    } catch (_) {
-      // ignore cleanup errors
-    }
+    } catch (_) {}
   }, 4 * 60 * 1000);
 }
 
 export async function orchestrateScript(input) {
-  // Allow both legacy string sessionId and richer session meta object
+  // Support both legacy string version and meta-object version
   const sessionMeta =
     typeof input === "string"
       ? { sessionId: input }
@@ -45,12 +47,16 @@ export async function orchestrateScript(input) {
   debug("🧠 Orchestrate Script: start", { sessionId: sid });
 
   try {
-    // Core sections
+    // ============================================================
+    // 1) Generate intro, main, outro (using updated Option A models)
+    // ============================================================
     const intro = await generateIntro(sid);
     const main = await generateMain(sid);
     const outro = await generateOutro(sid);
 
-    // High-level episode composition (may add structure markers)
+    // ============================================================
+    // 2) High-level composition pass (structure, ordering, cleanup)
+    // ============================================================
     const composed = await composeEpisode({
       sessionId: sid,
       intro,
@@ -61,13 +67,17 @@ export async function orchestrateScript(input) {
     const initialFullText =
       composed?.fullText ?? [intro, main, outro].join("\n\n");
 
-    // Optional editorial pass (LLM-based, guarded by env flag)
+    // ============================================================
+    // 3) Editorial Pass (humanisation, variety, tone consistency)
+    // ============================================================
     const editorialText = await runEditorialPass(
       { sessionId: sid, ...sessionMeta },
       initialFullText
     );
 
-    // Lightweight formatting + humanisation (local, not LLM)
+    // ============================================================
+    // 4) Local formatting pass (punctuation, spacing, flow polish)
+    // ============================================================
     const formattedText = editAndFormat(editorialText || initialFullText);
 
     const finalFullText =
@@ -75,7 +85,9 @@ export async function orchestrateScript(input) {
       (editorialText && editorialText.trim()) ||
       initialFullText;
 
-    // Chunk for TTS + R2 upload (raw text)
+    // ============================================================
+    // 5) Chunk for TTS + upload to R2
+    // ============================================================
     const chunks = chunkText(finalFullText);
     const uploadedChunks = [];
 
@@ -85,10 +97,14 @@ export async function orchestrateScript(input) {
       uploadedChunks.push(key);
     }
 
-    // Full transcript upload
+    // ============================================================
+    // 6) Store full transcript
+    // ============================================================
     await uploadText("transcript", `${sid}.txt`, finalFullText, "text/plain");
 
-    // LLM-driven metadata (title, description, SEO, artwork prompt, episode number)
+    // ============================================================
+    // 7) Metadata (title, SEO, artwork prompt, episode number)
+    // ============================================================
     let meta = await generateEpisodeMetaLLM(finalFullText, {
       sessionId: sid,
       date: sessionMeta.date,
@@ -105,15 +121,20 @@ export async function orchestrateScript(input) {
       "application/json"
     );
 
+    // ============================================================
+    // 8) Session cleanup (optional)
+    // ============================================================
     scheduleCleanup(sid);
 
     info("✅ Script orchestration complete");
+
     return {
       ...composed,
       fullText: finalFullText,
       chunks: uploadedChunks,
       metadata: meta,
     };
+
   } catch (err) {
     error("💥 Script orchestration failed", {
       sessionId: sid,
