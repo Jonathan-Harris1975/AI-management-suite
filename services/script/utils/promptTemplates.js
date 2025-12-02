@@ -1,8 +1,7 @@
 // services/script/utils/promptTemplates.js
 
 import { buildPersona, getClosingTagline } from "./toneSetter.js";
-import getSponsor from "./getSponsor.js";
-import { calculateDuration } from "./durationCalculator.js";
+import { calculateDuration } from "./durationCalculator.js"; // { calculateDuration } export is correct
 
 function weekdayFromDateStr(dateStr) {
   try {
@@ -62,10 +61,12 @@ export function buildMainPrompt({
   articles,
 }) {
   const persona = buildPersona(sessionId);
-  const duration = calculateDuration(articles || []);
+  const list = Array.isArray(articles) ? articles : [];
+
+  const { targetMins } = calculateDuration("main", sessionId, list.length);
 
   const articleLines =
-    (articles || [])
+    list
       .slice(0, 6)
       .map(
         (a, i) =>
@@ -82,7 +83,7 @@ Here are the candidate stories and links for context:
 ${articleLines}
 
 Guidelines:
-- Aim for about ${duration} minutes of spoken content in total.
+- Aim for about ${targetMins} minutes of spoken content in total.
 - Group related stories together so it feels like a coherent narrative.
 - For each story you choose to cover:
   - Explain what happened in plain English.
@@ -94,18 +95,30 @@ Guidelines:
 `.trim();
 }
 
-export async function buildOutroPrompt({
+export function buildOutroPrompt({
   sessionId,
+  sponsorBook,
+  sponsorCta,
 }) {
   const persona = buildPersona(sessionId);
   const closingTagline = getClosingTagline();
-  const sponsor = await getSponsor();
-  const book = sponsor?.book;
-  const spokenLink = sponsor?.spokenLink || "just search for Jonathan Harris on Amazon";
 
-  const sponsorLine = book
-    ? `Give a short, sincere promo for the book "${book.title}". Mention that listeners can find it by ${spokenLink}.`
-    : "Give a short, sincere one-line plug for Jonathan Harris's AI ebooks on Amazon.";
+  let sponsorLine;
+
+  if (sponsorBook && sponsorBook.title) {
+    const safeTitle = sponsorBook.title;
+    const safeCta = sponsorCta || "";
+
+    sponsorLine = `
+Give a short, sincere promo for the book "${safeTitle}".
+Paraphrase this call-to-action in natural spoken English, without sounding robotic:
+"${safeCta}"
+Do NOT spell out "https" or any full URL protocol; keep it listener-friendly and conversational.
+`.trim();
+  } else {
+    sponsorLine =
+      "Give a short, sincere one-line plug for Jonathan Harris's AI ebooks on Amazon. Keep it natural and conversational.";
+  }
 
   return `
 ${persona}
@@ -125,3 +138,9 @@ Plain text only.
 No headings, no bullet points, no sound cues.
 `.trim();
 }
+
+export default {
+  buildIntroPrompt,
+  buildMainPrompt,
+  buildOutroPrompt,
+};
