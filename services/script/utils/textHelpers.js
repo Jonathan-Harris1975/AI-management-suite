@@ -1,69 +1,67 @@
 // ============================================================
 // 🧠 Text Helpers — AI Podcast Suite
 // ============================================================
+// - Safe preprocessing for transcripts
+// - Consistent keyword formatting
+// - Normalisation for LLM metadata extraction
+// - Provides extractMainContent (required by podcastHelper.js)
+// ============================================================
 
 /**
- * Normalise a transcript:
- * - collapse repeated whitespace
- * - normalise quotes
- * - trim outer space
+ * Clean transcript content:
+ * - remove excessive spacing
+ * - normalize curly quotes
+ * - trim edges
  */
 export function cleanTranscript(text) {
   if (!text || typeof text !== "string") return "";
 
-  let out = text.replace(/\r\n/g, "\n");
-
-  // normalise quotes
-  out = out
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'");
-
-  // collapse spaces
-  out = out.replace(/[ \t]+/g, " ");
-
-  // collapse 3+ newlines to 2
-  out = out.replace(/\n{3,}/g, "\n\n");
-
-  return out.trim();
-}
-
-/**
- * Extract main content for metadata / LLM passes:
- * - remove line breaks
- * - collapse whitespace
- */
-export function extractMainContent(text) {
-  if (!text || typeof text !== "string") return "";
   return text
-    .replace(/[\r\n]+/g, " ")
-    .replace(/\s{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")     // collapse >2 newlines
+    .replace(/ {2,}/g, " ")         // collapse double spaces
+    .replace(/[“”]/g, '"')          // normalize double quotes
+    .replace(/[’]/g, "'")           // normalize single quotes
     .trim();
 }
 
 /**
- * Final TTS-friendly cleanup:
- * - replace isolated “AI” with “artificial intelligence”
- * - remove markdown artifacts and bullets
- * - remove obvious stage directions
+ * Format an LLM-generated title into clean Title Case
  */
-export function cleanupFinal(text) {
+export function formatTitle(title) {
+  if (!title || typeof title !== "string") return "";
+
+  return title
+    .replace(/\b\w/g, char => char.toUpperCase())
+    .trim();
+}
+
+/**
+ * Deduplicate, normalize, and alphabetize keywords
+ */
+export function normaliseKeywords(raw) {
+  if (!raw || typeof raw !== "string") return [];
+
+  const set = new Set(
+    raw
+      .split(",")
+      .map(k => k.trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  return Array.from(set).sort();
+}
+
+/**
+ * Extract main content for metadata generation:
+ * - removes excessive whitespace
+ * - collapses line breaks
+ * - ensures clean input for LLM prompts
+ */
+export function extractMainContent(text) {
   if (!text || typeof text !== "string") return "";
 
-  let out = cleanTranscript(text);
-
-  // AI → artificial intelligence (word boundaries)
-  out = out.replace(/\bAI\b/g, "artificial intelligence");
-
-  // strip markdown bullets / headings
-  out = out.replace(/^[\-\*\+]\s+/gm, "");
-  out = out.replace(/^#+\s+/gm, "");
-
-  // remove simple stage directions in brackets
-  out = out.replace(/\[(music|applause|beat|pause|intro|outro)[^\]]*\]/gi, "");
-
-  // collapse leftover multiple spaces
-  out = out.replace(/\s{2,}/g, " ");
-
-  return out.trim();
-                    }
-
+  return text
+    .replace(/[\r\n]+/g, " ")   // unify and collapse newlines
+    .replace(/\s{2,}/g, " ")    // collapse extra spacing
+    .trim();
+}

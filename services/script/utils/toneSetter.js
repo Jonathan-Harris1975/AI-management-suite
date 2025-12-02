@@ -1,34 +1,51 @@
 // ============================================================
 // 🧠 Tone Setter — Persona Builder for Episodes
 // ============================================================
+//
+// Provides a dynamic persona description with consistent tone
+// across intro, main, and outro for each episode.
+// ============================================================
 
 const tones = [
-  "sarcastic",
-  "witty",
-  "dry",
-  "skeptical",
-  "quietly optimistic",
-  "casual",
-  "playful",
-  "no-nonsense",
+  "Sarcastic",
+  "Witty",
+  "Dry as hell",
+  "Skeptical",
+  "Optimistic",
+  "Casual",
+  "Playful",
+  "Bold",
+  "Cautious",
+  "Confident",
+  "Inspirational",
+  "Friendly",
+  "Humorous",
 ];
 
-function getToneForSession(sessionId) {
-  const id = String(sessionId || "");
-  if (!id) return "witty";
-  const hash = [...id].reduce((acc, c) => acc + c.charCodeAt(0), 0);
+/**
+ * Random tone generator (used as fallback)
+ */
+export function getRandomTone() {
+  const idx = Math.floor(Math.random() * tones.length);
+  return tones[idx];
+}
+
+/**
+ * Deterministic tone selector — same session → same tone
+ */
+export function getToneForSession(sessionId) {
+  if (!sessionId) return getRandomTone();
+  const hash = [...String(sessionId)].reduce((acc, c) => acc + c.charCodeAt(0), 0);
   return tones[hash % tones.length];
 }
 
+/**
+ * Build persona text block for an episode
+ */
 export function buildPersona(sessionId) {
   const tone = getToneForSession(sessionId);
   return `You are Jonathan Harris — a British Gen X host of the podcast "Turing’s Torch: AI Weekly".
-Your tone is ${tone}, intelligent, and conversational.
-You cut through hype and nonsense but stay fair and grounded.
-You never include stage directions, sound cues, section headings, or bullet points.
-Everything you write must sound like natural spoken dialogue.`;
-}
-
-export function getClosingTagline() {
-  return "This is Turing’s Torch: keeping you just ahead of the machines.";
+Your persona is ${tone.toLowerCase()}, intelligent, and conversational.
+You never include stage directions, sound cues, or formatting.
+Your entire narration must read like natural spoken text only.`;
 }

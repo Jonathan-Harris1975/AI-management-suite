@@ -1,169 +1,158 @@
-// ============================================================================
 // services/script/utils/models.js
-// ----------------------------------------------------------------------------
-// High-level LLM calls for intro / main / outro / composed scripts.
-// Uses ai-service resilientRequest + promptTemplates + toneSetter.
-// ============================================================================
+// ============================================================
+// ✨ Generates Intro/Main/Outro → edits → chunked text files
+//   stored in raw-text bucket with public URLs for TTS
+// ============================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-import { extractMainContent } from "./textHelpers.js";
-import {
-  buildIntroPrompt,
-  buildMainPrompt,
-  buildOutroPrompt,
-} from "./promptTemplates.js";
+import { getIntroPrompt, getMainPrompt, getOutroPromptFull } from "./promptTemplates.js";
 import fetchFeedArticles from "./fetchFeeds.js";
-import { info } from "#logger.js";
+import { putText, putJson, buildPublicUrl } from "../../shared/utils/r2-client.js";
+import { cleanTranscript } from "./textHelpers.js";
+import { calculateDuration } from "./durationCalculator.js";
+import { getWeatherSummary } from "./getWeatherSummary.js";
+import getTuringQuote from "./getTuringQuote.js";
+import editAndFormat from "./editAndFormat.js";
+import chunkText from "./chunkText.js";
+import { generateMainLongform } from "./mainChunker.js";
+import * as sessionCache from "./sessionCache.js";
+import { generateEpisodeMetaLLM } from "./podcastHelper.js";
+import { info, error, debug } from "#logger.js";
 
-function normaliseContext(input = {}) {
-  if (typeof input === "string") {
-    return { sessionId: input };
+function toPlainText(s) {
+  if (!s) return "";
+  return String(s)
+    .replace(/\[(?:music|sfx|cue|intro|outro|.*?)]/gi, "")
+    .replace(/\((?:music|sfx|cue|intro|outro|.*?)]?\)/gi, "")
+    .replace(/\*{1,3}/g, "")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function sanitizeOutput(s) {
+  return cleanTranscript(toPlainText(s));
+}
+
+function normalizeSessionMeta(sessionIdLike) {
+  if (typeof sessionIdLike === "string") {
+    const m = sessionIdLike.match(/\d{4}-\d{2}-\d{2}/);
+    return { sessionId: sessionIdLike, date: m ? m[0] : undefined };
   }
-  const now = new Date();
-  return {
-    sessionId: input.sessionId || `TT-${now.toISOString().slice(0, 10)}`,
-    date: input.date || now.toISOString().slice(0, 10),
-    topic: input.topic || null,
-    tone: input.tone || {},
-
-    weatherSummary: input.weatherSummary || "",
-    turingQuote: input.turingQuote || "",
-
-    sponsorBook: input.sponsorBook || null,
-    sponsorCta: input.sponsorCta || "",
-  };
+  if (typeof sessionIdLike === "object" && sessionIdLike) {
+    return { sessionId: sessionIdLike.sessionId || "", date: sessionIdLike.date };
+  }
+  return { sessionId: "unknown", date: undefined };
 }
 
-async function callRoute(
-  routeName,
-  { sessionId, systemContent, userContent, maxTokens = 1500 },
-) {
-  const messages = [{ role: "system", content: systemContent }];
-  if (userContent) {
-    messages.push({ role: "user", content: userContent });
+export async function generateIntro(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
+  const weatherSummary = await getWeatherSummary();
+  const turingQuote = await getTuringQuote();
+  const prompt = getIntroPrompt({ weatherSummary, turingQuote, sessionMeta });
+
+  const res = await resilientRequest("scriptIntro", {
+    sessionId: sessionMeta,
+    section: "intro",
+    messages: [{ role: "system", content: prompt }],
+  });
+
+  const cleaned = sanitizeOutput(res);
+  await sessionCache.storeTempPart(sessionMeta, "intro", cleaned);
+  return cleaned;
+}
+
+export async function generateMain(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
+  const { items, feedUrl } = await fetchFeedArticles();
+
+  const articles = (items || [])
+    .map((it) => ({
+      title: it?.title?.trim() || "",
+      summary: it?.summary?.trim() || it?.contentSnippet?.trim() || it?.description?.trim() || "",
+      link: it?.link || it?.url || "",
+    }))
+    .filter((a) => a.title || a.summary);
+
+  const { mainSeconds, targetMins } = calculateDuration("main", sessionMeta, articles.length);
+  debug("Main script generation", { 
+    targetMinutes: targetMins, 
+    articles: articles.length 
+  });
+
+  const combined = await generateMainLongform(sessionMeta, articles, mainSeconds);
+  await sessionCache.storeTempPart(sessionMeta, "main", combined);
+  return sanitizeOutput(combined);
+}
+
+export async function generateOutro(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
+  const prompt = await getOutroPromptFull(sessionMeta);
+
+  const res = await resilientRequest("scriptOutro", {
+    sessionId: sessionMeta,
+    section: "outro",
+    messages: [{ role: "system", content: prompt }],
+  });
+
+  const cleaned = sanitizeOutput(res);
+  await sessionCache.storeTempPart(sessionMeta, "outro", cleaned);
+  return cleaned;
+}
+
+export async function generateComposedEpisode(sessionIdLike) {
+  const sessionMeta = normalizeSessionMeta(sessionIdLike);
+  const id = sessionMeta.sessionId || `TT-${Date.now()}`;
+
+  const intro = (await sessionCache.getTempPart(sessionMeta, "intro")) || await generateIntro(sessionMeta);
+  const main = (await sessionCache.getTempPart(sessionMeta, "main")) || await generateMain(sessionMeta);
+  const outro = (await sessionCache.getTempPart(sessionMeta, "outro")) || await generateOutro(sessionMeta);
+
+  const rawTranscript = [intro, "", main, "", outro].join("\n");
+  const edited = editAndFormat(rawTranscript);
+
+  const maxBytes = Number(process.env.MAX_SSML_CHUNK_BYTES || 4200);
+  const byteLen = (s) => Buffer.byteLength(s, "utf8");
+  let ttsChunks = chunkText(edited, maxBytes);
+  
+  if (ttsChunks.length <= 1 && byteLen(edited) > maxBytes) {
+    debug("Force splitting large chunk", { reason: "single-chunk-too-large" });
+    const out = [];
+    let remaining = edited.trim();
+    while (Buffer.byteLength(remaining, "utf8") > maxBytes) {
+      const approx = Math.floor(maxBytes * 0.9);
+      const slice = remaining.slice(0, approx);
+      const cut = slice.lastIndexOf(" ");
+      const chunk = slice.slice(0, cut > 200 ? cut : approx);
+      out.push(chunk.trim());
+      remaining = remaining.slice(chunk.length).trim();
+    }
+    if (remaining) out.push(remaining);
+    ttsChunks = out;
   }
 
-  const res = await resilientRequest({
-    routeName,
-    sessionId,
-    messages,
-    max_tokens: maxTokens,
-  });
+  await putText("transcripts", `${id}.txt`, edited);
 
-  return extractMainContent(res?.content || res || "");
-}
-
-// ---------------------------------------------------------------------------
-// INTRO
-// ---------------------------------------------------------------------------
-export async function generateIntro(rawCtx = {}) {
-  const ctx = normaliseContext(rawCtx);
-
-  const systemContent = buildIntroPrompt({
-    sessionId: ctx.sessionId,
-    date: ctx.date,
-    weatherSummary: ctx.weatherSummary,
-    turingQuote: ctx.turingQuote,
-  });
-
-  return callRoute("scriptIntro", {
-    sessionId: ctx.sessionId,
-    systemContent,
-    userContent: "",
-    maxTokens: 1000,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// MAIN
-// ---------------------------------------------------------------------------
-async function generateMainPart(rawCtx, index) {
-  const ctx = normaliseContext(rawCtx);
-
-  // pull feed items once per episode (fetchFeedArticles already encapsulates RSS parsing)
-  const { items: articles = [] } = await fetchFeedArticles();
-
-  const systemContent = buildMainPrompt({
-    sessionId: ctx.sessionId,
-    articles,
-  });
-
-  const userContent = `
-You are now writing main segment #${index}.
-Keep tone and pacing consistent with the rest of the episode.
-`.trim();
-
-  return callRoute(`scriptMain-${index}`, {
-    sessionId: ctx.sessionId,
-    systemContent,
-    userContent,
-    maxTokens: 1400,
-  });
-}
-
-export async function generateMain(rawCtx = {}) {
-  const parts = [];
-  for (let i = 1; i <= 6; i += 1) {
-    const part = await generateMainPart(rawCtx, i);
-    if (part) parts.push(part);
+  const files = [];
+  for (let i = 0; i < ttsChunks.length; i++) {
+    const name = `${id}/chunk-${String(i + 1).padStart(3, "0")}.txt`;
+    const body = ttsChunks[i];
+    await putText("rawtext", name, body);
+    const url = buildPublicUrl("rawtext", name);
+    files.push({ index: i + 1, bytes: byteLen(body), url });
   }
-  return parts.join("\n\n");
+
+  await putJson("meta", `${id}-tts.json`, { chunks: files, total: files.length });
+
+  const meta = await generateEpisodeMetaLLM(edited, sessionMeta);
+  await putJson("meta", `${id}-meta.json`, meta);
+  info("📃 Script orchestration complete"),
+  debug("📃 Script orchestration complete", { 
+    sessionId: id, 
+    chunks: files.length 
+  });
+  
+  return { transcript: edited, chunks: files, meta };
 }
 
-// ---------------------------------------------------------------------------
-// OUTRO
-// ---------------------------------------------------------------------------
-export async function generateOutro(rawCtx = {}) {
-  const ctx = normaliseContext(rawCtx);
-
-  const systemContent = buildOutroPrompt({
-    sessionId: ctx.sessionId,
-    sponsorBook: ctx.sponsorBook,
-    sponsorCta: ctx.sponsorCta,
-  });
-
-  return callRoute("scriptOutro", {
-    sessionId: ctx.sessionId,
-    systemContent,
-    userContent: "",
-    maxTokens: 900,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// COMPOSED EPISODE
-// ---------------------------------------------------------------------------
-export async function generateComposedEpisodeParts(rawCtx = {}) {
-  const ctx = normaliseContext(rawCtx);
-
-  info("script.models.compose.start", {
-    sessionId: ctx.sessionId,
-    date: ctx.date,
-  });
-
-  const intro = await generateIntro(ctx);
-  const main = await generateMain(ctx);
-  const outro = await generateOutro(ctx);
-
-  const formatted = [intro, main, outro].filter(Boolean).join("\n\n");
-
-  info("script.models.compose.complete", {
-    sessionId: ctx.sessionId,
-    totalLength: formatted.length,
-  });
-
-  return {
-    intro,
-    main,
-    outro,
-    formatted,
-    callLog: [], // ai-service already logs per-route usage
-  };
-}
-
-export default {
-  generateIntro,
-  generateMain,
-  generateOutro,
-  generateComposedEpisodeParts,
-};
+export default { generateIntro, generateMain, generateOutro, generateComposedEpisode };

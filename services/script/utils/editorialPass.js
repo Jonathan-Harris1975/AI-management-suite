@@ -1,57 +1,71 @@
 // ====================================================================
-// editorialPass.js – Light polish for full script
+// editorialPass.js – Full Production Version
+// ====================================================================
+// - Light polish for the full script (intro + main + outro)
+// - Conversational British tone
+// - Removes stiff/essay-like structures
+// - Adds spoken-English pacing
 // ====================================================================
 
 import { resilientRequest } from "../../shared/utils/ai-service.js";
-import { info, error } from "#logger.js";
-import { extractMainContent } from "./textHelpers.js";
+import { info, warn, error } from "#logger.js";
 
-function buildEditorialPrompt(scriptText) {
+function buildEnhancedPrompt(scriptText) {
   return `
-You are editing a full podcast script for Turing’s Torch: AI Weekly.
+You are a human editor polishing a spoken podcast script.
 
-Goals:
-- Keep the British Gen-X tone: dry, witty, but never cruel.
-- Improve pacing, clarity, and flow.
-- Remove repetition and over-formal phrasing.
-- Keep it 100% TTS-friendly: no headings, no bullet points, no stage directions.
-- Do NOT invent new stories or facts; only improve how the existing text is written.
+GOALS:
+- Make the script sound naturally spoken, not written.
+- Maintain the British Gen-X tone: dry, wry, understated.
+- Improve flow, pacing, and clarity.
+- Remove stiff, essay-like sentences.
+- Avoid repetitive phrasing.
+- Keep meaning EXACT and structure identical.
+- Do NOT add new facts or change order.
 
-Return ONLY the edited script as plain text.
-Here is the script:
+TTS RULES:
+- Break up overly long sentences.
+- Keep paragraphs short and natural.
+- Remove robotic connectors ("in addition", "moreover", etc.).
+- No markdown, no lists, no formatting — plain text ONLY.
 
+SCRIPT TO EDIT:
 ${scriptText}
+
+Return ONLY the revised script as plain text.
 `.trim();
 }
 
-export async function runEditorialPass(sessionId, scriptText) {
-  if (!scriptText || typeof scriptText !== "string") {
-    return "";
+export async function runEditorialPass(meta = {}, scriptText = "") {
+  if (!scriptText) {
+    warn("editorialPass.skip.empty");
+    return scriptText;
   }
 
-  try {
-    const prompt = buildEditorialPrompt(scriptText);
+  const sessionId = meta.sessionId || "session";
 
-    const res = await resilientRequest({
-      routeName: "editorialPass",
+  try {
+    const prompt = buildEnhancedPrompt(scriptText);
+    const edited = await resilientRequest("editorial-pass", {
       sessionId,
-      messages: [
-        { role: "system", content: "You are a human podcast script editor." },
-        { role: "user", content: prompt },
-      ],
-      max_tokens: 4000,
+      section: "editorial-pass",
+      messages: [{ role: "user", content: prompt }]
     });
 
-    const edited = extractMainContent(res?.content || res || scriptText);
+    if (!edited) {
+      warn("editorialPass.emptyResponse", { sessionId });
+      return scriptText;
+    }
+
     info("editorialPass.complete", {
       sessionId,
       original: scriptText.length,
-      edited: edited.length,
+      edited: edited.length
     });
 
     return edited.trim();
   } catch (err) {
-    error("editorialPass.fail", { sessionId, error: String(err) });
+    error("editorialPass.fail", { sessionId, err: String(err) });
     return scriptText;
   }
 }
