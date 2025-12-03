@@ -200,7 +200,7 @@ file '${outro}'
 
   const finalBuffer = fs.readFileSync(final);
 
-  const podcastKey = `${sessionId}_podcast.mp3`;
+  const podcastKey = `${sessionId}.mp3`;
   const podcastUrl = `${process.env.R2_PUBLIC_BASE_URL_PODCAST}/${podcastKey}`;
 
   await safePutObject("podcast", podcastKey, finalBuffer, "audio/mpeg");
