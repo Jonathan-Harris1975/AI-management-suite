@@ -32,10 +32,10 @@ export function getIntroPrompt({ weatherSummary, turingQuote, sessionMeta } = {}
   return `
 You are ${persona.host}, hosting "${persona.show}".
 
-Write a tight, confident radio-style INTRO with a British Gen-X tone:
+Write a tight, confident radio-style INTRO with a dry, confident British tone:
 - Subtle nod to the weather using: "${weatherSummary}" — keep it wry and passing.
 - Smoothly introduce this Alan Turing quote: "${turingQuote}" and link it to the mission of demystifying artificial intelligence.
-- Maintain a dry BBC/WIRED editorial energy — sharp, never theatrical.
+- Maintain a BBC/WIRED editorial energy — sharp, never theatrical.
 - No metaphors about "journeys", no stage cues.
 
 End EXACTLY with this tagline:
@@ -81,7 +81,7 @@ STRUCTURE:
 - Then develop the idea in a few short, spoken-language paragraphs.
 - End with a natural, human-sounding closing line that feels complete but not final for the entire show.
 
-ARTICLES (for your eyes only – never reference them by number):
+ARTICLES (for your eyes only – never reference them directly by number or position):
 ${articlePreview}
 
 Return ONLY the editorial segment as plain text.
@@ -108,7 +108,7 @@ export function getOutroPromptFull(book, sessionMeta) {
   const safeTitle = book?.title || "one of my artificial intelligence ebooks";
 
   return `
-Write a reflective OUTRO for "${persona.show}" in a British Gen-X podcast tone.
+Write a reflective OUTRO for "${persona.show}" in a British radio tone with a Gen-X vibe that is never explicitly named.
 
 Start with a single reflective line that ties together the feel of this week's themes.
 
@@ -126,4 +126,3 @@ Plain text only.
 }
 
 export default { getIntroPrompt, getMainPrompt, getOutroPromptFull };
-

@@ -1,4 +1,3 @@
-// services/script/utils/models.js
 // ============================================================
 // ✨ Generates Intro/Main/Outro → edits → chunked text files
 //   stored in raw-text bucket with public URLs for TTS
@@ -67,7 +66,7 @@ export async function generateIntro(sessionIdLike) {
   return cleaned;
 }
 
-// MAIN – Option A: prompt-driven editorial, longform as fallback
+// MAIN – Longform via batching + synthesis (Option B)
 export async function generateMain(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
   const { items } = await fetchFeedArticles();
@@ -90,37 +89,22 @@ export async function generateMain(sessionIdLike) {
     articles.length
   );
 
-  debug("Main script generation (Option A)", {
+  debug("Main script generation (Longform Batching)", {
     articles: articles.length,
     targetMinutes: targetMins,
     mainSeconds,
   });
 
-  // Primary: single, coherent editorial using the new prompt
-  const mainPrompt = getMainPrompt({
-    articles,
-    sessionMeta,
-  });
-
-  const res = await resilientRequest("scriptMain", {
-    sessionId: sessionMeta,
-    section: "main",
-    messages: [{ role: "system", content: mainPrompt }],
-  });
-
-  let cleaned = sanitizeOutput(res);
-  const wordCount = cleaned ? cleaned.split(/\s+/).length : 0;
-
-  // If the main section comes out too thin, fall back to longform generator
-  if (!cleaned || wordCount < 250) {
-    debug("Main section too short; falling back to longform generator", {
-      wordCount,
+  if (!articles.length) {
+    debug("No articles available for MAIN – returning empty main section", {
+      sessionId: sessionMeta.sessionId,
     });
-
-    const combined = await generateMainLongform(sessionMeta, articles, mainSeconds);
-    await sessionCache.storeTempPart(sessionMeta, "main", combined);
-    return sanitizeOutput(combined);
+    await sessionCache.storeTempPart(sessionMeta, "main", "");
+    return "";
   }
+
+  const combined = await generateMainLongform(sessionMeta, articles, mainSeconds);
+  const cleaned = sanitizeOutput(combined);
 
   await sessionCache.storeTempPart(sessionMeta, "main", cleaned);
   return cleaned;
@@ -130,9 +114,7 @@ export async function generateMain(sessionIdLike) {
 export async function generateOutro(sessionIdLike) {
   const sessionMeta = normalizeSessionMeta(sessionIdLike);
 
-  // Load a sponsor book from books.json (or fallback)
   const book = getSponsor();
-
   const prompt = getOutroPromptFull(book, sessionMeta);
 
   const res = await resilientRequest("scriptOutro", {

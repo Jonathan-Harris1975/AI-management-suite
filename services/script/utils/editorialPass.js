@@ -2,8 +2,7 @@
 // editorialPass.js – Human-Style Production Version
 // ====================================================================
 // - Transforms AI-generated text into natural human writing
-// - Bypasses AI detection through natural variation and imperfection
-// - Maintains conversational British Gen-X tone
+// - Maintains conversational British radio Gen-X vibe (never named)
 // - Preserves meaning while introducing human writing patterns
 // ====================================================================
 
@@ -27,20 +26,22 @@ CRITICAL ANTI-DETECTION REQUIREMENTS:
 - Mix formal and informal vocabulary unpredictably
 
 HUMAN SPEECH PATTERNS:
-- People repeat themselves slightly when emphasizing points
-- Thoughts sometimes circle back or digress briefly
-- Natural speech has rhythmic variation, not uniform structure
-- Speakers use metaphors and comparisons spontaneously
-- Real conversations include throwaway phrases and asides
+- People repeat themselves slightly when emphasising points — but avoid thematic repetition or rehashing
+- Thoughts sometimes digress briefly, but never loop back to earlier topics in a way that re-explains the same idea
+- Natural rhythm with varied pacing
+- Occasional metaphors and spontaneous comparisons
+- Throwaway asides used sparingly
 - Tone shifts naturally between serious and lighter moments
+- Maintain clarity: remove accidental restatements of the same idea
 
-BRITISH GEN-X VOICE:
-- Dry wit with occasional sarcasm
+BRITISH RADIO TONE (GEN-X VIBE WITHOUT EVER NAMING IT):
+- Dry wit with that familiar Gen-X edge — but never explicitly mention generations
 - Understated rather than enthusiastic
-- Self-deprecating humor where appropriate
-- Cultural references feel organic, not forced
-- Skeptical but not cynical
-- Conversational without being overly casual
+- Light, effortless sarcasm used naturally
+- Cultural references can appear, but subtly and without labelling them
+- Sceptical, observant, world-weary humour
+- Conversational but articulate, like a seasoned broadcaster who’s seen a few cycles of hype
+- Maintain the vibe, never the label
 
 AUTHENTICITY MARKERS:
 - Occasionally begin consecutive sentences differently than expected
@@ -53,11 +54,12 @@ AUTHENTICITY MARKERS:
 
 ABSOLUTE RULES:
 - Preserve ALL factual content and core meaning
-- Maintain the original structure and flow
+- Maintain the original structure and flow except where very small changes help intros/outros blend more naturally
 - Keep it suitable for text-to-speech (no complex formatting)
 - Output plain text only - no markdown, lists, or special characters
-- Do NOT add new information or change the order of topics
+- Do NOT add new information or change the order of topics unless required for tiny narrative smoothing
 - Remove any obviously AI phrases like "delve into", "it's important to note", "furthermore"
+- Do NOT introduce repeated ideas, themes, or re-explanations. If the script revisits a topic, smooth it into one coherent passage and remove duplication.
 
 Transform this script to sound like it was written by a real British podcaster who's articulate but naturally imperfect:
 
@@ -77,13 +79,12 @@ export async function runEditorialPass(meta = {}, scriptText = "") {
 
   try {
     const prompt = buildHumanizedPrompt(scriptText);
-    
-    // Multiple enhancement passes for maximum humanization
+
     let enhanced = await resilientRequest("editorial-pass", {
       sessionId,
       section: "editorial-humanization",
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.9  // Higher temperature for more natural variation
+      temperature: 0.9
     });
 
     if (!enhanced) {
@@ -91,7 +92,6 @@ export async function runEditorialPass(meta = {}, scriptText = "") {
       return scriptText;
     }
 
-    // Optional second pass for variety check
     if (meta.doublePassEnabled) {
       const varietyPrompt = `
 Review this script and ensure maximum natural variation:
@@ -135,20 +135,17 @@ Return the final version as plain text.
 
 // Helper function to add post-processing humanization
 function applyHumanizationLayer(text) {
-  // Add natural spacing variations
-  let humanized = text.replace(/\n{3,}/g, '\n\n');
-  
-  // Ensure varied paragraph lengths by occasionally combining or splitting
-  const paragraphs = humanized.split('\n\n');
-  
-  // Natural variation in spacing (occasionally three breaks for dramatic pause)
+  let humanized = text.replace(/\n{3,}/g, "\n\n");
+
+  const paragraphs = humanized.split("\n\n");
+
   for (let i = 0; i < paragraphs.length - 1; i++) {
-    if (Math.random() < 0.15) {  // 15% chance of dramatic pause
-      paragraphs[i] = paragraphs[i] + '\n';
+    if (Math.random() < 0.15) {
+      paragraphs[i] = paragraphs[i] + "\n";
     }
   }
-  
-  return paragraphs.join('\n\n');
+
+  return paragraphs.join("\n\n");
 }
 
 export default { runEditorialPass };

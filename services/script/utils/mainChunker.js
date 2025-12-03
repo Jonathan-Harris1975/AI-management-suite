@@ -64,11 +64,9 @@ Now write the FINAL MAIN SECTION as a single continuous monologue, plain text on
 export async function generateMainLongform(sessionMeta, articles, totalMainSeconds) {
   if (!articles?.length) return "";
 
-  // ✅ Batch size = 1 (your choice)
   const groupSize = 1;
   const groups = chunk(articles, groupSize);
 
-  // Basic per-group target seconds, in case we want to hint length later
   const buffer = Math.min(180, Math.round((totalMainSeconds || 1800) * 0.05));
   const perGroupSeconds = Math.max(
     240,
@@ -84,7 +82,6 @@ export async function generateMainLongform(sessionMeta, articles, totalMainSecon
 
   const parts = [];
 
-  // 1) Per-article mini editorials
   for (let i = 0; i < groups.length; i++) {
     const prompt = getMainPrompt({
       sessionMeta,
@@ -103,14 +100,9 @@ export async function generateMainLongform(sessionMeta, articles, totalMainSecon
     const cleaned = cleanTranscript(String(res || ""));
     parts.push(cleaned);
 
-    await sessionCache.storeTempPart(
-      sessionMeta,
-      `main-chunk-${i + 1}`,
-      cleaned
-    );
+    await sessionCache.storeTempPart(sessionMeta, `main-chunk-${i + 1}`, cleaned);
   }
 
-  // 2) Final synthesis into one long-form MAIN
   const synthesisPrompt = buildMainSynthesisPrompt(
     sessionMeta,
     parts,
