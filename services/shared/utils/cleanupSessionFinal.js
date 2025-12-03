@@ -15,12 +15,8 @@ const ALL_BUCKETS = [
   "rawtext",
   "merged",
   "chunks",
-  "podcast",
-  "transcripts",
-  "art",
   "raw-text",
-  "edited-audio",
-  "metasystem"
+  "edited-audio"
 ];
 
 export async function finalCleanupSession(sessionId) {
