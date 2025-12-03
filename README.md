@@ -1,9 +1,5 @@
 # 📘 Project README
 
-A fully polished, GitHub‑ready README for your project, including a
-clean overview, setup steps, architecture, and detailed service
-explanations.
-
 ------------------------------------------------------------------------
 
 # 🚀 Project Overview
