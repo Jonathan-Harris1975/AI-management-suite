@@ -1,4 +1,4 @@
-// services/script/utils/podcastHelper.js  
+// services/script/utils/podcastHelper.js
 // LLM-driven metadata generation for the podcast: title, description,
 // SEO keywords, and artwork prompt (cached only).
 
@@ -151,43 +151,40 @@ Return ONLY the comma-separated keywords.`;
 }
 
 /* -----------------------------------------------------------
- * UPDATED Artwork Prompt (Natural + Seasonal Feel)
+ * UPDATED Artwork Prompt (with subtle Turing-inspired motif)
  * -----------------------------------------------------------
  */
 export function getArtworkPrompt(description) {
-  // Get current month to determine season
-  const month = new Date().getMonth(); // 0-11
-  let seasonalElements = "";
-  
-  // Define seasonal aesthetics
+  const month = new Date().getMonth();
+  let seasonal = "";
+
   if (month >= 2 && month <= 4) {
-    // Spring (Mar-May)
-    seasonalElements = "soft pastels, fresh blooms, morning light, renewal energy";
+    seasonal = "spring pastels, fresh light";
   } else if (month >= 5 && month <= 7) {
-    // Summer (Jun-Aug)
-    seasonalElements = "warm golden hour, vibrant colors, bright sunshine, dynamic energy";
+    seasonal = "summer glow, vibrant warm tones";
   } else if (month >= 8 && month <= 10) {
-    // Fall (Sep-Nov)
-    seasonalElements = "warm amber tones, rich earth colors, cozy atmosphere, harvest glow";
+    seasonal = "autumn amber, rich muted warmth";
   } else {
-    // Winter (Dec-Feb)
-    seasonalElements = "cool crisp light, deep blues, warm contrasts, serene atmosphere";
+    seasonal = "winter cool hues, clean contrast";
   }
 
-  return `Professional editorial illustration based on the MAIN section themes.
-Focus on the core artificial intelligence topics, innovations, or concepts described.
-Style: Modern abstract with ${seasonalElements}.
-Use elegant gradients, flowing organic shapes, sophisticated composition, natural depth.
+  return `
+Create a high-end editorial illustration inspired directly by the MAIN section themes.
+Focus on abstract representations of the artificial intelligence ideas described.
+Style: modern abstract, cinematic depth, smooth gradients, organic flow, subtle reaction–diffusion patterns as a quiet homage to foundational AI theory, ${seasonal}.
+Mood: intelligent, premium, conceptual clarity.
 STRICT RULES:
-- No text or letters
 - No humans
-- No robots or circuits
-- No intro or outro themes
-- Contemporary design aesthetic
-- ≤ 250 chars total
+- No faces or silhouettes
+- No robots
+- No circuitry
+- No text or lettering
+- No intro/outro influence
+- Abstract representation only
+- ≤250 characters
 
 MAIN DESCRIPTION:
-${description}`;
+${description}`.trim();
 }
 
 /* -----------------------------------------------------------
