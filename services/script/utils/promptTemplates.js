@@ -124,3 +124,4 @@ Plain text only.
 }
 
 export default { getIntroPrompt, getMainPrompt, getOutroPromptFull };
+
