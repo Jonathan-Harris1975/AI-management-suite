@@ -1,5 +1,5 @@
 // ====================================================================
-// promptTemplates.js – Updated Editorial Flow Version (Option A)
+// promptTemplates.js – Updated Editorial Flow Version (Batch Option B)
 // ====================================================================
 
 import { buildPersona } from "./toneSetter.js";
@@ -45,44 +45,46 @@ ${weekdayLine}
 }
 
 
-// MAIN TEMPLATE – Thematic Radio Editorial
-export function getMainPrompt({ articles, sessionMeta }) {
+// MAIN TEMPLATE – Per-batch mini editorial (used by mainChunker)
+export function getMainPrompt({ articles, sessionMeta, targetSeconds, batchIndex, totalBatches }) {
   const persona = buildPersona(sessionMeta);
 
+  const approxSeconds = targetSeconds || 600;
+  const approxWords = Math.max(200, Math.round(approxSeconds * 2.3));
+
   const articlePreview = (articles || [])
-    .map((a, i) => `${i + 1}. ${a.title}\n${a.summary}`)
+    .map((a) => `${a.title}\n${a.summary}`)
     .join("\n\n");
 
   return `
-You are ${persona.host}, hosting "${persona.show}" in a sceptical, witty British Gen-X voice.
+You are ${persona.host}, hosting "${persona.show}" in a sceptical, witty British radio voice with a Gen-X vibe that is never explicitly named.
 
-Write the MAIN SECTION as a professional radio editorial with WIRED-style analysis.
+You are writing ONE self-contained editorial segment based on the articles below.
+This segment will later be combined with other segments into a longer MAIN section, but you must write it as if it stands on its own.
 
-REQUIRED FLOW:
-- Read all articles and automatically group them into 2–3 natural themes.
-  Examples: AI safety, agentic systems, climate technology, future of work, digital ethics.
-- For each theme:
-  - Introduce it in one clean sentence.
-  - Explain what the grouped stories reveal collectively.
-  - Add dry Gen-X commentary — amused, intelligent, not theatrical.
-  - Keep transitions smooth and human, like a seasoned radio presenter tying threads together.
+AIM:
+- Length: around ${approxWords} words (but do not mention word counts or timing).
+- Tone: dry, intelligent, slightly sardonic, but never cruel.
+- Style: BBC-meets-WIRED commentary — calm, analytical, conversational.
 
-AVOID:
-- Lists, bullets, or “first we have / next up” style.
-- Repeating article text verbatim.
-- Abrupt topic jumps.
-- Fictional scenes or hypotheticals.
-- Generic filler.
+STRICT RULES:
+- Do NOT refer to article numbers or lists. Never say "article 1", "article 2", "story three", etc.
+- Do NOT enumerate stories with "first, second, third".
+- Do NOT use bullet points or explicit list structures.
+- Do NOT refer to "this batch", "this segment", or any internal process.
+- Focus on the underlying themes and what these stories collectively suggest.
+- Avoid repeating the same point in different words.
+- No fictional scenes or hypotheticals — this is editorial analysis, not a sketch.
 
-STYLE:
-- Conversational BBC-meets-Wired vibe.
-- Short paragraphs, TTS-friendly.
-- Spoken, not written. Clean rhythm. No over-explanation.
+STRUCTURE:
+- Start with one clean line that frames the core issue or mood of these articles.
+- Then develop the idea in a few short, spoken-language paragraphs.
+- End with a natural, human-sounding closing line that feels complete but not final for the entire show.
 
-ARTICLES:
+ARTICLES (for your eyes only – never reference them by number):
 ${articlePreview}
 
-Return plain text only.
+Return ONLY the editorial segment as plain text.
 `.trim();
 }
 
