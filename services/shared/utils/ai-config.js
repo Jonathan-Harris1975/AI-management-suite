@@ -21,7 +21,7 @@ export const aiConfig = {
     // ==========================================
     // 🔥 REQUIRED NEW ROUTES (the missing piece)
     // ==========================================
-    editorialPass: ["google", "chatgpt", "meta"],
+    editorialPass: ["chatgpt"],
     editAndFormat: ["chatgpt", "google", "deepseek"],
     // ==========================================
 
@@ -33,7 +33,7 @@ export const aiConfig = {
     rssShortTitle: ["chatgpt", "google", "meta"],
   },
 
-  commonParams: { temperature: 0.75, timeout: 45000 },
+  commonParams: { temperature: 0.85, timeout: 45000 },
 
   headers: {
     "HTTP-Referer": process.env.APP_URL || "http://localhost:3000",
