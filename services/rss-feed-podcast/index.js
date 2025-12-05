@@ -121,7 +121,7 @@ export async function runRssFeedCreator() {
   });
 
   try {
-    const res = await notifyHubByUrl(FEED_URL);
+    const res = await notifyHubByUrl(process.env.PODCAST_LINK);
     info("📡 PodcastIndex Hub notified successfully!", {
       result: res?.status,
       feedUrl: FEED_URL,
