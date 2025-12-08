@@ -20,7 +20,6 @@ https://isentia.com/feed
 https://aihub.org/feed/?cat=-473
 https://blogs.rstudio.com/ai/index.xml
 https://nanonets.com/blog/rss
-https://kdnuggets.com/feed
 https://insights.fusemachines.com/feed
 https://kavita-ganesan.com/feed
 https://aitimejournal.com/feed
