@@ -5,8 +5,7 @@
   "main": "server.js",
 
   "scripts": {
-    "start": "node server.js",
-    "build": "echo 'Skipping TypeScript build — pure ESM JS project'"
+    "start": "node server.js"
   },
 
   "engines": {
